@@ -4,9 +4,9 @@
   "description": "Trail course backend API",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
-    "migrate": "node src/config/migrate.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "migrate": "node config/migrate.js"
   },
   "dependencies": {
     "axios": "^1.6.0",
