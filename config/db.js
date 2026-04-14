@@ -1,19 +1,17 @@
-const mysql = require('mysql2');
-
-const db = mysql.createConnection({
-  host: '127.0.0.1',
-  user: 'root',
-  password: '', // MySQL 비밀번호
-  database: 'suwaza-db',
-  port: 3307
+const pool = new Pool({
+  host: process.env.DB_HOST,    
+  port: process.env.DB_PORT,    
+  database: process.env.DB_NAME,  
+  user: process.env.DB_USER,      // postgres
+  password: process.env.DB_PASSWORD,
 });
 
-db.connect((err) => {
-  if (err) {
-    console.error('MySQL 연결 실패:', err);
-  } else {
-    console.log('MySQL 연결 성공');
-  }
-});
+//이 부분은 유정님이 채워주시면 됩니다 !
 
-module.exports = db;
+//  DB 연결 설정
+//  .env 파일에 아래 항목을 채워주세요:
+//  DB_HOST=
+//  DB_PORT=
+//  DB_NAME=
+//  DB_USER=
+//  DB_PASSWORD=
