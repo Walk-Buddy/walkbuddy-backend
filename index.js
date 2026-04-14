@@ -12,6 +12,7 @@ const courseDetailRoutes = require('./routes/courseDetail');
 const courseRoutes       = require('./routes/courses');
 const bookmarkRoutes     = require('./routes/bookmark');
 const bookmarkListRoutes = require('./routes/bookmarkList');
+const tagRoutes          = require('./routes/tags');
 const spotRoutes       = require('./routes/spots');
 const routeRoutes      = require('./routes/routes');
 const walkRoutes       = require('./routes/walks');
@@ -44,6 +45,7 @@ app.use('/api/courses', courseDetailRoutes); // GET /:courseId           (상세
 app.use('/api/courses', bookmarkRoutes);     // POST /:courseId/bookmark (북마크 토글)
 app.use('/api/courses', courseRoutes);       // 나머지 CRUD
 app.use('/api/bookmarks', bookmarkListRoutes); // GET / (내 북마크 목록)
+app.use('/api/tags',      tagRoutes);          // GET / (태그 목록)
 app.use('/api/spots',   spotRoutes);
 app.use('/api/routes',  routeRoutes);
 app.use('/api/walks',   walkRoutes);

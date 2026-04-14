@@ -308,6 +308,41 @@ const options = {
         },
       },
 
+      // ── Tags ────────────────────────────────────────────────────────
+      '/api/tags': {
+        get: {
+          tags: ['Tags'],
+          summary: '태그 목록 조회',
+          description: '코스 등록 시 선택 가능한 승인된 태그 목록을 반환합니다.',
+          responses: {
+            200: {
+              description: '태그 목록 반환',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            tag_id:   { type: 'string', format: 'uuid' },
+                            tag_name: { type: 'string', example: '강변' },
+                            category: { type: 'string', example: '환경', nullable: true },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
       // ── Bookmarks ───────────────────────────────────────────────────
       '/api/bookmarks': {
         get: {
