@@ -173,6 +173,57 @@ const options = {
           summary: '코스 목록 조회',
           responses: { 200: { description: '성공' } },
         },
+        post: {
+          tags: ['Courses'],
+          summary: '코스 등록',
+          description: '코스명·설명·태그·경로(핀/스팟)를 저장하고 거리/시간/난이도를 자동 계산합니다. Bearer 토큰 필요.',
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['title', 'pins'],
+                  properties: {
+                    title:       { type: 'string', example: '한강 공원 산책' },
+                    description: { type: 'string', example: '여의도부터 반포까지' },
+                    visibility:  { type: 'string', enum: ['public', 'private'], default: 'public' },
+                    pins:  { type: 'array', items: { type: 'string', format: 'uuid' }, description: '핀 nodeId 배열 (순서대로, 2개 이상)' },
+                    spots: { type: 'array', items: { type: 'string', format: 'uuid' }, description: '스팟 nodeId 배열 (선택)' },
+                    tags:  { type: 'array', items: { type: 'string', format: 'uuid' }, description: '태그 ID 배열 (선택)' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            201: {
+              description: '등록 성공',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          courseId:         { type: 'string', format: 'uuid' },
+                          totalDistanceKm:  { type: 'number', example: 3.5 },
+                          estimatedMinutes: { type: 'integer', example: 60 },
+                          difficulty:       { type: 'integer', example: 2 },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            400: { description: '필수 파라미터 누락 또는 핀 2개 미만' },
+            401: { description: '인증 토큰 없음 또는 유효하지 않음' },
+          },
+        },
       },
       '/api/courses/manual': {
         post: {

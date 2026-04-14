@@ -6,6 +6,7 @@ const errorHandler = require('./middleware/errorHandler');
 const { swaggerUi, specs } = require('./config/swagger');
 
 const pinRoutes          = require('./routes/pins');
+const courseCreateRoutes = require('./routes/courseCreate');
 const courseListRoutes   = require('./routes/courseList');
 const courseDetailRoutes = require('./routes/courseDetail');
 const courseRoutes       = require('./routes/courses');
@@ -37,6 +38,7 @@ app.get('/health', async (req, res) => {
 
 // ── Routes ──────────────────────────────────────────────────────────
 app.use('/api/pins',    pinRoutes);
+app.use('/api/courses', courseCreateRoutes);  // POST /                  (코스 등록)
 app.use('/api/courses', courseListRoutes);    // GET /                   (목록 조회)
 app.use('/api/courses', courseDetailRoutes); // GET /:courseId           (상세 조회)
 app.use('/api/courses', bookmarkRoutes);     // POST /:courseId/bookmark (북마크 토글)
