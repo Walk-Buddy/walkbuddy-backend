@@ -18,6 +18,13 @@ const options = {
       { url: 'http://localhost:3000', description: '로컬 개발 서버' },
     ],
     components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
       schemas: {
 
         // ── Node ─────────────────────────────────────────────────────
@@ -194,6 +201,39 @@ const options = {
           summary: '코스 삭제 (soft delete)',
           parameters: [{ name: 'courseId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
           responses: { 200: { description: '삭제 성공' }, 404: { description: '코스 없음' } },
+        },
+      },
+      '/api/courses/{courseId}/bookmark': {
+        post: {
+          tags: ['Courses'],
+          summary: '코스 북마크 추가/해제 토글',
+          description: '이미 북마크한 코스면 해제, 아니면 추가합니다. Bearer 토큰 필요.',
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: 'courseId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+          responses: {
+            200: {
+              description: '토글 성공',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success:    { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          bookmarked: { type: 'boolean', example: true },
+                          count:      { type: 'integer', example: 42 },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            401: { description: '인증 토큰 없음 또는 유효하지 않음' },
+            404: { description: '코스를 찾을 수 없음' },
+          },
         },
       },
       '/api/courses/{courseId}/pins': {
