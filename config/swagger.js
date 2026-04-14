@@ -18,6 +18,13 @@ const options = {
       { url: 'http://localhost:3000', description: '로컬 개발 서버' },
     ],
     components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
       schemas: {
 
         // ── Node ─────────────────────────────────────────────────────
@@ -166,6 +173,57 @@ const options = {
           summary: '코스 목록 조회',
           responses: { 200: { description: '성공' } },
         },
+        post: {
+          tags: ['Courses'],
+          summary: '코스 등록',
+          description: '코스명·설명·태그·경로(핀/스팟)를 저장하고 거리/시간/난이도를 자동 계산합니다. Bearer 토큰 필요.',
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['title', 'pins'],
+                  properties: {
+                    title:       { type: 'string', example: '한강 공원 산책' },
+                    description: { type: 'string', example: '여의도부터 반포까지' },
+                    visibility:  { type: 'string', enum: ['public', 'private'], default: 'public' },
+                    pins:  { type: 'array', items: { type: 'string', format: 'uuid' }, description: '핀 nodeId 배열 (순서대로, 2개 이상)' },
+                    spots: { type: 'array', items: { type: 'string', format: 'uuid' }, description: '스팟 nodeId 배열 (선택)' },
+                    tags:  { type: 'array', items: { type: 'string', format: 'uuid' }, description: '태그 ID 배열 (선택)' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            201: {
+              description: '등록 성공',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          courseId:         { type: 'string', format: 'uuid' },
+                          totalDistanceKm:  { type: 'number', example: 3.5 },
+                          estimatedMinutes: { type: 'integer', example: 60 },
+                          difficulty:       { type: 'integer', example: 2 },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            400: { description: '필수 파라미터 누락 또는 핀 2개 미만' },
+            401: { description: '인증 토큰 없음 또는 유효하지 않음' },
+          },
+        },
       },
       '/api/courses/manual': {
         post: {
@@ -196,6 +254,39 @@ const options = {
           responses: { 200: { description: '삭제 성공' }, 404: { description: '코스 없음' } },
         },
       },
+      '/api/courses/{courseId}/bookmark': {
+        post: {
+          tags: ['Courses'],
+          summary: '코스 북마크 추가/해제 토글',
+          description: '이미 북마크한 코스면 해제, 아니면 추가합니다. Bearer 토큰 필요.',
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: 'courseId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+          responses: {
+            200: {
+              description: '토글 성공',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success:    { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          bookmarked: { type: 'boolean', example: true },
+                          count:      { type: 'integer', example: 42 },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            401: { description: '인증 토큰 없음 또는 유효하지 않음' },
+            404: { description: '코스를 찾을 수 없음' },
+          },
+        },
+      },
       '/api/courses/{courseId}/pins': {
         post: {
           tags: ['Courses'],
@@ -214,6 +305,78 @@ const options = {
             { name: 'nodeId',   in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
           ],
           responses: { 200: { description: '제거 성공' }, 404: { description: '연결 없음' } },
+        },
+      },
+
+      // ── Tags ────────────────────────────────────────────────────────
+      '/api/tags': {
+        get: {
+          tags: ['Tags'],
+          summary: '태그 목록 조회',
+          description: '코스 등록 시 선택 가능한 승인된 태그 목록을 반환합니다.',
+          responses: {
+            200: {
+              description: '태그 목록 반환',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            tag_id:   { type: 'string', format: 'uuid' },
+                            tag_name: { type: 'string', example: '강변' },
+                            category: { type: 'string', example: '환경', nullable: true },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      // ── Bookmarks ───────────────────────────────────────────────────
+      '/api/bookmarks': {
+        get: {
+          tags: ['Bookmarks'],
+          summary: '내 북마크 코스 목록 조회',
+          description: '로그인한 사용자가 북마크한 코스 목록을 반환합니다. Bearer 토큰 필요.',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            { name: 'page',  in: 'query', schema: { type: 'integer', default: 1 },   description: '페이지 번호' },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 10 },  description: '페이지당 항목 수 (최대 100)' },
+          ],
+          responses: {
+            200: {
+              description: '북마크 목록 반환',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          courses: { type: 'array', items: { type: 'object' } },
+                          total:   { type: 'integer', example: 5 },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            401: { description: '인증 토큰 없음 또는 유효하지 않음' },
+          },
         },
       },
 
