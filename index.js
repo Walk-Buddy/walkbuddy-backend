@@ -5,9 +5,10 @@ const pool = require('./config/db');
 const errorHandler = require('./middleware/errorHandler');
 const { swaggerUi, specs } = require('./config/swagger');
 
-const pinRoutes        = require('./routes/pins');
-const courseListRoutes = require('./routes/courseList');
-const courseRoutes     = require('./routes/courses');
+const pinRoutes          = require('./routes/pins');
+const courseListRoutes   = require('./routes/courseList');
+const courseDetailRoutes = require('./routes/courseDetail');
+const courseRoutes       = require('./routes/courses');
 const spotRoutes       = require('./routes/spots');
 const routeRoutes      = require('./routes/routes');
 const walkRoutes       = require('./routes/walks');
@@ -34,7 +35,8 @@ app.get('/health', async (req, res) => {
 
 // ── Routes ──────────────────────────────────────────────────────────
 app.use('/api/pins',    pinRoutes);
-app.use('/api/courses', courseListRoutes);   // GET / (목록 조회)
+app.use('/api/courses', courseListRoutes);    // GET /         (목록 조회)
+app.use('/api/courses', courseDetailRoutes); // GET /:courseId (상세 조회)
 app.use('/api/courses', courseRoutes);       // 나머지 CRUD
 app.use('/api/spots',   spotRoutes);
 app.use('/api/routes',  routeRoutes);
