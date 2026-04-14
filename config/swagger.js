@@ -257,6 +257,43 @@ const options = {
         },
       },
 
+      // ── Bookmarks ───────────────────────────────────────────────────
+      '/api/bookmarks': {
+        get: {
+          tags: ['Bookmarks'],
+          summary: '내 북마크 코스 목록 조회',
+          description: '로그인한 사용자가 북마크한 코스 목록을 반환합니다. Bearer 토큰 필요.',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            { name: 'page',  in: 'query', schema: { type: 'integer', default: 1 },   description: '페이지 번호' },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 10 },  description: '페이지당 항목 수 (최대 100)' },
+          ],
+          responses: {
+            200: {
+              description: '북마크 목록 반환',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      success: { type: 'boolean', example: true },
+                      data: {
+                        type: 'object',
+                        properties: {
+                          courses: { type: 'array', items: { type: 'object' } },
+                          total:   { type: 'integer', example: 5 },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            401: { description: '인증 토큰 없음 또는 유효하지 않음' },
+          },
+        },
+      },
+
       // ── Routes (경로 계산) ───────────────────────────────────────────
       '/api/routes/calculate': {
         post: {
