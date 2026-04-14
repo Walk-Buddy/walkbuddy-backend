@@ -43,7 +43,71 @@ async function migrate() {
   try {
     await client.query('BEGIN');
 
-    // TODO: 테이블 생성 쿼리 작성
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS pins (
+        id           SERIAL PRIMARY KEY,
+        name         VARCHAR(100) NOT NULL,
+        description  TEXT,
+        latitude     DOUBLE PRECISION NOT NULL,
+        longitude    DOUBLE PRECISION NOT NULL,
+        address      VARCHAR(255),
+        category     VARCHAR(50),
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS courses (
+        id                SERIAL PRIMARY KEY,
+        name              VARCHAR(100) NOT NULL,
+        description       TEXT,
+        total_distance    DOUBLE PRECISION DEFAULT 0,
+        estimated_time    INT DEFAULT 0,
+        difficulty        SMALLINT DEFAULT 1,
+        status            VARCHAR(20) DEFAULT 'active',
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS course_pins (
+        id          SERIAL PRIMARY KEY,
+        course_id   INT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+        pin_id      INT NOT NULL REFERENCES pins(id) ON DELETE CASCADE,
+        order_index INT NOT NULL DEFAULT 0,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_course_pin UNIQUE (course_id, pin_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS route_segments (
+        id           SERIAL PRIMARY KEY,
+        course_id    INT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+        from_pin_id  INT NOT NULL REFERENCES pins(id) ON DELETE CASCADE,
+        to_pin_id    INT NOT NULL REFERENCES pins(id) ON DELETE CASCADE,
+        order_index  INT NOT NULL DEFAULT 0,
+        coordinates  JSONB NOT NULL DEFAULT '[]',
+        distance     DOUBLE PRECISION DEFAULT 0,
+        duration     DOUBLE PRECISION DEFAULT 0,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_route_segment UNIQUE (course_id, from_pin_id, to_pin_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS spots (
+        id          SERIAL PRIMARY KEY,
+        course_id   INT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+        name        VARCHAR(100) NOT NULL,
+        description TEXT,
+        latitude    DOUBLE PRECISION NOT NULL,
+        longitude   DOUBLE PRECISION NOT NULL,
+        category    VARCHAR(50),
+        order_index INT NOT NULL DEFAULT 0,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_course_pins_course_id    ON course_pins(course_id);
+      CREATE INDEX IF NOT EXISTS idx_route_segments_course_id ON route_segments(course_id);
+      CREATE INDEX IF NOT EXISTS idx_spots_course_id          ON spots(course_id);
+    `);
 
     await client.query('COMMIT');
     console.log('✅ Migration 완료');
