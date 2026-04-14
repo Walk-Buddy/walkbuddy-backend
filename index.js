@@ -6,6 +6,8 @@ const errorHandler = require('./middleware/errorHandler');
 
 const pinRoutes = require('./routes/pins');
 const courseRoutes = require('./routes/courses');
+const spotRoutes = require('./routes/spots');
+const recordingRoutes = require('./routes/recordings');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,6 +29,9 @@ app.get('/health', async (req, res) => {
 // ── Routes ──────────────────────────────────────────────────────────
 app.use('/api/pins', pinRoutes);
 app.use('/api/courses', courseRoutes);
+app.use('/api/spots', spotRoutes);
+app.use('/api/courses/:courseId/spots', spotRoutes);
+app.use('/api/recordings', recordingRoutes);
 
 // ── 404 ─────────────────────────────────────────────────────────────
 app.use((req, res) => {
@@ -44,21 +49,36 @@ app.listen(PORT, () => {
   console.log(`   --- Pins ---`);
   console.log(`   GET    /api/pins`);
   console.log(`   POST   /api/pins`);
-  console.log(`   GET    /api/pins/:id`);
-  console.log(`   PUT    /api/pins/:id`);
-  console.log(`   DELETE /api/pins/:id`);
+  console.log(`   GET    /api/pins/:nodeId`);
+  console.log(`   PUT    /api/pins/:nodeId`);
+  console.log(`   DELETE /api/pins/:nodeId`);
   console.log(`   --- Courses ---`);
   console.log(`   GET    /api/courses`);
   console.log(`   POST   /api/courses`);
-  console.log(`   GET    /api/courses/:id`);
-  console.log(`   PUT    /api/courses/:id`);
-  console.log(`   DELETE /api/courses/:id`);
-  console.log(`   POST   /api/courses/:id/pins`);
-  console.log(`   DELETE /api/courses/:id/pins/:pinId`);
-  console.log(`   --- Route (Day 2) ---`);
-  console.log(`   POST   /api/courses/:id/route/build`);
-  console.log(`   GET    /api/courses/:id/route/coordinates`);
-  console.log(`   POST   /api/courses/:id/route/connect-pins`);
+  console.log(`   GET    /api/courses/:courseId`);
+  console.log(`   PUT    /api/courses/:courseId`);
+  console.log(`   DELETE /api/courses/:courseId`);
+  console.log(`   POST   /api/courses/:courseId/pins`);
+  console.log(`   DELETE /api/courses/:courseId/pins/:nodeId`);
+  console.log(`   --- Route (Day 2-3) ---`);
+  console.log(`   POST   /api/courses/:courseId/route/build`);
+  console.log(`   GET    /api/courses/:courseId/route/coordinates`);
+  console.log(`   POST   /api/courses/:courseId/route/connect-pins`);
+  console.log(`   --- Spots (Day 4) ---`);
+  console.log(`   GET    /api/spots`);
+  console.log(`   POST   /api/spots`);
+  console.log(`   GET    /api/spots/:nodeId`);
+  console.log(`   PUT    /api/spots/:nodeId`);
+  console.log(`   DELETE /api/spots/:nodeId`);
+  console.log(`   GET    /api/courses/:courseId/spots`);
+  console.log(`   --- Recordings (Day 5-6) ---`);
+  console.log(`   POST   /api/recordings/start`);
+  console.log(`   POST   /api/recordings/:id/stop`);
+  console.log(`   POST   /api/recordings/:id/pause`);
+  console.log(`   POST   /api/recordings/:id/resume`);
+  console.log(`   POST   /api/recordings/:id/coordinates`);
+  console.log(`   POST   /api/recordings/:id/spots`);
+  console.log(`   POST   /api/recordings/:id/save-as-course`);
 });
 
 module.exports = app;

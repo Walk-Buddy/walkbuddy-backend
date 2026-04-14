@@ -1,41 +1,37 @@
-const PinRepository = require('../repositories/pinRepository');
+const NodeRepository = require('../repositories/nodeRepository');
 const CourseRepository = require('../repositories/courseRepository');
 const RouteSegmentRepository = require('../repositories/routeSegmentRepository');
 const { getWalkingRoute } = require('./osrmRouteService');
+const CourseCalculator = require('./courseCalculator');
 
 // ─────────────────────────────────────────────────────────────────────
 //  Route Service
 //  Day 2: 핀 간 경로 자동 연결 + 경로 좌표 반환
+//  Day 3: 경로 생성 완료 후 코스 정보 자동 계산 및 저장
 // ─────────────────────────────────────────────────────────────────────
 
 const RouteService = {
 
   /**
-   * 코스의 핀 순서대로 OSRM 도보 경로 API 호출 → 모든 세그먼트 저장
-   * @param {number} courseId
-   * @returns {{ segments: Array, totalDistance: number, totalDuration: number }}
+   * 코스의 핀 순서대로 OSRM 도보 경로 API 호출 → 세그먼트 저장
+   * → 총 거리 / 예상 소요시간 / 난이도 자동 계산 (Day 3)
    */
   async buildRouteForCourse(courseId) {
     const course = await CourseRepository.findWithPins(courseId);
     if (!course) throw new Error(`코스 ID ${courseId}를 찾을 수 없습니다.`);
 
     const pins = course.pins;
-    if (pins.length < 2) {
-      throw new Error('경로 생성을 위해 핀이 2개 이상 필요합니다.');
-    }
+    if (pins.length < 2) throw new Error('경로 생성을 위해 핀이 2개 이상 필요합니다.');
 
-    // 기존 세그먼트 삭제 후 재생성
     await RouteSegmentRepository.deleteByCourse(courseId);
 
     const segments = [];
-    let totalDistance = 0;
-    let totalDuration = 0;
 
     for (let i = 0; i < pins.length - 1; i++) {
       const from = pins[i];
       const to = pins[i + 1];
 
-      console.log(`🗺  경로 계산 중: ${from.name} → ${to.name}`);
+      console.log(`🗺  경로 계산 중: pin ${from.node_id} → ${to.node_id}`);
 
       const routeData = await getWalkingRoute(
         from.latitude, from.longitude,
@@ -44,8 +40,8 @@ const RouteService = {
 
       const segment = await RouteSegmentRepository.upsert({
         courseId,
-        fromPinId: from.id,
-        toPinId: to.id,
+        fromNodeId: from.node_id,
+        toNodeId: to.node_id,
         orderIndex: i,
         coordinates: routeData.coordinates,
         distance: routeData.distance,
@@ -53,24 +49,34 @@ const RouteService = {
       });
 
       segments.push(segment);
-      totalDistance += routeData.distance;
-      totalDuration += routeData.duration;
     }
+
+    // Day 3: 코스 정보 자동 계산 및 업데이트
+    const { totalDistanceKm, estimatedMinutes, difficulty } = CourseCalculator.calcAll(segments);
+    await CourseRepository.update(courseId, {
+      total_distance_km: totalDistanceKm,
+      estimated_minutes: estimatedMinutes,
+      difficulty,
+    });
+
+    const totalDuration = segments.reduce((sum, s) => sum + (s.duration || 0), 0);
 
     return {
       segments,
-      totalDistance: Math.round(totalDistance * 100) / 100, // km, 소수점 2자리
-      totalDuration: Math.round(totalDuration),              // 초
+      totalDistanceKm,
+      totalDuration: Math.round(totalDuration), // 초
+      estimatedMinutes,                          // 분
+      difficulty,
     };
   },
 
   /**
-   * 두 핀 간 단일 경로 연결 (핀 추가 시 개별 호출용)
+   * 두 노드(핀) 간 단일 경로 연결
    */
-  async connectTwoPins(courseId, fromPinId, toPinId, orderIndex) {
+  async connectTwoNodes(courseId, fromNodeId, toNodeId, orderIndex) {
     const [from, to] = await Promise.all([
-      PinRepository.findById(fromPinId),
-      PinRepository.findById(toPinId),
+      NodeRepository.findPinById(fromNodeId),
+      NodeRepository.findPinById(toNodeId),
     ]);
     if (!from || !to) throw new Error('핀을 찾을 수 없습니다.');
 
@@ -81,8 +87,8 @@ const RouteService = {
 
     return RouteSegmentRepository.upsert({
       courseId,
-      fromPinId,
-      toPinId,
+      fromNodeId,
+      toNodeId,
       orderIndex,
       ...routeData,
     });
@@ -90,7 +96,6 @@ const RouteService = {
 
   /**
    * 코스의 전체 경로 좌표 반환 (세그먼트 이어붙이기)
-   * @returns {{ coordinates: Array<{lat,lng}>, segments: Array }}
    */
   async getFullRouteCoordinates(courseId) {
     const segments = await RouteSegmentRepository.findByCourse(courseId);
@@ -101,7 +106,6 @@ const RouteService = {
     const coordinates = [];
     for (const seg of segments) {
       const coords = Array.isArray(seg.coordinates) ? seg.coordinates : [];
-      // 세그먼트 이음새 중복 제거: 첫 세그먼트는 전부, 이후엔 첫 좌표 제외
       const slice = coordinates.length > 0 ? coords.slice(1) : coords;
       coordinates.push(...slice);
     }
@@ -110,8 +114,8 @@ const RouteService = {
       coordinates,
       segments: segments.map((s) => ({
         id: s.id,
-        fromPinId: s.from_pin_id,
-        toPinId: s.to_pin_id,
+        fromNodeId: s.from_node_id,
+        toNodeId: s.to_node_id,
         orderIndex: s.order_index,
         distance: s.distance,
         duration: s.duration,
