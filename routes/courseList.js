@@ -8,6 +8,10 @@ const CourseListRepository = require('../repositories/courseListRepository');
 // ─────────────────────────────────────────────────────────────────────
 
 const VALID_SORTS = ['latest', 'popularity', 'nearest', 'distance', 'difficulty', 'estimated_time'];
+const VALID_CREATION_TYPES = ['manual', 'auto'];
+
+/** 한 페이지 최대 건수 (Postman 등에서 전체 조회 시 사용 — 응답이 매우 커질 수 있음) */
+const MAX_LIMIT = 2000;
 
 /**
  * @swagger
@@ -85,8 +89,8 @@ const VALID_SORTS = ['latest', 'popularity', 'nearest', 'distance', 'difficulty'
  *           type: integer
  *           default: 10
  *           minimum: 1
- *           maximum: 100
- *         description: 페이지당 항목 수 (최대 100)
+ *           maximum: 2000
+ *         description: 페이지당 항목 수 (최대 2000, 기본 10)
  *     responses:
  *       200:
  *         description: 코스 목록 반환
@@ -122,15 +126,26 @@ router.get('/', async (req, res) => {
       max_distance,
       min_time,
       max_time,
+      creation_type,
       page        = 1,
       limit       = 10,
     } = req.query;
+
+    const creationType =
+      creation_type === '' || creation_type === undefined ? undefined : creation_type;
 
     // ── 유효성 검사 ───────────────────────────────────────────────────
     if (!VALID_SORTS.includes(sort)) {
       return res.status(400).json({
         success: false,
         message: `sort 값이 올바르지 않습니다. 허용 값: ${VALID_SORTS.join(', ')}`,
+      });
+    }
+
+    if (creationType !== undefined && !VALID_CREATION_TYPES.includes(creationType)) {
+      return res.status(400).json({
+        success: false,
+        message: `creation_type 은 ${VALID_CREATION_TYPES.join(', ')} 중 하나이거나 생략해야 합니다.`,
       });
     }
 
@@ -151,8 +166,9 @@ router.get('/', async (req, res) => {
       max_distance: max_distance !== undefined ? Number(max_distance) : undefined,
       min_time:     min_time     !== undefined ? Number(min_time)     : undefined,
       max_time:     max_time     !== undefined ? Number(max_time)     : undefined,
+      creation_type: creationType,
       page:  Math.max(1, Number(page)),
-      limit: Math.min(Math.max(1, Number(limit)), 100),
+      limit: Math.min(Math.max(1, Number(limit)), MAX_LIMIT),
     });
 
     res.json({ success: true, data: result });

@@ -5,11 +5,12 @@ const pool = require('../config/db');
 // ─────────────────────────────────────────────────────────────────────
 
 const SORT_MAP = {
-  latest:         'c.created_at DESC',
-  popularity:     'c.bookmark_count DESC, c.avg_rating DESC',
-  distance:       'c.total_distance_km ASC',
-  difficulty:     'c.difficulty ASC',
-  estimated_time: 'c.estimated_minutes ASC',
+  // 보조 정렬로 course_id 를 두어 동일 시각 삽입 건의 순서가 안정적이게 함
+  latest:         'c.created_at DESC, c.course_id DESC',
+  popularity:     'c.bookmark_count DESC, c.avg_rating DESC, c.course_id DESC',
+  distance:       'c.total_distance_km ASC, c.course_id DESC',
+  difficulty:     'c.difficulty ASC, c.course_id DESC',
+  estimated_time: 'c.estimated_minutes ASC, c.course_id DESC',
 };
 
 const CourseListRepository = {
@@ -25,11 +26,24 @@ const CourseListRepository = {
    * @param {number}  [opts.max_distance] - km
    * @param {number}  [opts.min_time]     - 분
    * @param {number}  [opts.max_time]     - 분
+   * @param {string}  [opts.creation_type] - 'manual' | 'auto' (걷기길 CSV import 는 auto)
    * @param {number}  opts.page           - 1-based
-   * @param {number}  opts.limit          - 페이지당 개수 (max 100)
+   * @param {number}  opts.limit          - 페이지당 개수 (라우트에서 상한 적용, 예: 2000)
    * @returns {{ courses: object[], total: number }}
    */
-  async findList({ sort = 'latest', lat, lng, difficulty, min_distance, max_distance, min_time, max_time, page = 1, limit = 10 }) {
+  async findList({
+    sort = 'latest',
+    lat,
+    lng,
+    difficulty,
+    min_distance,
+    max_distance,
+    min_time,
+    max_time,
+    creation_type,
+    page = 1,
+    limit = 10,
+  }) {
     const offset = (page - 1) * limit;
 
     // ── WHERE 조건 빌드 ──────────────────────────────────────────────
@@ -40,6 +54,11 @@ const CourseListRepository = {
     ];
     const whereValues = [];
     let idx = 1;
+
+    if (creation_type !== undefined) {
+      conditions.push(`c.creation_type = $${idx++}`);
+      whereValues.push(creation_type);
+    }
 
     if (difficulty !== undefined) {
       conditions.push(`c.difficulty = $${idx++}`);
@@ -73,7 +92,7 @@ const CourseListRepository = {
       orderBy = `ST_Distance(
                    c.full_route::geography,
                    ST_MakePoint($${idx}, $${idx + 1})::geography
-                 ) ASC NULLS LAST`;
+                 ) ASC NULLS LAST, c.course_id DESC`;
       orderValues.push(lng, lat);   // ST_MakePoint(경도, 위도) 순서
       idx += 2;
     } else {
