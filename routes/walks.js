@@ -4,6 +4,7 @@ const RecordingRepository = require('../repositories/recordingRepository');
 const CourseRepository = require('../repositories/courseRepository');
 const NodeRepository = require('../repositories/nodeRepository');
 const CourseCalculator = require('../services/courseCalculator');
+const { getWalkingRoute } = require('../services/osrmRouteService');
 
 // ─────────────────────────────────────────────────────────────────────
 //  Walks Routes  (코스 생성 - 자동 / GPS 기록)
@@ -107,6 +108,26 @@ router.post('/tracking/:id/stop', async (req, res) => {
     await RecordingRepository.linkCourse(req.params.id, course.course_id);
 
     res.status(201).json({ success: true, data: { courseId: course.course_id } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+router.get('/preview-path', async (req, res) => {
+  try {
+    const { startLat, startLng, endLat, endLng } = req.query;
+
+    if (!startLat || !startLng || !endLat || !endLng) {
+      return res.status(400).json({ success: false, message: '시작점과 끝점 좌표가 필요합니다.' });
+    }
+
+    const result = await getWalkingRoute(
+      parseFloat(startLat),
+      parseFloat(startLng),
+      parseFloat(endLat),
+      parseFloat(endLng)
+    );
+
+    res.json({ success: true, data: result });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
