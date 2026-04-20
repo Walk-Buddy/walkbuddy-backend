@@ -107,14 +107,22 @@ const CourseListRepository = {
     const countValues = whereValues;
 
     const dataQuery = `
-      SELECT c.*
-      FROM   courses c
-      WHERE  ${whereClause}
-      ORDER  BY ${orderBy}
-      LIMIT  $${limitIdx}
-      OFFSET $${offsetIdx}
-    `;
-
+  SELECT c.*,
+    COALESCE(
+      JSON_AGG(
+        JSON_BUILD_OBJECT('tag_id', mt.tag_id, 'tag_name', mt.tag_name, 'category', mt.category)
+      ) FILTER (WHERE mt.tag_id IS NOT NULL),
+      '[]'
+    ) AS tags
+  FROM courses c
+  LEFT JOIN course_tags ct ON ct.course_id = c.course_id
+  LEFT JOIN master_tags mt ON mt.tag_id = ct.tag_id
+  WHERE ${whereClause}
+  GROUP BY c.course_id
+  ORDER BY ${orderBy}
+  LIMIT $${limitIdx}
+  OFFSET $${offsetIdx}
+`;
     const countQuery = `
       SELECT COUNT(*) AS total
       FROM   courses c

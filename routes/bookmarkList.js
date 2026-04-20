@@ -73,12 +73,14 @@ const BookmarkListRepository = require('../repositories/bookmarkListRepository')
  *       401:
  *         description: 인증 토큰 없음 또는 유효하지 않음
  */
-router.get('/', auth, async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const page  = Math.max(1, Number(req.query.page  || 1));
     const limit = Math.min(Math.max(1, Number(req.query.limit || 10)), 100);
 
-    const result = await BookmarkListRepository.findByUser(req.userId, page, limit);
+    // 임시: userId 고정 (로그인 구현 전)
+    const userId = '00000000-0000-0000-0000-000000000001';
+    const result = await BookmarkListRepository.findByUser(userId, page, limit);
     res.json({ success: true, data: result });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

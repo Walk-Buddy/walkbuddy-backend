@@ -55,22 +55,29 @@ const NodeRepository = {
 
   // ── Spot ──────────────────────────────────────────────────────────
 
-  async findAllSpots() {
-    const { rows } = await pool.query(
-      `SELECT * FROM nodes
-       WHERE node_type = 'spot' AND is_deleted = FALSE
-       ORDER BY created_at DESC`
-    );
-    return rows;
-  },
+  async findAllPins() {
+  const { rows } = await pool.query(
+    `SELECT *,
+       ST_Y(location::geometry) AS latitude,
+       ST_X(location::geometry) AS longitude
+     FROM nodes 
+     WHERE node_type = 'pin' 
+     ORDER BY created_at DESC`
+  );
+  return rows;
+},
 
-  async findSpotById(nodeId) {
-    const { rows } = await pool.query(
-      `SELECT * FROM nodes WHERE node_id = $1 AND node_type = 'spot' AND is_deleted = FALSE`,
-      [nodeId]
-    );
-    return rows[0] || null;
-  },
+async findPinById(nodeId) {
+  const { rows } = await pool.query(
+    `SELECT *,
+       ST_Y(location::geometry) AS latitude,
+       ST_X(location::geometry) AS longitude
+     FROM nodes 
+     WHERE node_id = $1 AND node_type = 'pin'`,
+    [nodeId]
+  );
+  return rows[0] || null;
+},
 
   async createSpot({ name, description, latitude, longitude, contentTypes, userId }) {
     const { rows } = await pool.query(
@@ -108,22 +115,24 @@ const NodeRepository = {
 
   // 반경 내 스팟 조회 (PostGIS)
   async findSpotsWithinRadius(lat, lng, radiusKm) {
-    const { rows } = await pool.query(
-      `SELECT *,
-         ST_Distance(location::geography, ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography) / 1000 AS distance_km
-       FROM nodes
-       WHERE node_type = 'spot'
-         AND is_deleted = FALSE
-         AND ST_DWithin(
-           location::geography,
-           ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography,
-           $3 * 1000
-         )
-       ORDER BY distance_km ASC`,
-      [lat, lng, radiusKm]
-    );
-    return rows;
-  },
+  const { rows } = await pool.query(
+    `SELECT *,
+       ST_Y(location::geometry) AS latitude,
+       ST_X(location::geometry) AS longitude,
+       ST_Distance(location::geography, ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography) / 1000 AS distance_km
+     FROM nodes
+     WHERE node_type = 'spot'
+       AND is_deleted = FALSE
+       AND ST_DWithin(
+         location::geography,
+         ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography,
+         $3 * 1000
+       )
+     ORDER BY distance_km ASC`,
+    [lat, lng, radiusKm]
+  );
+  return rows;
+},
 
   // 코스에 연결된 노드(pin/spot) 조회
   async findByCourse(courseId, nodeType = null) {

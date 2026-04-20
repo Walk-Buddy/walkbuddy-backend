@@ -19,6 +19,7 @@ const { haversineKm } = require('../services/osrmRouteService');
 router.post('/calculate', async (req, res) => {
   try {
     const { pins } = req.body;
+     console.log('📌 받은 핀 좌표:', JSON.stringify(pins, null, 2));
     if (!Array.isArray(pins) || pins.length < 2) {
       return res.status(400).json({ success: false, message: '핀이 2개 이상 필요합니다.' });
     }

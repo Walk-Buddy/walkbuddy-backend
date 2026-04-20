@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const auth = require('../middleware/auth');
+// const auth = require('../middleware/auth'); // 테스트 시에는 주석 처리
 const CourseCreateRepository = require('../repositories/courseCreateRepository');
 const RouteService = require('../services/routeService');
 
@@ -12,89 +12,62 @@ const RouteService = require('../services/routeService');
 /**
  * @swagger
  * /api/courses:
- *   post:
- *     summary: 코스 등록
- *     description: |
- *       코스명·설명·태그·경로(핀/스팟)를 저장하고 거리/시간/난이도를 자동 계산합니다.
- *       Bearer 토큰 필요.
- *     tags: [Courses]
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - title
- *               - pins
- *             properties:
- *               title:
- *                 type: string
- *                 example: 한강 공원 산책
- *                 description: 코스명 (필수)
- *               description:
- *                 type: string
- *                 example: 여의도부터 반포까지 이어지는 코스
- *               visibility:
- *                 type: string
- *                 enum: [public, private]
- *                 default: public
- *                 description: 공개 여부
- *               pins:
- *                 type: array
- *                 items:
- *                   type: string
- *                   format: uuid
- *                 description: 핀 nodeId 배열 (순서대로, 2개 이상 필수)
- *                 example: ["uuid-pin-1", "uuid-pin-2"]
- *               spots:
- *                 type: array
- *                 items:
- *                   type: string
- *                   format: uuid
- *                 description: 스팟 nodeId 배열 (선택)
- *                 example: ["uuid-spot-1"]
- *               tags:
- *                 type: array
- *                 items:
- *                   type: string
- *                   format: uuid
- *                 description: 태그 ID 배열 (master_tags.tag_id, 선택)
- *                 example: ["uuid-tag-1", "uuid-tag-2"]
- *     responses:
- *       201:
- *         description: 코스 등록 성공
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: object
- *                   properties:
- *                     courseId:
- *                       type: string
- *                       format: uuid
- *                     totalDistanceKm:
- *                       type: number
- *                       example: 3.5
- *                     estimatedMinutes:
- *                       type: integer
- *                       example: 60
- *                     difficulty:
- *                       type: integer
- *                       example: 2
- *       400:
- *         description: 필수 파라미터 누락 또는 핀 2개 미만
- *       401:
- *         description: 인증 토큰 없음 또는 유효하지 않음
+ * post:
+ * summary: 코스 등록
+ * description: |
+ * 코스명·설명·태그·경로(핀/스팟)를 저장하고 거리/시간/난이도를 자동 계산합니다.
+ * (현재 테스트를 위해 인증 토큰 없이도 허용 중)
+ * tags: [Courses]
+ * requestBody:
+ * required: true
+ * content:
+ * application/json:
+ * schema:
+ * type: object
+ * required:
+ * - title
+ * - pins
+ * properties:
+ * title:
+ * type: string
+ * example: 한강 공원 산책
+ * description:
+ * type: string
+ * example: 여의도부터 반포까지 이어지는 코스
+ * visibility:
+ * type: string
+ * enum: [public, private]
+ * default: public
+ * pins:
+ * type: array
+ * items:
+ * type: string
+ * format: uuid
+ * example: ["aaaaaaaa-0000-0000-0000-000000000001", "aaaaaaaa-0000-0000-0000-000000000002"]
+ * spots:
+ * type: array
+ * items:
+ * type: string
+ * format: uuid
+ * example: ["bbbbbbbb-0000-0000-0000-000000000001"]
+ * tags:
+ * type: array
+ * items:
+ * type: string
+ * format: uuid
+ * example: ["11111111-0000-0000-0000-000000000001"]
+ * responses:
+ * 201:
+ * description: 코스 등록 성공
+ * 400:
+ * description: 필수 파라미터 누락
  */
-router.post('/', auth, async (req, res) => {
+
+router.post('/', async (req, res) => {
+  // [수정] Seed 파일에 정의된 실제 테스터1의 UUID를 사용합니다.
+  // 이 값은 DB의 users 테이블에 반드시 존재해야 합니다.
+  const tempUserId = '00000000-0000-0000-0000-000000000001'; 
+
   try {
     const {
       title,
@@ -117,8 +90,9 @@ router.post('/', auth, async (req, res) => {
     }
 
     // ── 코스 등록 (트랜잭션) ─────────────────────────────────────────
+    // CourseCreateRepository 내부에서 DB 작업을 수행할 때 tempUserId를 작성자로 등록합니다.
     const courseId = await CourseCreateRepository.create({
-      userId:      req.userId,
+      userId: tempUserId, 
       title,
       description,
       visibility,
@@ -128,10 +102,9 @@ router.post('/', auth, async (req, res) => {
     });
 
     // ── 경로 자동 계산 (거리/시간/난이도) ────────────────────────────
-    // 외부 API(OSRM) 호출이므로 트랜잭션 외부에서 실행
-    // 실패해도 코스 자체는 저장됨
     let routeResult = { totalDistanceKm: 0, estimatedMinutes: 0, difficulty: 1 };
     try {
+      // OSRM API 호출 등을 통해 실제 경로 데이터를 생성합니다.
       routeResult = await RouteService.buildRouteForCourse(courseId);
     } catch (routeErr) {
       console.warn(`⚠️  경로 계산 실패 (courseId: ${courseId}):`, routeErr.message);
@@ -147,6 +120,8 @@ router.post('/', auth, async (req, res) => {
       },
     });
   } catch (err) {
+    // 에러 발생 시 터미널에서 상세 내용을 확인할 수 있도록 로그를 남깁니다.
+    console.error("Course Create Error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });

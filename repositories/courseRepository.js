@@ -1,14 +1,22 @@
 const pool = require('../config/db');
 
-// ─────────────────────────────────────────────────────────────────────
-//  Course Repository
-// ─────────────────────────────────────────────────────────────────────
-
 const CourseRepository = {
 
   async findAll() {
     const { rows } = await pool.query(
-      `SELECT * FROM courses WHERE is_deleted = FALSE ORDER BY created_at DESC`
+      `SELECT c.*,
+         COALESCE(
+           JSON_AGG(
+             JSON_BUILD_OBJECT('tag_id', mt.tag_id, 'tag_name', mt.tag_name, 'category', mt.category)
+           ) FILTER (WHERE mt.tag_id IS NOT NULL),
+           '[]'
+         ) AS tags
+       FROM courses c
+       LEFT JOIN course_tags ct ON ct.course_id = c.course_id
+       LEFT JOIN master_tags mt ON mt.tag_id = ct.tag_id
+       WHERE c.is_deleted = FALSE
+       GROUP BY c.course_id
+       ORDER BY c.created_at DESC`
     );
     return rows;
   },
@@ -21,9 +29,23 @@ const CourseRepository = {
     return rows[0] || null;
   },
 
-  // 코스 + 연결된 핀 목록 함께 조회
   async findWithPins(courseId) {
-    const course = await this.findById(courseId);
+    const { rows: courseRows } = await pool.query(
+      `SELECT c.*,
+         COALESCE(
+           JSON_AGG(
+             JSON_BUILD_OBJECT('tag_id', mt.tag_id, 'tag_name', mt.tag_name, 'category', mt.category)
+           ) FILTER (WHERE mt.tag_id IS NOT NULL),
+           '[]'
+         ) AS tags
+       FROM courses c
+       LEFT JOIN course_tags ct ON ct.course_id = c.course_id
+       LEFT JOIN master_tags mt ON mt.tag_id = ct.tag_id
+       WHERE c.course_id = $1 AND c.is_deleted = FALSE
+       GROUP BY c.course_id`,
+      [courseId]
+    );
+    const course = courseRows[0];
     if (!course) return null;
 
     const { rows: pins } = await pool.query(
@@ -75,7 +97,6 @@ const CourseRepository = {
     return rows[0] || null;
   },
 
-  // soft delete
   async delete(courseId) {
     const { rowCount } = await pool.query(
       `UPDATE courses SET is_deleted=TRUE WHERE course_id=$1`,
@@ -84,10 +105,7 @@ const CourseRepository = {
     return rowCount > 0;
   },
 
-  // ── course_path (핀 연결) ─────────────────────────────────────────
-
   async addPin(courseId, nodeId) {
-    // 현재 마지막 node_order + 1
     const { rows: existing } = await pool.query(
       `SELECT COALESCE(MAX(node_order), 0) + 1 AS next_order
        FROM course_path WHERE course_id = $1`,

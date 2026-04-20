@@ -9,6 +9,27 @@ const NodeRepository = require('../repositories/nodeRepository');
 
 // GET /api/spots  또는  GET /api/courses/:courseId/spots
 // ?lat=&lng=&radius= 이면 반경 내 스팟 감지
+// GET /api/spots/pins?lat=&lng=&radius=
+router.get('/pins', async (req, res) => {
+  try {
+    const { lat, lng, radius } = req.query;
+
+    if (!lat || !lng) {
+      return res.status(400).json({ success: false, message: 'lat, lng는 필수입니다.' });
+    }
+
+    const spots = await NodeRepository.findSpotsWithinRadius(
+      parseFloat(lat),
+      parseFloat(lng),
+      parseFloat(radius) || 1
+    );
+
+    res.json({ success: true, data: spots });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 router.get('/', async (req, res) => {
   try {
     const { lat, lng, radius } = req.query;
