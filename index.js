@@ -42,7 +42,7 @@ app.use('/api/pins',    pinRoutes);
 app.use('/api/courses', courseCreateRoutes);  // POST /                  (코스 등록)
 app.use('/api/courses', courseListRoutes);    // GET /                   (목록 조회)
 app.use('/api/courses', courseDetailRoutes); // GET /:courseId           (상세 조회)
-app.use('/api/courses', bookmarkRoutes);     // POST /:courseId/bookmark (북마크 토글)
+app.use('/api/courses/:courseId/bookmark', bookmarkRoutes);    // POST /:courseId/bookmark (북마크 토글)
 app.use('/api/courses', courseRoutes);       // 나머지 CRUD
 app.use('/api/bookmarks', bookmarkListRoutes); // GET / (내 북마크 목록)
 app.use('/api/tags',      tagRoutes);          // GET / (태그 목록)
