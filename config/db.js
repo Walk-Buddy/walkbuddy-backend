@@ -6,8 +6,9 @@ const os = require('os');
  * 로컬 PostgreSQL
  * - host 기본: 127.0.0.1
  * - user 기본: 현재 OS 로그인 이름
- * - database 기본: swu
- *
+ * - database 기본: walkbuddy
+ * 
+
  * TCP(127.0.0.1 등) + SCRAM: .env에 DB_PASSWORD 필수.
  * 빈 문자열을 넘기면 node-pg가 비밀번호를 버려 SCRAM 단계에서 오류가 납니다.
  */
@@ -22,7 +23,7 @@ function buildPoolConfig() {
 
   const host = process.env.DB_HOST || '127.0.0.1';
   const port = parseInt(process.env.DB_PORT || '5432', 10);
-  const database = process.env.DB_NAME || 'swu';
+  const database = process.env.DB_NAME || 'walkbuddy';
   const user = process.env.DB_USER || os.userInfo().username || 'postgres';
 
   const cfg = {
@@ -70,7 +71,7 @@ if (usesTcp && !poolConfig.password) {
   console.warn(
     '\n⚠️  [DB] .env에 DB_PASSWORD가 없습니다. PostgreSQL SCRAM 때문에 API가 실패합니다.\n' +
       '   → .env에 DB_PASSWORD=실제비밀번호 를 넣고 서버를 다시 시작하세요.\n' +
-      '   → 또는 DATABASE_URL=postgresql://유저:비번@127.0.0.1:5432/swu\n'
+      '   → 또는 DATABASE_URL=postgresql://유저:비번@127.0.0.1:5432/walkbuddy\n'
   );
 }
 
