@@ -5,9 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js",
-    "migrate": "node config/migrate.js",
-    "seed:korea-walk": "node config/importKoreaWalkDataset.js"
+    "dev": "nodemon index.js"
   },
   "dependencies": {
     "axios": "^1.6.0",
