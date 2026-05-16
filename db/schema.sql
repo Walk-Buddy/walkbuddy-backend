@@ -103,13 +103,30 @@ CREATE TABLE users (
     -- }
     -- 미설정 시 NULL, 앱단에서 값 범위·형식 validation 필요
 
-    pref_tag_ids            UUID[]          NULL,
-    -- 선호 태그 ID 배열 (tags 테이블의 tag_id 참조)
-    -- 예: '{uuid1, uuid2, uuid3}'
-    -- [주의] tags 테이블에 FK 제약 불가 (배열 타입은 FK 미지원)
+    pref_tag_ids            JSONB           NULL,
+    -- 선호 태그 ID 목록 (tags 테이블의 tag_id 참조)
+    -- 스팟 태그·코스 태그를 구분하여 저장하기 위해 UUID[] → JSONB 로 변경
+    -- 예: {
+    --   "spot":   ["uuid1", "uuid2"],   -- 선호 스팟 태그 ID 목록
+    --   "course": ["uuid3", "uuid4"]    -- 선호 코스 태그 ID 목록
+    -- }
+    -- 미설정 시 NULL, key 생략 가능 (spot 만 설정하고 course 생략 허용)
+    -- [주의] tags 테이블에 FK 제약 불가 (JSONB 타입은 FK 미지원)
     --        존재하지 않는 tag_id 가 들어와도 DB단에서 차단 불가
-    --        반드시 앱단 validation 으로 tag_id 유효성 검증 필요
-    -- GIN 인덱스로 배열 검색 성능 보완 (하단 인덱스 참고)
+    --        반드시 앱단 validation 으로 tag_id 유효성·type 일치 검증 필요
+    -- GIN 인덱스로 JSONB 검색 성능 보완 (하단 인덱스 참고)
+
+    pref_categories         JSONB           NULL,
+    -- 선호 카테고리 목록 (spots.category · courses.category 값 참조)
+    -- 스팟 카테고리·코스 카테고리를 구분하여 저장
+    -- 예: {
+    --   "spot":   ["공원", "강", "호수"],  -- 선호 스팟 카테고리 목록
+    --   "course": ["둘레길", "숲길"]       -- 선호 코스 카테고리 목록
+    -- }
+    -- 미설정 시 NULL, key 생략 가능 (spot 만 설정하고 course 생략 허용)
+    -- [주의] spots.category · courses.category 는 자유 문자열이므로
+    --        허용 카테고리 목록 관리 및 유효성 검증은 앱단에서 처리 필요
+    -- GIN 인덱스로 JSONB 검색 성능 보완 (하단 인덱스 참고)
 
     created_at              TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
@@ -174,10 +191,17 @@ CREATE INDEX ix_users_admin
     ON users (user_id)
     WHERE role = 'admin';
 
--- 선호 태그 배열 검색용 GIN 인덱스
--- 특정 tag_id 를 포함한 유저 조회 시 사용 (예: WHERE pref_tag_ids @> '{uuid1}')
+-- 선호 태그 JSONB 검색용 GIN 인덱스
+-- 특정 tag_id 를 포함한 유저 조회 시 사용
+-- 예: WHERE pref_tag_ids @> '{"spot": ["uuid1"]}'
 CREATE INDEX ix_users_pref_tag_ids
     ON users USING GIN (pref_tag_ids);
+
+-- 선호 카테고리 JSONB 검색용 GIN 인덱스
+-- 특정 카테고리를 선호하는 유저 조회 시 사용
+-- 예: WHERE pref_categories @> '{"spot": ["공원"]}'
+CREATE INDEX ix_users_pref_categories
+    ON users USING GIN (pref_categories);
 
 -- updated_at 자동 갱신 트리거
 CREATE TRIGGER trg_users_updated_at
@@ -883,6 +907,11 @@ CREATE TABLE course_reviews (
     -- walk_record_id NOT NULL 이므로 산책 기록 삭제 차단
     -- 후기 삭제 후 walk_records 삭제 필요 (앱단에서 처리)
 
+    CONSTRAINT uq_course_reviews_walk_record
+        UNIQUE (walk_record_id),
+    -- 이용 기록 1건 당 코스 후기 1번만 작성 가능
+    -- 동일 walk_record_id 로 중복 후기 INSERT 차단
+
     CONSTRAINT chk_course_reviews_difficulty
         CHECK (difficulty IS NULL OR difficulty IN ('easy', 'normal', 'hard')),
     -- NULL: 미입력 허용
@@ -913,7 +942,8 @@ CREATE TRIGGER trg_course_reviews_updated_at
 -- ================================================
 -- TABLE: spot_reviews
 -- 스팟 후기 테이블
--- 산책 종료 후 또는 스팟 상세에서 직접 작성 가능
+-- 반드시 산책 기록(walk_record_id)과 연결하여 작성
+-- 직접 작성(walk_record_id NULL) 불허: 이용 기록 1건 당 스팟별 1번만 작성 가능
 --
 -- [스팟 태그 저장 방식]
 -- 후기 작성 시 선택한 태그는 taggings 테이블에 저장
@@ -933,10 +963,10 @@ CREATE TABLE spot_reviews (
     spot_id             UUID            NOT NULL,
     -- 후기 대상 스팟: spots.spot_id 참조
 
-    walk_record_id      UUID            NULL,
+    walk_record_id      UUID            NOT NULL,
     -- 연결된 산책 기록: walk_records.walk_record_id 참조
-    -- 산책 종료 후 작성 시 자동 연결
-    -- 직접 작성 시 NULL
+    -- 반드시 산책 종료 후 작성, 직접 작성(NULL) 불허
+    -- walk_record_id + spot_id UNIQUE 로 이용 기록 1건 당 스팟별 1번만 작성 가능
 
     description         TEXT            NULL,
     -- 후기 내용 (선택 입력)
@@ -973,8 +1003,14 @@ CREATE TABLE spot_reviews (
 
     CONSTRAINT fk_spot_reviews_walk
         FOREIGN KEY (walk_record_id) REFERENCES walk_records (walk_record_id)
-        ON DELETE SET NULL,
-    -- 산책 기록 삭제 시 연결만 해제, 후기 유지
+        ON DELETE RESTRICT,
+    -- walk_record_id NOT NULL 이므로 산책 기록 삭제 차단
+    -- 후기 삭제 후 walk_records 삭제 필요 (앱단에서 처리)
+
+    CONSTRAINT uq_spot_reviews_walk_spot
+        UNIQUE (walk_record_id, spot_id),
+    -- 이용 기록 1건 당 스팟별 후기 1번만 작성 가능
+    -- 동일 walk_record_id + spot_id 조합 중복 INSERT 차단
 
     CONSTRAINT chk_spot_reviews_status
         CHECK (status IN ('active', 'hidden')),
