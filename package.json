@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "db": "node db/run-sql.js db/reset.sql && db/run-sql.js db/schema.sql",
+    "db": "node db/run-sql.js db/reset.sql && node db/run-sql.js db/schema.sql",
     "db:migrate": "node db/run-sql.js"
   },
   "dependencies": {
