@@ -264,21 +264,51 @@ CREATE TABLE spots (
     spot_id             UUID            NOT NULL DEFAULT gen_random_uuid(),
     -- PK: UUID 사용
 
+    kakao_place_id        TEXT            NULL,
+    -- 카카오 Local API documents[].id 저장
+    -- 예: "13121007"
+    -- 사용자가 카카오 검색 결과에서 장소를 선택했을 때,
+    -- 같은 장소가 spots에 중복 INSERT 되지 않도록 판단하는 기준
+    -- 관리자 직접 등록 장소는 카카오 ID가 없을 수 있으므로 NULL 허용
+
+
     name                VARCHAR(100)    NOT NULL,
-    -- 스팟명 (네이버 지도 API 장소 검색에서 자동 입력)
+    -- 스팟명
+    -- 카카오 Local API 저장 시 documents[].place_name 사용
+    -- 예: "한강", "뚝섬한강공원"
 
     location            GEOGRAPHY(POINT, 4326)  NOT NULL,
     -- 스팟 위치 (위경도 통합)
     -- 예: ST_Point(126.97, 37.56)::GEOGRAPHY  (경도, 위도 순서)
-    -- 네이버 지도 API 좌표 검색에서 자동 입력
+    -- 카카오 Local API 저장 시 documents[].x = 경도, documents[].y = 위도 사용
+    -- [주의] PostGIS Point는 경도(lng), 위도(lat) 순서
     -- GEOGRAPHY 타입이 좌표 유효성 자동 검증 (별도 CHECK 불필요)
 
     address             TEXT            NULL,
-    -- 주소 (네이버 지도 API 역지오코딩으로 자동 입력)
+    -- 주소
+    -- 카카오 Local API documents[].address_name 저장
+    -- 예: "서울 강북구 우이동 산 40-1"
+    -- road_address_name은 별도 컬럼으로 저장하지 않음
 
     category            VARCHAR(20)     NULL,
-    -- 지도 제공 분류 카테고리 (예: '강', '호수', '공원')
+    -- 앱 검색용 카테고리
+    -- 카카오 category_name의 마지막 값을 저장
+    -- 예:
+    --   "여행 > 관광,명소 > 강"       → "강"
+    --   "여행 > 공원 > 도시근린공원" → "도시근린공원"
+    -- 사용자가 카테고리 검색할 때 이 컬럼 기준으로 필터링
 
+    kakao_category_name TEXT            NULL,
+    -- 카카오 원본 카테고리 전체 저장
+    -- 예: "여행 > 관광,명소 > 강"
+    -- category는 앱 검색용으로 가공된 값이므로,
+    -- 원본 응답 추적과 추후 카테고리 매핑 규칙 변경을 위해 보관
+
+    source              VARCHAR(20)     NOT NULL DEFAULT 'admin',
+    -- 장소 등록 출처
+    -- 'admin': 관리자가 직접 등록한 장소
+    -- 'kakao': 사용자가 카카오 검색 결과에서 선택해 저장된 장소
+    
     content_place       TEXT            NULL,
     -- 장소 안내 해설 텍스트
     -- NULL 이면 해당 스팟은 장소 안내 불가
@@ -301,6 +331,11 @@ CREATE TABLE spots (
     status              VARCHAR(20)     NOT NULL DEFAULT 'active',
     -- 'active': 정상 / 'hidden': 신고로 숨김
 
+    last_synced_at      TIMESTAMPTZ     NULL,
+    -- 카카오 API 응답으로 마지막 갱신한 시각
+    -- source = 'kakao'인 장소를 다시 보강/동기화할 때 사용
+    -- 관리자 직접 등록 장소는 NULL 가능
+
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
 
@@ -309,6 +344,9 @@ CREATE TABLE spots (
 
     CONSTRAINT chk_spots_status
         CHECK (status IN ('active', 'hidden')),
+
+    CONSTRAINT chk_spots_source
+        CHECK (source IN ('admin', 'kakao')),
 
     CONSTRAINT chk_spots_recommend_pct
         CHECK (recommend_pct IS NULL OR recommend_pct BETWEEN 0 AND 100)
@@ -340,6 +378,16 @@ CREATE TRIGGER trg_spots_updated_at
     BEFORE UPDATE ON spots
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+CREATE UNIQUE INDEX uix_spots_kakao_place_id
+    ON spots (kakao_place_id);
+-- 카카오 장소 중복 저장 방지
+-- PostgreSQL UNIQUE는 NULL을 서로 다른 값으로 보므로,
+-- kakao_place_id가 NULL인 관리자 직접 등록 장소는 여러 개 저장 가능
+
+CREATE INDEX ix_spots_status_category
+    ON spots (status, category);
+-- 사용자 장소 검색용
+-- 예: WHERE status = 'active' AND category = '강'
 
 -- ================================================
 -- TABLE: courses
