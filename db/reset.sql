@@ -4,5 +4,19 @@
 -- 주의: 실행하면 기존 데이터가 모두 삭제됩니다.
 -- ================================================
 
-DROP SCHEMA public CASCADE;
-CREATE SCHEMA public;
+DROP TABLE IF EXISTS
+    spot_ai_contents,
+    notifications,
+    reports,
+    reactions,
+    spot_reviews,
+    course_reviews,
+    walk_records,
+    bookmarks,
+    taggings,
+    course_waypoints,
+    courses,
+    spots,
+    tags,
+    users
+CASCADE;
