@@ -117,15 +117,16 @@ CREATE TABLE users (
     -- GIN 인덱스로 JSONB 검색 성능 보완 (하단 인덱스 참고)
 
     pref_categories         JSONB           NULL,
-    -- 선호 카테고리 목록 (spots.category · courses.category 값 참조)
+    -- 선호 카테고리 목록 (spots.categories · courses.category 값 참조)
     -- 스팟 카테고리·코스 카테고리를 구분하여 저장
     -- 예: {
-    --   "spot":   ["공원", "강", "호수"],  -- 선호 스팟 카테고리 목록
+    --   "spot":   ["공원·광장", "강·하천", "호수·저수지"],  -- 선호 스팟 카테고리 목록
     --   "course": ["둘레길", "숲길"]       -- 선호 코스 카테고리 목록
     -- }
     -- 미설정 시 NULL, key 생략 가능 (spot 만 설정하고 course 생략 허용)
-    -- [주의] spots.category · courses.category 는 자유 문자열이므로
-    --        허용 카테고리 목록 관리 및 유효성 검증은 앱단에서 처리 필요
+    -- [주의] spots.categories 는 chk_spots_categories 로 허용값을 제한하지만,
+    --        JSONB 배열인 users.pref_categories 는 FK/CHECK 로 세부 값을 검증하기 어려움
+    --        courses.category 도 자유 문자열이므로 앱단 validation 병행 필요
     -- GIN 인덱스로 JSONB 검색 성능 보완 (하단 인덱스 참고)
 
     created_at              TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
@@ -199,7 +200,7 @@ CREATE INDEX ix_users_pref_tag_ids
 
 -- 선호 카테고리 JSONB 검색용 GIN 인덱스
 -- 특정 카테고리를 선호하는 유저 조회 시 사용
--- 예: WHERE pref_categories @> '{"spot": ["공원"]}'
+-- 예: WHERE pref_categories @> '{"spot": ["공원·광장"]}'
 CREATE INDEX ix_users_pref_categories
     ON users USING GIN (pref_categories);
 
@@ -290,18 +291,19 @@ CREATE TABLE spots (
     -- 예: "서울 강북구 우이동 산 40-1"
     -- road_address_name은 별도 컬럼으로 저장하지 않음
 
-    category            VARCHAR(20)     NULL,
-    -- 앱 검색용 카테고리
-    -- 카카오 category_name의 마지막 값을 저장
+    categories          TEXT[]          NOT NULL DEFAULT '{}',
+    -- 앱 검색용 카테고리 목록
+    -- 카카오 category_name의 마지막 값과 장소명 예외 규칙을 앱 기준 카테고리 배열로 변환해 저장
     -- 예:
-    --   "여행 > 관광,명소 > 강"       → "강"
-    --   "여행 > 공원 > 도시근린공원" → "도시근린공원"
-    -- 사용자가 카테고리 검색할 때 이 컬럼 기준으로 필터링
+    --   "여행 > 관광,명소 > 강"       → ARRAY['강·하천']
+    --   "여행 > 공원 > 도시근린공원" → ARRAY['공원·광장']
+    --   "금강습지생태공원"처럼 복합 성격의 장소 → ARRAY['생태·서식지', '공원·광장']
+    -- 사용자가 카테고리 검색할 때 이 배열에 해당 카테고리가 포함되는지 기준으로 필터링
 
     kakao_category_name TEXT            NULL,
     -- 카카오 원본 카테고리 전체 저장
     -- 예: "여행 > 관광,명소 > 강"
-    -- category는 앱 검색용으로 가공된 값이므로,
+    -- categories는 앱 검색용으로 가공된 값이므로,
     -- 원본 응답 추적과 추후 카테고리 매핑 규칙 변경을 위해 보관
 
     source              VARCHAR(20)     NOT NULL DEFAULT 'admin',
@@ -349,8 +351,25 @@ CREATE TABLE spots (
         CHECK (source IN ('admin', 'kakao')),
 
     CONSTRAINT chk_spots_recommend_pct
-        CHECK (recommend_pct IS NULL OR recommend_pct BETWEEN 0 AND 100)
+        CHECK (recommend_pct IS NULL OR recommend_pct BETWEEN 0 AND 100),
     -- 추천도 0~100% 범위 검증
+
+    CONSTRAINT chk_spots_categories
+        CHECK (
+            categories <@ ARRAY[
+            '산',
+            '숲·휴양림',
+            '수목원·정원',
+            '강·하천',
+            '호수·저수지',
+            '계곡·폭포',
+            '해수욕장·해변',
+            '생태·서식지',
+            '공원·광장'
+            ]::TEXT[]
+        )
+    -- categories 배열에는 앱에서 허용한 카테고리명만 저장
+    -- <@ 연산자는 왼쪽 배열이 오른쪽 배열의 부분집합인지 확인
 );
 
 -- 위치 기반 반경 검색·거리 정렬용 GiST 인덱스
@@ -384,10 +403,10 @@ CREATE UNIQUE INDEX uix_spots_kakao_place_id
 -- PostgreSQL UNIQUE는 NULL을 서로 다른 값으로 보므로,
 -- kakao_place_id가 NULL인 관리자 직접 등록 장소는 여러 개 저장 가능
 
-CREATE INDEX ix_spots_status_category
-    ON spots (status, category);
--- 사용자 장소 검색용
--- 예: WHERE status = 'active' AND category = '강'
+CREATE INDEX ix_spots_categories
+    ON spots USING GIN (categories);
+-- 사용자 장소 카테고리 검색용
+-- 예: WHERE categories @> ARRAY['강·하천']::TEXT[]
 
 -- ================================================
 -- TABLE: courses
