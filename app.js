@@ -31,8 +31,9 @@ const authRoutes = require('./routes/auth');
 // const userRoutes         = require('./routes/users');
 // const tagRoutes          = require('./routes/tags');
 const courseRoutes       = require('./routes/courses');
-// const spotRoutes         = require('./routes/spots');
+const spotRoutes         = require('./routes/spots');
 const walkRoutes         = require('./routes/walks');
+
 // const reviewRoutes       = require('./routes/reviews');
 // const reactionRoutes     = require('./routes/reactions');
 // const bookmarkRoutes     = require('./routes/bookmarks');
@@ -44,8 +45,9 @@ app.use('/api/auth', authRoutes);
 // app.use('/api/users',         userRoutes);
 // app.use('/api/tags',          tagRoutes);
 app.use('/api/courses',       courseRoutes);
-// app.use('/api/spots',         spotRoutes);
+app.use('/api/spots',         spotRoutes);
 app.use('/api/walks',         walkRoutes);
+
 // app.use('/api/reviews',       reviewRoutes);
 // app.use('/api/reactions',     reactionRoutes);
 // app.use('/api/bookmarks',     bookmarkRoutes);
