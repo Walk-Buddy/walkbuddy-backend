@@ -8,11 +8,15 @@ const swaggerDefinition = {
     description: 'WalkBuddy 서비스 REST API 문서',
   },
   servers: [
-    {
-      url: 'http://localhost:3000',
-      description: '개발 서버',
-    },
-  ],
+  {
+    url: 'http://43.200.171.53:3000',
+    description: '운영 서버',
+  },
+  {
+    url: 'http://localhost:3000',
+    description: '개발 서버',
+  },
+],
   components: {
     securitySchemes: {
       bearerAuth: {

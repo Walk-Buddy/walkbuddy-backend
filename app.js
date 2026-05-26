@@ -26,15 +26,14 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// ── Routes (구현된 것만 등록) ─────────────────────────────────────────
-// TODO: 각 라우터 파일 생성 후 아래 주석을 해제하세요
-
-// const authRoutes         = require('./routes/auth');
+// ── Routes ───────────────────────────────────────────────────────────
+const authRoutes = require('./routes/auth');
 // const userRoutes         = require('./routes/users');
 // const tagRoutes          = require('./routes/tags');
-// const courseRoutes       = require('./routes/courses');
+const courseRoutes       = require('./routes/courses');
 const spotRoutes         = require('./routes/spots');
-// const walkRoutes         = require('./routes/walks');
+const walkRoutes         = require('./routes/walks');
+
 // const reviewRoutes       = require('./routes/reviews');
 // const reactionRoutes     = require('./routes/reactions');
 // const bookmarkRoutes     = require('./routes/bookmarks');
@@ -42,12 +41,13 @@ const spotRoutes         = require('./routes/spots');
 // const adminRoutes        = require('./routes/admin');
 // const notificationRoutes = require('./routes/notifications');
 
-// app.use('/api/auth',          authRoutes);
+app.use('/api/auth', authRoutes);
 // app.use('/api/users',         userRoutes);
 // app.use('/api/tags',          tagRoutes);
-// app.use('/api/courses',       courseRoutes);
+app.use('/api/courses',       courseRoutes);
 app.use('/api/spots',         spotRoutes);
-// app.use('/api/walks',         walkRoutes);
+app.use('/api/walks',         walkRoutes);
+
 // app.use('/api/reviews',       reviewRoutes);
 // app.use('/api/reactions',     reactionRoutes);
 // app.use('/api/bookmarks',     bookmarkRoutes);
