@@ -2,12 +2,15 @@
   "name": "trail-course-backend",
   "version": "1.0.0",
   "description": "Trail course backend API",
-  "main": "src/app.js",
+  "main": "app.js",
   "scripts": {
-    "start": "node src/app.js",
-    "dev": "nodemon src/app.js",
-    "db": "node db/run-sql.js db/reset.sql && node db/run-sql.js db/schema.sql",
-    "db:migrate": "node db/run-sql.js"
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "db": "node db/run-sql.js db/reset.sql && node db/run-sql.js db/schema.sql && node db/generate-erd-data.js && npm --prefix db/erd-viewer run dev",
+    "db:apply": "node db/run-sql.js db/reset.sql && node db/run-sql.js db/schema.sql && node db/generate-erd-data.js",
+    "db:migrate": "node db/run-sql.js",
+    "erd:gen": "node db/generate-erd-data.js",
+    "erd:dev": "npm run erd:gen && npm --prefix db/erd-viewer run dev"
   },
   "dependencies": {
     "axios": "^1.6.0",
