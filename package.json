@@ -2,10 +2,10 @@
   "name": "trail-course-backend",
   "version": "1.0.0",
   "description": "Trail course backend API",
-  "main": "src/index.js",
+  "main": "src/app.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js",
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js",
     "db": "node db/run-sql.js db/reset.sql && node db/run-sql.js db/schema.sql",
     "db:migrate": "node db/run-sql.js"
   },
