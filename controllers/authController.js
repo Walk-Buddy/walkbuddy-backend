@@ -161,3 +161,97 @@ exports.register = async (req, res, next) => {
     next(err);
   }
 };
+
+// ──────────────────────────────────────────────────────────────────────
+// POST /api/auth/login
+// 일반 로그인 (이메일/비밀번호 + 자동 로그인)
+// body: { email, password, auto_login }
+// ──────────────────────────────────────────────────────────────────────
+exports.login = async (req, res, next) => {
+  try {
+    const { email, password, auto_login = false } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: '이메일과 비밀번호를 입력해주세요.' });
+    }
+
+    const result = await authService.login({ email, password, auto_login });
+    return res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// POST /api/auth/login/kakao
+// 카카오 소셜 로그인
+// body: { code }
+// ──────────────────────────────────────────────────────────────────────
+exports.kakaoLogin = async (req, res, next) => {
+  try {
+    const { code } = req.body;
+
+    if (!code) {
+      return res.status(400).json({ success: false, message: '카카오 인가코드가 없습니다.' });
+    }
+
+    const result = await authService.kakaoLogin(code);
+    return res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// POST /api/auth/password/reset
+// 비밀번호 찾기 (임시 비밀번호 이메일 발송)
+// body: { email }
+// ──────────────────────────────────────────────────────────────────────
+exports.resetPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ success: false, message: '이메일을 입력해주세요.' });
+    }
+
+    await authService.resetPassword(email);
+    return res.status(200).json({ success: true, message: '임시 비밀번호가 이메일로 발송되었습니다.' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// POST /api/auth/token/refresh
+// 액세스 토큰 재발급
+// body: { refresh_token }
+// ──────────────────────────────────────────────────────────────────────
+exports.refreshToken = async (req, res, next) => {
+  try {
+    const { refresh_token } = req.body;
+
+    if (!refresh_token) {
+      return res.status(400).json({ success: false, message: 'refresh_token이 없습니다.' });
+    }
+
+    const result = await authService.refreshToken(refresh_token);
+    return res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// POST /api/auth/logout
+// 로그아웃
+// ──────────────────────────────────────────────────────────────────────
+exports.logout = async (req, res, next) => {
+  try {
+    // req.user는 인증(authenticate) 미들웨어에서 주입된다고 가정합니다.
+    await authService.logout(req.user.user_id);
+    return res.status(200).json({ success: true, message: '로그아웃 되었습니다.' });
+  } catch (err) {
+    next(err);
+  }
+};

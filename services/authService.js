@@ -162,4 +162,225 @@ exports.register = async ({ email, password, nickname, verifyToken }) => {
   );
 
   return rows[0];
+
+ // ──────────────────────────────────────────────────────────────────────
+// 일반 로그인
+// 사용자 조회 → 비밀번호 비교 → 계정 상태 확인 → JWT 발급
+// ──────────────────────────────────────────────────────────────────────
+exports.login = async ({ email, password, auto_login }) => {
+  // 1. 사용자 조회 (소셜 가입자는 일반 로그인 불가능하도록 구분 처리)
+  const { rows } = await pool.query(
+    `SELECT user_id, email, nickname, password_hash, role, status
+     FROM users
+     WHERE email = $1 AND social_provider IS NULL`,
+    [email]
+  );
+
+  const user = rows[0];
+
+  // 2. 사용자 없음 or 비밀번호 불일치 (보안상 에러 메시지 통일)
+  if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+    throw Object.assign(new Error('이메일 또는 비밀번호가 올바르지 않습니다.'), { status: 401 });
+  }
+
+  // 3. 계정 상태 확인
+  if (user.status === 'suspended') {
+    throw Object.assign(new Error('정지된 계정입니다. 고객센터에 문의해주세요.'), { status: 403 });
+  }
+  if (user.status === 'deleted') {
+    throw Object.assign(new Error('탈퇴한 계정입니다.'), { status: 403 });
+  }
+
+  // 4. 토큰 발급
+  const { access_token, refresh_token } = issueTokens(
+    { user_id: user.user_id, role: user.role },
+    auto_login
+  );
+
+  return {
+    access_token,
+    refresh_token,
+    user: {
+      user_id: user.user_id,
+      nickname: user.nickname,
+      role: user.role,
+    },
+  };
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 카카오 소셜 로그인
+// 토큰 교환 → 사용자 정보 조회 → 신규 가입/로그인 처리 → JWT 발급
+// ──────────────────────────────────────────────────────────────────────
+exports.kakaoLogin = async (code) => {
+  // ── Step 1: 인가코드로 카카오 액세스 토큰 교환 ──
+  const tokenRes = await fetch('https://kauth.kakao.com/oauth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type:   'authorization_code',
+      client_id:    process.env.KAKAO_REST_API_KEY,
+      redirect_uri: process.env.KAKAO_REDIRECT_URI,
+      code,
+    }),
+  });
+
+  const tokenData = await tokenRes.json();
+  if (tokenData.error) {
+    throw Object.assign(
+      ...[new Error(`카카오 토큰 교환 실패: ${tokenData.error_description}`)],
+      { status: 400 }
+    );
+  }
+
+  const kakaoAccessToken = tokenData.access_token;
+
+  // ── Step 2: 카카오 사용자 정보 조회 ──
+  const userRes = await fetch('https://kapi.kakao.com/v2/user/me', {
+    headers: { Authorization: `Bearer ${kakaoAccessToken}` },
+  });
+
+  const kakaoUser = await userRes.json();
+  if (!kakaoUser.id) {
+    throw Object.assign(new Error('카카오 사용자 정보 조회 실패'), { status: 400 });
+  }
+
+  const social_id       = String(kakaoUser.id);
+  const kakaoEmail      = kakaoUser.kakao_account?.email ?? null;       // 이메일 미동의 시 null
+  const kakaoNickname   = kakaoUser.kakao_account?.profile?.nickname;
+  const kakaoProfileImg = kakaoUser.kakao_account?.profile?.profile_image_url ?? null;
+
+  // ── Step 3: DB에서 기존 유저 조회 ──
+  const { rows } = await pool.query(
+    `SELECT user_id, nickname, role, status
+     FROM users
+     WHERE social_provider = 'kakao' AND social_id = $1`,
+    [social_id]
+  );
+
+  let user;
+  let is_new_user = false;
+
+  if (rows.length > 0) {
+    // 기존 유저: 로그인 처리
+    user = rows[0];
+
+    if (user.status === 'suspended') {
+      throw Object.assign(new Error('정지된 계정입니다.'), { status: 403 });
+    }
+    if (user.status === 'deleted') {
+      throw Object.assign(new Error('탈퇴한 계정입니다.'), { status: 403 });
+    }
+  } else {
+    // 신규 유저: 자동 회원가입
+    is_new_user = true;
+
+    // 닉네임 설정 및 중복 시 랜덤 suffix 부여
+    let nickname = kakaoNickname ?? '카카오유저';
+    if (nickname.length > 12) nickname = nickname.slice(0, 12);
+    const nicknameAvailable = await exports.isNicknameAvailable(nickname);
+    if (!nicknameAvailable) {
+      nickname = nickname.slice(0, 9) + Math.floor(Math.random() * 1000);
+    }
+
+    const { rows: newRows } = await pool.query(
+      `INSERT INTO users (email, nickname, profile_image_url, social_provider, social_id)
+       VALUES ($1, $2, $3, 'kakao', $4)
+       RETURNING user_id, nickname, role`,
+      [kakaoEmail, nickname, kakaoProfileImg, social_id]
+    );
+
+    user = newRows[0];
+  }
+
+  // ── Step 4: JWT 발급 ──
+  const { access_token, refresh_token } = issueTokens({
+    user_id: user.user_id,
+    role: user.role,
+  });
+
+  return {
+    access_token,
+    refresh_token,
+    is_new_user,
+    user: {
+      user_id:  user.user_id,
+      email:    kakaoEmail,
+      nickname: user.nickname,
+    },
+  };
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 비밀번호 찾기: 임시 비밀번호 발송
+// ──────────────────────────────────────────────────────────────────────
+exports.resetPassword = async (email) => {
+  const { rows } = await pool.query(
+    'SELECT user_id FROM users WHERE email = $1 AND social_provider IS NULL',
+    [email]
+  );
+  if (rows.length === 0) {
+    return; // 보안상 계정 존재 여부를 숨기기 위해 바로 리턴
+  }
+
+  const tempPassword = crypto.randomBytes(5).toString('hex');
+  const passwordHash = await bcrypt.hash(tempPassword, BCRYPT_ROUNDS);
+
+  await pool.query(
+    'UPDATE users SET password_hash = $1 WHERE user_id = $2',
+    [passwordHash, rows[0].user_id]
+  );
+
+  await emailUtil.sendEmail({
+    to: email,
+    subject: '[SWUAZA] 임시 비밀번호 안내',
+    text: `임시 비밀번호: ${tempPassword}\n\n로그인 후 반드시 비밀번호를 변경해주세요.`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 400px; margin: auto;">
+        <h2>임시 비밀번호 안내</h2>
+        <p>아래 임시 비밀번호로 로그인 후 <strong>반드시 비밀번호를 변경</strong>해주세요.</p>
+        <div style="font-size: 24px; font-weight: bold; letter-spacing: 4px; color: #333; padding: 16px; background: #f5f5f5; border-radius: 8px; text-align: center;">
+          ${tempPassword}
+        </div>
+      </div>
+    `,
+  });
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 액세스 토큰 재발급
+// ──────────────────────────────────────────────────────────────────────
+exports.refreshToken = async (refresh_token) => {
+  let payload;
+  try {
+    payload = jwt.verify(refresh_token, process.env.JWT_REFRESH_SECRET);
+  } catch (err) {
+    throw Object.assign(new Error('유효하지 않거나 만료된 refresh_token입니다.'), { status: 401 });
+  }
+
+  const { rows } = await pool.query(
+    'SELECT user_id, role, status FROM users WHERE user_id = $1',
+    [payload.user_id]
+  );
+  const user = rows[0];
+  if (!user || user.status !== 'active') {
+    throw Object.assign(new Error('사용할 수 없는 계정입니다.'), { status: 403 });
+  }
+
+  const access_token = jwt.sign(
+    { user_id: user.user_id, role: user.role },
+    process.env.JWT_SECRET,
+    { expiresIn: ACCESS_TOKEN_EXPIRES }
+  );
+
+  return { access_token };
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 로그아웃
+// ──────────────────────────────────────────────────────────────────────
+exports.logout = async (user_id) => {
+  return true;
+};
+
 };
