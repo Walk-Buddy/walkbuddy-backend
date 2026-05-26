@@ -287,8 +287,10 @@ CREATE TABLE spots (
 
     address             TEXT            NULL,
     -- 주소
-    -- 카카오 Local API documents[].address_name 저장
-    -- 예: "서울 강북구 우이동 산 40-1"
+    -- 카카오 Local API documents[].road_address_name 우선 저장
+    -- road_address_name이 비어 있으면 documents[].address_name을 fallback으로 저장
+    -- 예: "서울 강남구 압구정로 343"
+    -- 도로명 주소가 없는 자연 장소는 지번/행정동 주소가 저장될 수 있음
     -- road_address_name은 별도 컬럼으로 저장하지 않음
 
     categories          TEXT[]          NOT NULL DEFAULT '{}',
