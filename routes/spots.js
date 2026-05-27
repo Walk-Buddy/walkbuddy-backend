@@ -1,24 +1,22 @@
 const express = require('express');
-const axios = require('axios');
-const pool = require('../config/db');
-const { authenticate, requireAdmin } = require('../middleware/auth');
-
-const {
-    SPOT_CATEGORIES,
-    SPOT_CATEGORY_SEARCH_RULES,
-    inferSpotCategories,
-} = require('../constants/spotCategoryRules');
-
 const router = express.Router();
+const spotController = require('../controllers/spotController');
+const { authenticate } = require('../middleware/auth');
 
-function isMissing(value) {
-    return value === undefined || value === null || value === '';
-}
+router.get('/health', (req, res) => res.json({ success: true, message: 'spot router connected' }));
 
-function getKakaoAddress(document) {
-    return document.road_address_name || document.address_name || null;
-}
+router.get('/search', spotController.searchSpots);
+router.get('/filter', spotController.filterSpots);
+router.get('/', spotController.getSpots);
+router.get('/:spot_id/ai-contents', spotController.getAiContents);
+router.get('/:spot_id', spotController.getSpotById);
 
+<<<<<<< HEAD
+router.post('/kakao', authenticate, spotController.saveKakaoSpot);
+router.post('/', authenticate, spotController.createSpot);
+
+module.exports = router;
+=======
 function getKakaoSearchRules(category) {
     if (!isMissing(category)) {
         return SPOT_CATEGORY_SEARCH_RULES[category];
@@ -857,3 +855,4 @@ router.get('/:spot_id/ai-contents', async (req, res) => {
         return res.status(500).json({ success: false, message: 'Failed to fetch AI contents' });
     }
 });
+>>>>>>> origin/develop
