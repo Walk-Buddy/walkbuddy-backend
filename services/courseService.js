@@ -384,7 +384,6 @@ exports.searchCourses = async (query) => {
   const minEstimatedDuration = parseNumberParam(query.min_estimated_duration, 'min_estimated_duration', { min: 0 });
   const maxEstimatedDuration = parseNumberParam(query.max_estimated_duration, 'max_estimated_duration', { min: 0 });
   const minAvgRating = parseNumberParam(query.min_avg_rating, 'min_avg_rating', { min: 0, max: 5 });
-  const maxAvgRating = parseNumberParam(query.max_avg_rating, 'max_avg_rating', { min: 0, max: 5 });
   const difficulty = normalizeDifficulty(query.difficulty);
   const courseTagIds = parseUuidList(query.course_tag_ids ?? query.tag_ids, 'course_tag_ids');
   const spotTagIds = parseUuidList(query.spot_tag_ids, 'spot_tag_ids');
@@ -398,10 +397,6 @@ exports.searchCourses = async (query) => {
 
   if (maxEstimatedDuration !== null && minEstimatedDuration !== null && maxEstimatedDuration < minEstimatedDuration) {
     throw createBadRequest('max_estimated_duration must be greater than or equal to min_estimated_duration');
-  }
-
-  if (maxAvgRating !== null && minAvgRating !== null && maxAvgRating < minAvgRating) {
-    throw createBadRequest('max_avg_rating must be greater than or equal to min_avg_rating');
   }
 
   const params = [];
@@ -447,11 +442,6 @@ exports.searchCourses = async (query) => {
   if (minAvgRating !== null) {
     params.push(minAvgRating);
     conditions.push(`rs.avg_rating >= $${params.length}`);
-  }
-
-  if (maxAvgRating !== null) {
-    params.push(maxAvgRating);
-    conditions.push(`rs.avg_rating <= $${params.length}`);
   }
 
   if (courseTagIds.length > 0) {
@@ -649,7 +639,6 @@ exports.searchCourses = async (query) => {
         max_estimated_duration: maxEstimatedDuration,
         difficulty,
         min_avg_rating: minAvgRating,
-        max_avg_rating: maxAvgRating,
         course_tag_ids: courseTagIds,
         spot_tag_ids: spotTagIds,
       },
