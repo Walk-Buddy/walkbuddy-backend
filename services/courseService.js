@@ -198,8 +198,9 @@ exports.createCourseFromWalk = async (userId, body) => {
   } catch (err) {
     await client.query('ROLLBACK'); throw err;
   } finally { client.release(); }
+};
 
-  // ──────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────
 // 코스 목록 조회
 // ──────────────────────────────────────────────────────────────────────
 exports.getCourses = async (query) => {
@@ -482,5 +483,4 @@ exports.deleteCourse = async (userId, courseId) => {
     );
     return { message: '삭제되었습니다.' };
   } finally { client.release(); }
-};
 };
