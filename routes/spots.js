@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const pool = require('../config/db');
+const { authenticate, requireAdmin } = require('../middleware/auth');
 
 const {
     SPOT_CATEGORIES,
@@ -385,7 +386,7 @@ router.get('/search', async (req, res) => {
 
 // 사용자가 카카오 검색 결과 목록에서 특정 장소를 선택했을 때 호출되는 API입니다.
 // 이미 저장된 장소는 기존 데이터를 반환하고, 저장되지 않은 장소만 새로 저장합니다.
-router.post('/kakao', async (req, res) => {
+router.post('/kakao', authenticate, async (req, res) => {
     const {
         kakao_place_id,
         name,
@@ -769,3 +770,302 @@ router.get('/filter', async (req, res) => {
 });
 
 module.exports = router;
+
+// ──────────────────────────────────────────────────────────────────────
+// POST /api/spots — 스팟 직접 등록 (관리자 전용)
+// ──────────────────────────────────────────────────────────────────────
+router.post('/', authenticate, async (req, res) => {
+    const {
+        name,
+        x,
+        y,
+        address,
+        categories,
+        kakao_category_name,
+        content_place,
+        content_history,
+        content_tour,
+    } = req.body;
+
+    try {
+        // 필수값 검증
+        if (!name || isMissing(x) || isMissing(y)) {
+            return res.status(400).json({
+                success: false,
+                message: 'name, x, y는 필수입니다.',
+            });
+        }
+
+        if (!Array.isArray(categories) || categories.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'categories는 비어있지 않은 배열이어야 합니다.',
+            });
+        }
+
+        const hasInvalidCategory = categories.some(c => !SPOT_CATEGORIES.includes(c));
+        if (hasInvalidCategory) {
+            return res.status(400).json({
+                success: false,
+                message: 'categories에 허용되지 않은 값이 있습니다.',
+                supported_categories: SPOT_CATEGORIES,
+            });
+        }
+
+        const lng = Number(x);
+        const lat = Number(y);
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+            return res.status(400).json({
+                success: false,
+                message: 'x, y는 유효한 숫자여야 합니다.',
+            });
+        }
+
+        const result = await pool.query(
+            `INSERT INTO spots (
+                name, location, address, categories,
+                kakao_category_name, source,
+                content_place, content_history, content_tour
+            ) VALUES (
+                $1,
+                ST_Point($2, $3)::GEOGRAPHY,
+                $4, $5::TEXT[], $6,
+                'admin',
+                $7, $8, $9
+            )
+            RETURNING
+                spot_id, name, address, categories,
+                kakao_category_name, source,
+                content_place, content_history, content_tour,
+                recommend_pct, status, created_at,
+                ST_X(location::GEOMETRY) AS x,
+                ST_Y(location::GEOMETRY) AS y`,
+            [
+                name, lng, lat,
+                address || null,
+                categories,
+                kakao_category_name || null,
+                content_place || null,
+                content_history || null,
+                content_tour || null,
+            ]
+        );
+
+        const spot = result.rows[0];
+        return res.status(201).json({
+            success: true,
+            spot: {
+                ...spot,
+                x: Number(spot.x),
+                y: Number(spot.y),
+            },
+        });
+    } catch (error) {
+        console.error(error.message);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to create spot',
+        });
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// GET /api/spots — 스팟 목록 조회
+// ──────────────────────────────────────────────────────────────────────
+router.get('/', async (req, res) => {
+    const { x, y, radius, category, tag_ids, min_recommend_pct, page = 1, limit = 20 } = req.query;
+
+    try {
+        const offset = (Number(page) - 1) * Number(limit);
+        const whereConditions = ["s.status = 'active'"];
+        const queryValues = [];
+        let distanceSelectSql = 'NULL::DOUBLE PRECISION AS distance';
+        let orderBySql = 's.created_at DESC';
+
+        // 카테고리 필터
+        if (category) {
+            if (!SPOT_CATEGORIES.includes(category)) {
+                return res.status(400).json({ success: false, message: 'unsupported spot category', supported_categories: SPOT_CATEGORIES });
+            }
+            queryValues.push(category);
+            whereConditions.push(`s.categories @> ARRAY[$${queryValues.length}]::TEXT[]`);
+        }
+
+        // 태그 필터
+        if (tag_ids) {
+            const tagIdList = (Array.isArray(tag_ids) ? tag_ids.join(',') : tag_ids)
+                .split(',').map(t => t.trim()).filter(Boolean);
+            const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            if (tagIdList.some(t => !uuidPattern.test(t))) {
+                return res.status(400).json({ success: false, message: 'tag_ids must be comma-separated UUID values' });
+            }
+            if (tagIdList.length > 0) {
+                queryValues.push(tagIdList);
+                const tagIdx = queryValues.length;
+                queryValues.push(tagIdList.length);
+                const cntIdx = queryValues.length;
+                whereConditions.push(`
+                    s.spot_id IN (
+                        SELECT tg.target_id FROM taggings tg
+                        WHERE tg.target_type = 'spot' AND tg.tag_id = ANY($${tagIdx}::UUID[])
+                        GROUP BY tg.target_id HAVING COUNT(DISTINCT tg.tag_id) = $${cntIdx}
+                    )
+                `);
+            }
+        }
+
+        // 추천도 필터
+        if (!isMissing(min_recommend_pct)) {
+            const pct = Number(min_recommend_pct);
+            if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+                return res.status(400).json({ success: false, message: 'min_recommend_pct must be between 0 and 100' });
+            }
+            queryValues.push(pct);
+            whereConditions.push(`s.recommend_pct >= $${queryValues.length}`);
+        }
+
+        // 위치 기반 필터
+        if (!isMissing(x) && !isMissing(y)) {
+            const lng = Number(x);
+            const lat = Number(y);
+            const searchRadius = isMissing(radius) ? 3000 : Number(radius);
+            if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+                return res.status(400).json({ success: false, message: 'x and y must be valid numbers' });
+            }
+            queryValues.push(lng); const lngIdx = queryValues.length;
+            queryValues.push(lat); const latIdx = queryValues.length;
+            queryValues.push(searchRadius); const radIdx = queryValues.length;
+
+            distanceSelectSql = `ST_Distance(s.location, ST_Point($${lngIdx}, $${latIdx})::GEOGRAPHY) AS distance`;
+            whereConditions.push(`ST_DWithin(s.location, ST_Point($${lngIdx}, $${latIdx})::GEOGRAPHY, $${radIdx})`);
+            orderBySql = 'distance ASC';
+        }
+
+        // 전체 카운트
+        const countResult = await pool.query(
+            `SELECT COUNT(DISTINCT s.spot_id) AS total FROM spots s WHERE ${whereConditions.join(' AND ')}`,
+            queryValues
+        );
+
+        // 목록 조회
+        queryValues.push(Number(limit));  const limitIdx = queryValues.length;
+        queryValues.push(offset);         const offsetIdx = queryValues.length;
+
+        const spotsResult = await pool.query(
+            `SELECT
+                s.spot_id, s.name, s.address, s.categories, s.kakao_category_name,
+                s.recommend_pct, s.source,
+                ST_X(s.location::GEOMETRY) AS x,
+                ST_Y(s.location::GEOMETRY) AS y,
+                ${distanceSelectSql},
+                COALESCE(
+                    json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
+                    FILTER (WHERE t.tag_id IS NOT NULL), '[]'
+                ) AS top_tags
+             FROM spots s
+             LEFT JOIN taggings tg ON tg.target_type = 'spot' AND tg.target_id = s.spot_id
+             LEFT JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'spot' AND t.is_active = TRUE
+             WHERE ${whereConditions.join(' AND ')}
+             GROUP BY s.spot_id
+             ORDER BY ${orderBySql}
+             LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+            queryValues
+        );
+
+        return res.json({
+            success: true,
+            total: Number(countResult.rows[0].total),
+            page: Number(page),
+            spots: spotsResult.rows.map(s => ({
+                ...s,
+                x: Number(s.x),
+                y: Number(s.y),
+                distance: s.distance == null ? null : Number(s.distance),
+                recommend_pct: s.recommend_pct == null ? null : Number(s.recommend_pct),
+            })),
+        });
+    } catch (error) {
+        console.error(error.message);
+        return res.status(500).json({ success: false, message: 'Failed to fetch spots' });
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// GET /api/spots/:spot_id — 스팟 상세 조회
+// ──────────────────────────────────────────────────────────────────────
+router.get('/:spot_id', async (req, res) => {
+    const { spot_id } = req.params;
+    try {
+        // 스팟 기본 정보
+        const spotResult = await pool.query(
+            `SELECT
+                s.spot_id, s.name, s.address, s.categories, s.kakao_category_name,
+                s.recommend_pct, s.source, s.content_place, s.content_history, s.content_tour,
+                ST_X(s.location::GEOMETRY) AS x,
+                ST_Y(s.location::GEOMETRY) AS y,
+                COALESCE(
+                    json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
+                    FILTER (WHERE t.tag_id IS NOT NULL), '[]'
+                ) AS top_tags
+             FROM spots s
+             LEFT JOIN taggings tg ON tg.target_type = 'spot' AND tg.target_id = s.spot_id
+             LEFT JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'spot' AND t.is_active = TRUE
+             WHERE s.spot_id = $1 AND s.status = 'active'
+             GROUP BY s.spot_id`,
+            [spot_id]
+        );
+
+        if (!spotResult.rows.length) {
+            return res.status(404).json({ success: false, message: '스팟을 찾을 수 없습니다.' });
+        }
+
+        // 포함된 코스 목록
+        const coursesResult = await pool.query(
+            `SELECT DISTINCT c.course_id, c.name, c.total_distance, c.estimated_duration, c.is_public
+             FROM courses c
+             JOIN course_waypoints cw ON cw.course_id = c.course_id
+             WHERE cw.spot_id = $1 AND c.status = 'active' AND c.is_public = TRUE
+             LIMIT 10`,
+            [spot_id]
+        );
+
+        const spot = spotResult.rows[0];
+        return res.json({
+            success: true,
+            spot: {
+                ...spot,
+                x: Number(spot.x),
+                y: Number(spot.y),
+                recommend_pct: spot.recommend_pct == null ? null : Number(spot.recommend_pct),
+                courses: coursesResult.rows,
+            },
+        });
+    } catch (error) {
+        console.error(error.message);
+        return res.status(500).json({ success: false, message: 'Failed to fetch spot' });
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// GET /api/spots/:spot_id/ai-contents — 스팟 AI 콘텐츠 조회
+// ──────────────────────────────────────────────────────────────────────
+router.get('/:spot_id/ai-contents', async (req, res) => {
+    const { spot_id } = req.params;
+    try {
+        const result = await pool.query(
+            `SELECT content_type, script, audio_url
+             FROM spot_ai_contents
+             WHERE spot_id = $1
+             ORDER BY content_type`,
+            [spot_id]
+        );
+        return res.json({
+            success: true,
+            spot_id,
+            contents: result.rows,
+        });
+    } catch (error) {
+        console.error(error.message);
+        return res.status(500).json({ success: false, message: 'Failed to fetch AI contents' });
+    }
+});
