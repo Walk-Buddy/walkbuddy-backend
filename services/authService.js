@@ -162,6 +162,7 @@ exports.register = async ({ email, password, nickname, verifyToken }) => {
   );
 
   return rows[0];
+};
 
  // ──────────────────────────────────────────────────────────────────────
 // 일반 로그인
@@ -362,7 +363,7 @@ exports.refreshToken = async (refresh_token) => {
     'SELECT user_id, role, status FROM users WHERE user_id = $1',
     [payload.user_id]
   );
-  const user = rows[0]; };
+  const user = rows[0];
   if (!user || user.status !== 'active') {
     throw Object.assign(new Error('사용할 수 없는 계정입니다.'), { status: 403 });
   }
