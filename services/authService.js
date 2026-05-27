@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
 const emailUtil = require('../utils/email');
+const crypto = require('crypto');
 
 const BCRYPT_ROUNDS = 12;
 const VERIFY_CODE_EXPIRES_SEC = 180; // 3분
