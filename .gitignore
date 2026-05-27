@@ -1,3 +1,11 @@
 node_modules/
 .env
 db/erd-viewer/dist/
+
+# Local ERD artifacts
+db/erd-viewer/
+db/generate-erd-data.js
+*.erd
+*.pgerd
+*.drawio
+*.dbml
