@@ -44,6 +44,24 @@ exports.isNicknameAvailable = async (nickname) => {
 // 실운영에서 다중 인스턴스라면 Redis로 교체
 const verifyStore = new Map();
 
+// ── 토큰 발급 헬퍼 ──────────────────────────────────────────────────
+const ACCESS_TOKEN_EXPIRES = '1h';
+const REFRESH_TOKEN_EXPIRES = '30d';
+
+function issueTokens({ user_id, role }, auto_login = false) {
+  const access_token = jwt.sign(
+    { user_id, role },
+    process.env.JWT_SECRET,
+    { expiresIn: ACCESS_TOKEN_EXPIRES }
+  );
+  const refresh_token = jwt.sign(
+    { user_id },
+    process.env.JWT_REFRESH_SECRET,
+    { expiresIn: auto_login ? REFRESH_TOKEN_EXPIRES : '1d' }
+  );
+  return { access_token, refresh_token };
+}
+
 exports.sendVerifyCode = async (email) => {
   // 6자리 숫자 코드 생성
   const code = String(Math.floor(100000 + Math.random() * 900000));
