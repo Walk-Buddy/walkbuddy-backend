@@ -4,7 +4,7 @@
  * 직접 수정하지 말고 db/schema.sql 수정 후 npm run erd:gen 또는 npm run db 를 실행하세요.
  */
 
-export const GENERATED_AT = "2026-05-26T15:45:01.047Z";
+export const GENERATED_AT = "2026-05-27T03:08:32.988Z";
 export const TABLES = [
   {
     "id": "users",
