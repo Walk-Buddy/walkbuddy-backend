@@ -9,6 +9,7 @@
     "db": "node db/run-sql.js db/reset.sql && node db/run-sql.js db/schema.sql && node db/generate-erd-data.js && npm --prefix db/erd-viewer run dev",
     "db:apply": "node db/run-sql.js db/reset.sql && node db/run-sql.js db/schema.sql && node db/generate-erd-data.js",
     "db:migrate": "node db/run-sql.js",
+    "import:durunubi": "node scripts/import-durunubi-courses.js",
     "erd:gen": "node db/generate-erd-data.js",
     "erd:dev": "npm run erd:gen && npm --prefix db/erd-viewer run dev"
   },
