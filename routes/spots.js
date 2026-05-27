@@ -18,6 +18,23 @@ function getKakaoAddress(document) {
     return document.road_address_name || document.address_name || null;
 }
 
+function getKakaoSearchRules(category) {
+    if (!isMissing(category)) {
+        return SPOT_CATEGORY_SEARCH_RULES[category];
+    }
+
+    const uniqueRuleMap = new Map();
+
+    for (const rules of Object.values(SPOT_CATEGORY_SEARCH_RULES)) {
+        for (const rule of rules) {
+            const key = `${rule.query}:${rule.category_group_code || ''}`;
+            uniqueRuleMap.set(key, rule);
+        }
+    }
+
+    return Array.from(uniqueRuleMap.values());
+}
+
 router.get('/health', (req, res) => {
     res.json({
         success: true,
@@ -36,15 +53,10 @@ router.get('/search', async (req, res) => {
         min_recommend_pct,
     } = req.query;
 
-    if (!category) {
-        return res.status(400).json({
-            success: false,
-            message: 'category query parameter is required',
-        });
-    }
+    const hasCategory = !isMissing(category);
 
     // 지원하지 않는 카테고리 값은 검색하지 않음
-    if (!SPOT_CATEGORIES.includes(category)) {
+    if (hasCategory && !SPOT_CATEGORIES.includes(category)) {
         return res.status(400).json({
             success: false,
             message: 'unsupported spot category',
@@ -52,43 +64,29 @@ router.get('/search', async (req, res) => {
         });
     }
 
-    if ((!isMissing(x) && isMissing(y)) || (isMissing(x) && !isMissing(y))) {
+    if (isMissing(x) || isMissing(y)) {
         return res.status(400).json({
             success: false,
-            message: 'x and y must be provided together',
+            message: 'x and y query parameters are required',
         });
     }
 
-    if (!isMissing(radius) && (isMissing(x) || isMissing(y))) {
+    const lng = Number(x);
+    const lat = Number(y);
+    const searchRadius = isMissing(radius) ? 3000 : Number(radius);
+
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
         return res.status(400).json({
             success: false,
-            message: 'radius requires x and y',
+            message: 'x and y must be valid numbers',
         });
     }
 
-    const hasLocation = !isMissing(x) && !isMissing(y);
-    let lng = null;
-    let lat = null;
-    let searchRadius = null;
-
-    if (hasLocation) {
-        lng = Number(x);
-        lat = Number(y);
-        searchRadius = isMissing(radius) ? 3000 : Number(radius);
-
-        if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-            return res.status(400).json({
-                success: false,
-                message: 'x and y must be valid numbers',
-            });
-        }
-
-        if (!Number.isFinite(searchRadius) || searchRadius <= 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'radius must be a positive number',
-            });
-        }
+    if (!Number.isFinite(searchRadius) || searchRadius <= 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'radius must be a positive number',
+        });
     }
 
     let tagIdList = [];
@@ -134,16 +132,15 @@ router.get('/search', async (req, res) => {
         });
     }
 
-    //선택한 스팟 카테고리에 해당하는 카카오 검색 규칙 목록 가져옴.
-    const rules = SPOT_CATEGORY_SEARCH_RULES[category];
+    // category가 있으면 해당 카테고리 규칙만 사용하고,
+    // category가 없으면 전체 스팟 카테고리의 카카오 검색 규칙을 사용합니다.
+    const rules = getKakaoSearchRules(category);
 
-    //여러 query의 카카오 api 응답을 모아둘 배열
-    //여러 카카오 query에서 받은 documents를 하나로 합쳐 담을 배열
+    // 여러 카카오 query에서 받은 documents를 하나로 합쳐 담을 배열
     const allDocuments = [];
 
-    //카카오 API 호출
     try {
-        // 카테고리에 연결된 카카오 검색 규칙을 하나씩 실행
+        // 선택된 카테고리가 없으면 모든 스팟 카테고리의 검색 규칙을 실행합니다.
         for (const rule of rules) {
             const params = {
                 query: rule.query,
@@ -156,13 +153,11 @@ router.get('/search', async (req, res) => {
                 params.category_group_code = rule.category_group_code;
             }
 
-            // 위치 조건이 있으면 카카오 API에도 같은 반경을 적용해 가까운 후보만 받습니다.
-            if (hasLocation) {
-                params.x = lng;
-                params.y = lat;
-                params.sort = 'distance';
-                params.radius = searchRadius;
-            }
+            // 기준 위치는 필수이므로 카카오 API에도 같은 반경을 적용해 가까운 후보만 받습니다.
+            params.x = lng;
+            params.y = lat;
+            params.sort = 'distance';
+            params.radius = searchRadius;
 
             // 카카오 장소 검색 API 호출
             const kakaoResponse = await axios.get(
@@ -230,8 +225,10 @@ router.get('/search', async (req, res) => {
         let distanceSelectSql = 'NULL::DOUBLE PRECISION AS distance';
         let orderBySql = 's.created_at DESC';
 
-        queryValues.push(category);
-        whereConditions.push(`s.categories @> ARRAY[$${queryValues.length}]::TEXT[]`);
+        if (hasCategory) {
+            queryValues.push(category);
+            whereConditions.push(`s.categories @> ARRAY[$${queryValues.length}]::TEXT[]`);
+        }
 
         if (tagIdList.length > 0) {
             queryValues.push(tagIdList);
@@ -258,33 +255,31 @@ router.get('/search', async (req, res) => {
             whereConditions.push(`s.recommend_pct >= $${queryValues.length}`);
         }
 
-        if (hasLocation) {
-            queryValues.push(lng);
-            const lngParamIndex = queryValues.length;
+        queryValues.push(lng);
+        const lngParamIndex = queryValues.length;
 
-            queryValues.push(lat);
-            const latParamIndex = queryValues.length;
+        queryValues.push(lat);
+        const latParamIndex = queryValues.length;
 
-            queryValues.push(searchRadius);
-            const radiusParamIndex = queryValues.length;
+        queryValues.push(searchRadius);
+        const radiusParamIndex = queryValues.length;
 
-            distanceSelectSql = `
-                ST_Distance(
-                    s.location,
-                    ST_Point($${lngParamIndex}, $${latParamIndex})::GEOGRAPHY
-                ) AS distance
-            `;
+        distanceSelectSql = `
+            ST_Distance(
+                s.location,
+                ST_Point($${lngParamIndex}, $${latParamIndex})::GEOGRAPHY
+            ) AS distance
+        `;
 
-            whereConditions.push(`
-                ST_DWithin(
-                    s.location,
-                    ST_Point($${lngParamIndex}, $${latParamIndex})::GEOGRAPHY,
-                    $${radiusParamIndex}
-                )
-            `);
+        whereConditions.push(`
+            ST_DWithin(
+                s.location,
+                ST_Point($${lngParamIndex}, $${latParamIndex})::GEOGRAPHY,
+                $${radiusParamIndex}
+            )
+        `);
 
-            orderBySql = 'distance ASC';
-        }
+        orderBySql = 'distance ASC';
 
         const savedSpotsResult = await pool.query(
             `
@@ -333,9 +328,6 @@ router.get('/search', async (req, res) => {
                 ? null
                 : Number(spot.recommend_pct),
             is_saved: true,
-            has_app_data: true,
-            filter_match: 'matched',
-            result_group: 'saved_spot',
         }));
 
         const kakaoCandidates = kakaoSpots
@@ -343,34 +335,26 @@ router.get('/search', async (req, res) => {
             .map((spot) => ({
                 ...spot,
                 is_saved: false,
-                has_app_data: false,
                 tags: [],
                 recommend_pct: null,
-                filter_match: tagIdList.length > 0 || minRecommendPct !== null
-                    ? 'unknown'
-                    : 'category_location_only',
-                result_group: 'kakao_candidate',
             }));
-
-        const spots = [...savedSpots, ...kakaoCandidates];
 
         return res.json({
             success: true,
-            category,
+            category: hasCategory ? category : null,
             filters: {
                 tag_ids: tagIdList,
-                x: hasLocation ? lng : null,
-                y: hasLocation ? lat : null,
-                radius: hasLocation ? searchRadius : null,
+                x: lng,
+                y: lat,
+                radius: searchRadius,
                 min_recommend_pct: minRecommendPct,
             },
             raw_count: allDocuments.length,
             saved_count: savedSpots.length,
             kakao_candidate_count: kakaoCandidates.length,
-            total_count: spots.length,
+            total_count: savedSpots.length + kakaoCandidates.length,
             saved_spots: savedSpots,
             kakao_candidates: kakaoCandidates,
-            spots,
         });
     } catch (error) {
         console.error(error.response?.data || error.message);
@@ -378,7 +362,7 @@ router.get('/search', async (req, res) => {
         //클라이언트에 통일된 에러 응답 반환
         return res.status(500).json({
             success: false,
-            message: 'Failed to fetch data from Kakao API',
+            message: 'Failed to search spots',
         });
     }
 });
@@ -568,202 +552,6 @@ router.post('/kakao', async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Failed to save Kakao spot',
-        });
-    }
-});
-
-// DB에 저장된 스팟을 카테고리, 태그, 위치 반경, 추천도 기준으로 필터링합니다.
-router.get('/filter', async (req, res) => {
-    const {
-        category,
-        tag_ids,
-        x,
-        y,
-        radius,
-        min_recommend_pct,
-    } = req.query;
-
-    try {
-        const whereConditions = ["s.status = 'active'"];
-        const queryValues = [];
-        let distanceSelectSql = 'NULL::DOUBLE PRECISION AS distance';
-        let orderBySql = 's.created_at DESC';
-
-        if (category) {
-            if (!SPOT_CATEGORIES.includes(category)) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'unsupported spot category',
-                    supported_categories: SPOT_CATEGORIES,
-                });
-            }
-
-            queryValues.push(category);
-            whereConditions.push(`s.categories @> ARRAY[$${queryValues.length}]::TEXT[]`);
-        }
-
-        if (tag_ids) {
-            const rawTagIds = Array.isArray(tag_ids) ? tag_ids.join(',') : tag_ids;
-            const tagIdList = rawTagIds
-                .split(',')
-                .map((tagId) => tagId.trim())
-                .filter(Boolean);
-
-            const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-            const hasInvalidTagId = tagIdList.some((tagId) => !uuidPattern.test(tagId));
-
-            if (hasInvalidTagId) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'tag_ids must be comma-separated UUID values',
-                });
-            }
-
-            if (tagIdList.length > 0) {
-                queryValues.push(tagIdList);
-                const tagIdsParamIndex = queryValues.length;
-
-                queryValues.push(tagIdList.length);
-                const tagCountParamIndex = queryValues.length;
-
-                // 선택한 태그를 모두 가진 스팟만 조회합니다.
-                whereConditions.push(`
-                    s.spot_id IN (
-                        SELECT tg.target_id
-                        FROM taggings tg
-                        WHERE tg.target_type = 'spot'
-                        AND tg.tag_id = ANY($${tagIdsParamIndex}::UUID[])
-                        GROUP BY tg.target_id
-                        HAVING COUNT(DISTINCT tg.tag_id) = $${tagCountParamIndex}
-                    )
-                `);
-            }
-        }
-
-        if (min_recommend_pct) {
-            const minRecommendPct = Number(min_recommend_pct);
-
-            if (!Number.isFinite(minRecommendPct) || minRecommendPct < 0 || minRecommendPct > 100) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'min_recommend_pct must be a number between 0 and 100',
-                });
-            }
-
-            queryValues.push(minRecommendPct);
-            whereConditions.push(`s.recommend_pct >= $${queryValues.length}`);
-        }
-
-        if ((!isMissing(x) && isMissing(y)) || (isMissing(x) && !isMissing(y))) {
-            return res.status(400).json({
-                success: false,
-                message: 'x and y must be provided together',
-            });
-        }
-
-        if (!isMissing(x) && !isMissing(y)) {
-            const lng = Number(x);
-            const lat = Number(y);
-            const searchRadius = radius ? Number(radius) : 3000;
-
-            if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'x and y must be valid numbers',
-                });
-            }
-
-            if (!Number.isFinite(searchRadius) || searchRadius <= 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'radius must be a positive number',
-                });
-            }
-
-            queryValues.push(lng);
-            const lngParamIndex = queryValues.length;
-
-            queryValues.push(lat);
-            const latParamIndex = queryValues.length;
-
-            queryValues.push(searchRadius);
-            const radiusParamIndex = queryValues.length;
-
-            distanceSelectSql = `
-                ST_Distance(
-                    s.location,
-                    ST_Point($${lngParamIndex}, $${latParamIndex})::GEOGRAPHY
-                ) AS distance
-            `;
-
-            whereConditions.push(`
-                ST_DWithin(
-                    s.location,
-                    ST_Point($${lngParamIndex}, $${latParamIndex})::GEOGRAPHY,
-                    $${radiusParamIndex}
-                )
-            `);
-
-            orderBySql = 'distance ASC';
-        }
-
-        const spotsResult = await pool.query(
-            `
-            SELECT
-                s.spot_id,
-                s.kakao_place_id,
-                s.name,
-                s.address,
-                s.categories,
-                s.kakao_category_name,
-                s.recommend_pct,
-                ST_X(s.location::GEOMETRY) AS x,
-                ST_Y(s.location::GEOMETRY) AS y,
-                ${distanceSelectSql},
-                COALESCE(
-                    json_agg(
-                        DISTINCT jsonb_build_object(
-                            'tag_id', t.tag_id,
-                            'name', t.name
-                        )
-                    ) FILTER (WHERE t.tag_id IS NOT NULL),
-                    '[]'
-                ) AS tags
-            FROM spots s
-            LEFT JOIN taggings tg_all
-                ON tg_all.target_type = 'spot'
-                AND tg_all.target_id = s.spot_id
-            LEFT JOIN tags t
-                ON t.tag_id = tg_all.tag_id
-                AND t.type = 'spot'
-                AND t.is_active = true
-            WHERE ${whereConditions.join(' AND ')}
-            GROUP BY s.spot_id
-            ORDER BY ${orderBySql}
-            LIMIT 50
-            `,
-            queryValues
-        );
-
-        return res.json({
-            success: true,
-            total_count: spotsResult.rows.length,
-            spots: spotsResult.rows.map((spot) => ({
-                ...spot,
-                x: Number(spot.x),
-                y: Number(spot.y),
-                distance: spot.distance === null ? null : Number(spot.distance),
-                recommend_pct: spot.recommend_pct === null
-                    ? null
-                    : Number(spot.recommend_pct),
-            })),
-        });
-    } catch (error) {
-        console.error(error.message);
-
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to filter spots',
         });
     }
 });
