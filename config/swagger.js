@@ -278,6 +278,40 @@ const swaggerDefinition = {
     // ─────────────────────────────────────────
     // 코스
     // ─────────────────────────────────────────
+    '/api/courses/search': {
+      get: {
+        tags: ['코스'],
+        summary: '코스 검색',
+        description: '기준 좌표 반경 안의 공개 코스를 거리/시간, 후기 기반 난이도·평점, 코스 태그, 포함 스팟 태그로 검색합니다. x는 경도, y는 위도입니다.',
+        parameters: [
+          { name: 'x', in: 'query', required: true, schema: { type: 'number' }, description: '기준 경도(lng)' },
+          { name: 'y', in: 'query', required: true, schema: { type: 'number' }, description: '기준 위도(lat)' },
+          { name: 'radius', in: 'query', schema: { type: 'number', default: 5000 }, description: '검색 반경(m)' },
+          { name: 'min_total_distance', in: 'query', schema: { type: 'number' }, description: '최소 총 길이(m)' },
+          { name: 'max_total_distance', in: 'query', schema: { type: 'number' }, description: '최대 총 길이(m)' },
+          { name: 'min_estimated_duration', in: 'query', schema: { type: 'number' }, description: '최소 예상 소요 시간(분)' },
+          { name: 'max_estimated_duration', in: 'query', schema: { type: 'number' }, description: '최대 예상 소요 시간(분)' },
+          { name: 'difficulty', in: 'query', schema: { type: 'string', enum: ['easy', 'normal', 'medium', 'hard'] }, description: '후기 난이도 평균 기반 필터. medium은 normal로 처리됩니다.' },
+          { name: 'min_avg_rating', in: 'query', schema: { type: 'number', minimum: 0, maximum: 5 }, description: '최소 평균 평점' },
+          { name: 'max_avg_rating', in: 'query', schema: { type: 'number', minimum: 0, maximum: 5 }, description: '최대 평균 평점' },
+          { name: 'course_tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표로 구분한 코스 태그 UUID 목록. tag_ids도 같은 의미로 사용할 수 있습니다.' },
+          { name: 'spot_tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표로 구분한 장소 태그 UUID 목록. 코스에 포함된 스팟들의 태그 합집합 기준입니다.' },
+          { name: 'sort', in: 'query', schema: { type: 'string', enum: ['distance', 'rating', 'latest', 'length', 'duration'], default: 'distance' } },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
+        ],
+        responses: {
+          200: {
+            description: '코스 검색 결과',
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, filters: { type: 'object' }, total_count: { type: 'integer' }, page: { type: 'integer' }, limit: { type: 'integer' }, courses: { type: 'array', items: { type: 'object', properties: { course_id: { type: 'string', format: 'uuid' }, name: { type: 'string' }, description: { type: 'string' }, category: { type: 'string' }, total_distance: { type: 'integer' }, estimated_duration: { type: 'integer' }, distance: { type: 'number' }, avg_rating: { type: 'number', nullable: true }, avg_difficulty_score: { type: 'number', nullable: true }, difficulty: { type: 'string', nullable: true }, review_count: { type: 'integer' }, course_tags: { type: 'array', items: { type: 'object' } }, spot_tags: { type: 'array', items: { type: 'object' } }, is_public: { type: 'boolean' } } } } } } } },
+          },
+          400: {
+            description: '잘못된 검색 조건',
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: false }, message: { type: 'string' } } } } },
+          },
+        },
+      },
+    },
     '/api/courses': {
       get: {
         tags: ['코스'],

@@ -67,6 +67,89 @@ const insertTags = async (tagIds, courseId, userId, client) => {
     );
 };
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DIFFICULTY_ALIASES = {
+  easy: 'easy',
+  normal: 'normal',
+  medium: 'normal',
+  hard: 'hard',
+};
+
+function isMissing(value) {
+  return value === undefined || value === null || value === '';
+}
+
+function createBadRequest(message) {
+  const err = new Error(message);
+  err.status = 400;
+  return err;
+}
+
+function readQueryValue(...values) {
+  const value = values.find((item) => !isMissing(item));
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function parseNumberParam(value, name, { required = false, min = null, max = null } = {}) {
+  if (isMissing(value)) {
+    if (required) throw createBadRequest(`${name} query parameter is required`);
+    return null;
+  }
+
+  const numberValue = Number(Array.isArray(value) ? value[0] : value);
+
+  if (!Number.isFinite(numberValue)) {
+    throw createBadRequest(`${name} must be a valid number`);
+  }
+
+  if (min !== null && numberValue < min) {
+    throw createBadRequest(`${name} must be greater than or equal to ${min}`);
+  }
+
+  if (max !== null && numberValue > max) {
+    throw createBadRequest(`${name} must be less than or equal to ${max}`);
+  }
+
+  return numberValue;
+}
+
+function parseIntegerParam(value, name, { defaultValue, min, max }) {
+  const numberValue = isMissing(value) ? defaultValue : Number(Array.isArray(value) ? value[0] : value);
+
+  if (!Number.isInteger(numberValue) || numberValue < min || numberValue > max) {
+    throw createBadRequest(`${name} must be an integer between ${min} and ${max}`);
+  }
+
+  return numberValue;
+}
+
+function parseUuidList(value, name) {
+  if (isMissing(value)) return [];
+
+  const rawValue = Array.isArray(value) ? value.join(',') : value;
+  const uuidList = rawValue
+    .split(',')
+    .map((tagId) => tagId.trim())
+    .filter(Boolean);
+
+  if (uuidList.some((tagId) => !UUID_PATTERN.test(tagId))) {
+    throw createBadRequest(`${name} must be comma-separated UUID values`);
+  }
+
+  return uuidList;
+}
+
+function normalizeDifficulty(value) {
+  if (isMissing(value)) return null;
+
+  const normalized = DIFFICULTY_ALIASES[String(value).toLowerCase()];
+  if (!normalized) {
+    throw createBadRequest('difficulty must be one of easy, normal, medium, hard');
+  }
+
+  return normalized;
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // 코스 미리보기 (저장 없이 거리·시간·경로 계산)
 // ──────────────────────────────────────────────────────────────────────
@@ -284,6 +367,296 @@ exports.getCourses = async (query) => {
       total: +countRows[0].total,
       page: +page,
       courses: rows,
+    };
+  } finally { client.release(); }
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 코스 검색
+// 기준 좌표 반경, 거리/시간, 후기 기반 난이도·평점, 코스 태그, 포함 스팟 태그로 필터링
+// ──────────────────────────────────────────────────────────────────────
+exports.searchCourses = async (query) => {
+  const lng = parseNumberParam(readQueryValue(query.x, query.lng), 'x', { required: true });
+  const lat = parseNumberParam(readQueryValue(query.y, query.lat), 'y', { required: true });
+  const radius = parseNumberParam(query.radius, 'radius', { min: 1 }) ?? 5000;
+  const minTotalDistance = parseNumberParam(query.min_total_distance, 'min_total_distance', { min: 0 });
+  const maxTotalDistance = parseNumberParam(query.max_total_distance, 'max_total_distance', { min: 0 });
+  const minEstimatedDuration = parseNumberParam(query.min_estimated_duration, 'min_estimated_duration', { min: 0 });
+  const maxEstimatedDuration = parseNumberParam(query.max_estimated_duration, 'max_estimated_duration', { min: 0 });
+  const minAvgRating = parseNumberParam(query.min_avg_rating, 'min_avg_rating', { min: 0, max: 5 });
+  const maxAvgRating = parseNumberParam(query.max_avg_rating, 'max_avg_rating', { min: 0, max: 5 });
+  const difficulty = normalizeDifficulty(query.difficulty);
+  const courseTagIds = parseUuidList(query.course_tag_ids ?? query.tag_ids, 'course_tag_ids');
+  const spotTagIds = parseUuidList(query.spot_tag_ids, 'spot_tag_ids');
+  const page = parseIntegerParam(query.page, 'page', { defaultValue: 1, min: 1, max: 10000 });
+  const limit = parseIntegerParam(query.limit, 'limit', { defaultValue: 20, min: 1, max: 100 });
+  const offset = (page - 1) * limit;
+
+  if (maxTotalDistance !== null && minTotalDistance !== null && maxTotalDistance < minTotalDistance) {
+    throw createBadRequest('max_total_distance must be greater than or equal to min_total_distance');
+  }
+
+  if (maxEstimatedDuration !== null && minEstimatedDuration !== null && maxEstimatedDuration < minEstimatedDuration) {
+    throw createBadRequest('max_estimated_duration must be greater than or equal to min_estimated_duration');
+  }
+
+  if (maxAvgRating !== null && minAvgRating !== null && maxAvgRating < minAvgRating) {
+    throw createBadRequest('max_avg_rating must be greater than or equal to min_avg_rating');
+  }
+
+  const params = [];
+  const conditions = [`c.status = 'active'`, `c.is_public = TRUE`];
+
+  params.push(lng);
+  const lngParamIndex = params.length;
+  params.push(lat);
+  const latParamIndex = params.length;
+  params.push(radius);
+  const radiusParamIndex = params.length;
+
+  const referencePointSql = `ST_Point($${lngParamIndex}, $${latParamIndex})::geography`;
+  const distanceSelectSql = `ST_Distance(c.route_geometry, ${referencePointSql}) AS distance`;
+
+  conditions.push(`ST_DWithin(c.route_geometry, ${referencePointSql}, $${radiusParamIndex})`);
+
+  if (minTotalDistance !== null) {
+    params.push(minTotalDistance);
+    conditions.push(`c.total_distance >= $${params.length}`);
+  }
+
+  if (maxTotalDistance !== null) {
+    params.push(maxTotalDistance);
+    conditions.push(`c.total_distance <= $${params.length}`);
+  }
+
+  if (minEstimatedDuration !== null) {
+    params.push(minEstimatedDuration);
+    conditions.push(`c.estimated_duration >= $${params.length}`);
+  }
+
+  if (maxEstimatedDuration !== null) {
+    params.push(maxEstimatedDuration);
+    conditions.push(`c.estimated_duration <= $${params.length}`);
+  }
+
+  if (difficulty !== null) {
+    params.push(difficulty);
+    conditions.push(`rs.difficulty = $${params.length}`);
+  }
+
+  if (minAvgRating !== null) {
+    params.push(minAvgRating);
+    conditions.push(`rs.avg_rating >= $${params.length}`);
+  }
+
+  if (maxAvgRating !== null) {
+    params.push(maxAvgRating);
+    conditions.push(`rs.avg_rating <= $${params.length}`);
+  }
+
+  if (courseTagIds.length > 0) {
+    params.push(courseTagIds);
+    const tagIdsParamIndex = params.length;
+    params.push(courseTagIds.length);
+    const tagCountParamIndex = params.length;
+
+    conditions.push(`
+      c.course_id IN (
+        SELECT tg.target_id
+        FROM taggings tg
+        JOIN tags t
+          ON t.tag_id = tg.tag_id
+         AND t.type = 'course'
+         AND t.is_active = TRUE
+        WHERE tg.target_type = 'course'
+          AND tg.tag_id = ANY($${tagIdsParamIndex}::uuid[])
+        GROUP BY tg.target_id
+        HAVING COUNT(DISTINCT tg.tag_id) = $${tagCountParamIndex}
+      )
+    `);
+  }
+
+  if (spotTagIds.length > 0) {
+    params.push(spotTagIds);
+    const tagIdsParamIndex = params.length;
+    params.push(spotTagIds.length);
+    const tagCountParamIndex = params.length;
+
+    // 장소 태그는 코스에 포함된 스팟들의 태그 합집합이 선택 태그를 모두 포함하는지로 판단합니다.
+    conditions.push(`
+      c.course_id IN (
+        SELECT cw.course_id
+        FROM course_waypoints cw
+        JOIN taggings tg
+          ON tg.target_type = 'spot'
+         AND tg.target_id = cw.spot_id
+        JOIN tags t
+          ON t.tag_id = tg.tag_id
+         AND t.type = 'spot'
+         AND t.is_active = TRUE
+        WHERE cw.type = 'spot'
+          AND tg.tag_id = ANY($${tagIdsParamIndex}::uuid[])
+        GROUP BY cw.course_id
+        HAVING COUNT(DISTINCT tg.tag_id) = $${tagCountParamIndex}
+      )
+    `);
+  }
+
+  const sort = readQueryValue(query.sort) || 'distance';
+  const orderMap = {
+    distance: 'distance ASC',
+    rating: 'rs.avg_rating DESC NULLS LAST, distance ASC',
+    latest: 'c.created_at DESC',
+    length: 'c.total_distance ASC, distance ASC',
+    duration: 'c.estimated_duration ASC, distance ASC',
+  };
+  const orderBySql = orderMap[sort] || orderMap.distance;
+
+  const baseSql = `
+    WITH review_source AS (
+      SELECT
+        course_id,
+        rating,
+        CASE difficulty
+          WHEN 'easy' THEN 1
+          WHEN 'normal' THEN 2
+          WHEN 'hard' THEN 3
+        END AS difficulty_score
+      FROM course_reviews
+      WHERE status = 'active'
+    ),
+    review_stats AS (
+      SELECT
+        course_id,
+        ROUND(AVG(rating)::numeric, 1) AS avg_rating,
+        ROUND(AVG(difficulty_score)::numeric, 1) AS avg_difficulty_score,
+        CASE
+          WHEN AVG(difficulty_score) IS NULL THEN NULL
+          WHEN AVG(difficulty_score) < 1.5 THEN 'easy'
+          WHEN AVG(difficulty_score) < 2.5 THEN 'normal'
+          ELSE 'hard'
+        END AS difficulty,
+        COUNT(*) AS review_count
+      FROM review_source
+      GROUP BY course_id
+    ),
+    course_tag_agg AS (
+      SELECT
+        tg.target_id AS course_id,
+        jsonb_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name)) AS course_tags
+      FROM taggings tg
+      JOIN tags t
+        ON t.tag_id = tg.tag_id
+       AND t.type = 'course'
+       AND t.is_active = TRUE
+      WHERE tg.target_type = 'course'
+      GROUP BY tg.target_id
+    ),
+    spot_tag_agg AS (
+      SELECT
+        cw.course_id,
+        jsonb_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name)) AS spot_tags
+      FROM course_waypoints cw
+      JOIN taggings tg
+        ON tg.target_type = 'spot'
+       AND tg.target_id = cw.spot_id
+      JOIN tags t
+        ON t.tag_id = tg.tag_id
+       AND t.type = 'spot'
+       AND t.is_active = TRUE
+      WHERE cw.type = 'spot'
+      GROUP BY cw.course_id
+    )
+  `;
+
+  const fromSql = `
+    FROM courses c
+    LEFT JOIN review_stats rs
+      ON rs.course_id = c.course_id
+    LEFT JOIN course_tag_agg ct
+      ON ct.course_id = c.course_id
+    LEFT JOIN spot_tag_agg st
+      ON st.course_id = c.course_id
+    WHERE ${conditions.join(' AND ')}
+  `;
+
+  const listParams = [...params, limit, offset];
+  const limitParamIndex = params.length + 1;
+  const offsetParamIndex = params.length + 2;
+
+  const listSql = `
+    ${baseSql}
+    SELECT
+      c.course_id,
+      c.name,
+      c.description,
+      c.category,
+      c.total_distance,
+      c.estimated_duration,
+      c.is_public,
+      c.created_at,
+      ${distanceSelectSql},
+      rs.avg_rating,
+      rs.avg_difficulty_score,
+      rs.difficulty,
+      COALESCE(rs.review_count, 0) AS review_count,
+      COALESCE(ct.course_tags, '[]'::jsonb) AS course_tags,
+      COALESCE(st.spot_tags, '[]'::jsonb) AS spot_tags
+    ${fromSql}
+    ORDER BY ${orderBySql}
+    LIMIT $${limitParamIndex} OFFSET $${offsetParamIndex}
+  `;
+
+  const countSql = `
+    ${baseSql}
+    SELECT COUNT(*) AS total
+    ${fromSql}
+  `;
+
+  const client = await pool.connect();
+  try {
+    const [{ rows }, { rows: countRows }] = await Promise.all([
+      client.query(listSql, listParams),
+      client.query(countSql, params),
+    ]);
+
+    const courses = rows.map((course) => {
+      const courseTags = course.course_tags || [];
+
+      return {
+        ...course,
+        distance: course.distance === null ? null : Number(course.distance),
+        avg_rating: course.avg_rating === null ? null : Number(course.avg_rating),
+        avg_difficulty_score: course.avg_difficulty_score === null
+          ? null
+          : Number(course.avg_difficulty_score),
+        review_count: Number(course.review_count),
+        course_tags: courseTags,
+        spot_tags: course.spot_tags || [],
+        tags: courseTags,
+      };
+    });
+
+    return {
+      success: true,
+      filters: {
+        x: lng,
+        y: lat,
+        radius,
+        min_total_distance: minTotalDistance,
+        max_total_distance: maxTotalDistance,
+        min_estimated_duration: minEstimatedDuration,
+        max_estimated_duration: maxEstimatedDuration,
+        difficulty,
+        min_avg_rating: minAvgRating,
+        max_avg_rating: maxAvgRating,
+        course_tag_ids: courseTagIds,
+        spot_tag_ids: spotTagIds,
+      },
+      total_count: Number(countRows[0].total),
+      page,
+      limit,
+      courses,
     };
   } finally { client.release(); }
 };

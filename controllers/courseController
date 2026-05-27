@@ -41,6 +41,13 @@ exports.getCourses = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+exports.searchCourses = async (req, res, next) => {
+  try {
+    const result = await courseService.searchCourses(req.query);
+    return res.status(200).json(result);
+  } catch (err) { next(err); }
+};
+
 exports.getCourseById = async (req, res, next) => {
   try {
     const result = await courseService.getCourseById(req.params.course_id, req.userId);
