@@ -32,8 +32,9 @@ exports.createCourseFromWalk = async (req, res, next) => {
     const course = await courseService.createCourseFromWalk(req.userId, req.body);
     return res.status(201).json(course);
   } catch (err) { next(err); }
+};
 
-  exports.getCourses = async (req, res, next) => {
+exports.getCourses = async (req, res, next) => {
   try {
     const result = await courseService.getCourses(req.query);
     return res.status(200).json(result);
@@ -64,5 +65,4 @@ exports.deleteCourse = async (req, res, next) => {
     const result = await courseService.deleteCourse(req.userId, req.params.course_id);
     return res.status(200).json(result);
   } catch (err) { next(err); }
-};
 };
