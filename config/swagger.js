@@ -283,6 +283,7 @@ const swaggerDefinition = {
         tags: ['코스'],
         summary: '코스 검색',
         description: '기준 좌표 반경 안의 공개 코스를 거리/시간, 후기 기반 난이도·평점, 코스 태그, 포함 스팟 태그로 검색합니다. x는 경도, y는 위도입니다.',
+        security: [],
         parameters: [
           { name: 'x', in: 'query', required: true, schema: { type: 'number' }, description: '기준 경도(lng)' },
           { name: 'y', in: 'query', required: true, schema: { type: 'number' }, description: '기준 위도(lat)' },
@@ -302,7 +303,7 @@ const swaggerDefinition = {
         responses: {
           200: {
             description: '코스 검색 결과',
-            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, filters: { type: 'object' }, total_count: { type: 'integer' }, page: { type: 'integer' }, limit: { type: 'integer' }, courses: { type: 'array', items: { type: 'object', properties: { course_id: { type: 'string', format: 'uuid' }, name: { type: 'string' }, description: { type: 'string' }, category: { type: 'string' }, total_distance: { type: 'integer' }, estimated_duration: { type: 'integer' }, distance: { type: 'number' }, avg_rating: { type: 'number', nullable: true }, avg_difficulty_score: { type: 'number', nullable: true }, difficulty: { type: 'string', nullable: true }, review_count: { type: 'integer' }, course_tags: { type: 'array', items: { type: 'object' } }, spot_tags: { type: 'array', items: { type: 'object' } }, is_public: { type: 'boolean' } } } } } } } },
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, filters: { type: 'object', properties: { x: { type: 'number', example: 127.073821318894 }, y: { type: 'number', example: 37.6248431089168 }, radius: { type: 'number', example: 5000 }, min_total_distance: { type: 'number', nullable: true }, max_total_distance: { type: 'number', nullable: true }, min_estimated_duration: { type: 'number', nullable: true }, max_estimated_duration: { type: 'number', nullable: true }, difficulty: { type: 'string', nullable: true, enum: ['easy', 'normal', 'hard'] }, min_avg_rating: { type: 'number', nullable: true }, course_tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } }, spot_tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } } } }, total_count: { type: 'integer' }, page: { type: 'integer' }, limit: { type: 'integer' }, courses: { type: 'array', items: { type: 'object', properties: { course_id: { type: 'string', format: 'uuid' }, name: { type: 'string' }, description: { type: 'string', nullable: true }, category: { type: 'string', nullable: true }, total_distance: { type: 'integer' }, estimated_duration: { type: 'integer' }, is_public: { type: 'boolean' }, created_at: { type: 'string', format: 'date-time' }, distance: { type: 'number' }, avg_rating: { type: 'number', nullable: true }, avg_difficulty_score: { type: 'number', nullable: true }, difficulty: { type: 'string', nullable: true }, review_count: { type: 'integer' }, course_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } } }, spot_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } } }, tags: { type: 'array', items: { type: 'object' }, description: 'course_tags와 같은 값' } } } } } } } },
           },
           400: {
             description: '잘못된 검색 조건',
@@ -388,6 +389,65 @@ const swaggerDefinition = {
     // ─────────────────────────────────────────
     // 스팟
     // ─────────────────────────────────────────
+    '/api/spots/search': {
+      get: {
+        tags: ['스팟'],
+        summary: '스팟 통합 검색',
+        description: '선택한 앱 스팟 카테고리 기준으로 카카오 API 후보와 DB 저장 스팟을 함께 검색합니다. DB 저장 스팟에는 태그, 추천도, 반경 필터를 적용할 수 있습니다.',
+        security: [],
+        parameters: [
+          { name: 'category', in: 'query', required: true, schema: { type: 'string', enum: ['산', '숲·휴양림', '수목원·정원', '강·하천', '호수·저수지', '계곡·폭포', '해수욕장·해변', '생태·서식지', '공원·광장'] }, description: '앱 기준 스팟 카테고리' },
+          { name: 'tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표로 구분한 스팟 태그 UUID 목록. 선택한 태그를 모두 가진 DB 저장 스팟만 saved_spots에 포함됩니다.' },
+          { name: 'x', in: 'query', schema: { type: 'number' }, description: '기준 경도(lng). y와 함께 전달하면 카카오 API와 DB 모두 반경 검색을 적용합니다.' },
+          { name: 'y', in: 'query', schema: { type: 'number' }, description: '기준 위도(lat). x와 함께 전달하면 카카오 API와 DB 모두 반경 검색을 적용합니다.' },
+          { name: 'radius', in: 'query', schema: { type: 'number', default: 3000 }, description: '검색 반경(m). x, y가 있을 때 사용됩니다.' },
+          { name: 'min_recommend_pct', in: 'query', schema: { type: 'number', minimum: 0, maximum: 100 }, description: 'DB 저장 스팟의 최소 추천도' },
+        ],
+        responses: {
+          200: {
+            description: '스팟 통합 검색 결과',
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, category: { type: 'string', example: '강·하천' }, filters: { type: 'object', properties: { tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } }, x: { type: 'number', nullable: true }, y: { type: 'number', nullable: true }, radius: { type: 'number', nullable: true }, min_recommend_pct: { type: 'number', nullable: true } } }, raw_count: { type: 'integer', description: '카카오 API에서 받은 원본 document 개수' }, saved_count: { type: 'integer' }, kakao_candidate_count: { type: 'integer' }, total_count: { type: 'integer' }, saved_spots: { type: 'array', items: { type: 'object', properties: { spot_id: { type: 'string', format: 'uuid' }, kakao_place_id: { type: 'string', nullable: true }, name: { type: 'string' }, address: { type: 'string', nullable: true }, categories: { type: 'array', items: { type: 'string' } }, kakao_category_name: { type: 'string', nullable: true }, recommend_pct: { type: 'number', nullable: true }, x: { type: 'number' }, y: { type: 'number' }, distance: { type: 'number', nullable: true }, tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } } }, is_saved: { type: 'boolean', example: true }, has_app_data: { type: 'boolean', example: true }, filter_match: { type: 'string', example: 'matched' }, result_group: { type: 'string', example: 'saved_spot' } } } }, kakao_candidates: { type: 'array', items: { type: 'object', properties: { kakao_place_id: { type: 'string' }, name: { type: 'string' }, kakao_category_name: { type: 'string', nullable: true }, categories: { type: 'array', items: { type: 'string' } }, address: { type: 'string', nullable: true }, x: { type: 'string' }, y: { type: 'string' }, distance: { type: 'number', nullable: true }, is_saved: { type: 'boolean', example: false }, has_app_data: { type: 'boolean', example: false }, tags: { type: 'array', items: { type: 'object' }, example: [] }, recommend_pct: { type: 'number', nullable: true }, filter_match: { type: 'string', enum: ['unknown', 'category_location_only'] }, result_group: { type: 'string', example: 'kakao_candidate' } } } }, spots: { type: 'array', items: { type: 'object' }, description: 'saved_spots와 kakao_candidates를 합친 배열' } } } } },
+          },
+          400: {
+            description: '잘못된 검색 조건',
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: false }, message: { type: 'string' } } } } },
+          },
+          500: {
+            description: '카카오 API 키 누락 또는 서버 오류',
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: false }, message: { type: 'string' } } } } },
+          },
+        },
+      },
+    },
+    '/api/spots/kakao': {
+      post: {
+        tags: ['스팟'],
+        summary: '카카오 스팟 저장/조회',
+        description: '사용자가 카카오 API 검색 결과에서 특정 장소를 선택했을 때 호출합니다. kakao_place_id 기준으로 이미 저장된 스팟이면 기존 데이터를 반환하고, 없으면 새 스팟으로 저장합니다.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { type: 'object', required: ['kakao_place_id', 'name', 'categories', 'x', 'y'], properties: { kakao_place_id: { type: 'string', description: '카카오 Local API documents[].id' }, name: { type: 'string', description: '카카오 Local API documents[].place_name' }, kakao_category_name: { type: 'string', nullable: true, example: '여행 > 공원' }, categories: { type: 'array', items: { type: 'string', enum: ['산', '숲·휴양림', '수목원·정원', '강·하천', '호수·저수지', '계곡·폭포', '해수욕장·해변', '생태·서식지', '공원·광장'] }, minItems: 1 }, address: { type: 'string', nullable: true, description: '이미 정리된 주소. road_address_name이 없을 때 사용 가능' }, road_address_name: { type: 'string', nullable: true, description: '카카오 도로명 주소. 있으면 우선 저장' }, address_name: { type: 'string', nullable: true, description: '카카오 지번 주소. 도로명 주소가 없을 때 fallback' }, x: { type: 'number', description: '장소 경도(lng)' }, y: { type: 'number', description: '장소 위도(lat)' } } } } },
+        },
+        responses: {
+          200: {
+            description: '이미 저장된 스팟 반환',
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, is_created: { type: 'boolean', example: false }, spot: { type: 'object', properties: { spot_id: { type: 'string', format: 'uuid' }, kakao_place_id: { type: 'string' }, name: { type: 'string' }, address: { type: 'string', nullable: true }, categories: { type: 'array', items: { type: 'string' } }, kakao_category_name: { type: 'string', nullable: true }, recommend_pct: { type: 'number', nullable: true } } } } } } },
+          },
+          201: {
+            description: '새 스팟 저장 완료',
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, is_created: { type: 'boolean', example: true }, spot: { type: 'object', properties: { spot_id: { type: 'string', format: 'uuid' }, kakao_place_id: { type: 'string' }, name: { type: 'string' }, address: { type: 'string', nullable: true }, categories: { type: 'array', items: { type: 'string' } }, kakao_category_name: { type: 'string', nullable: true }, recommend_pct: { type: 'number', nullable: true } } } } } } },
+          },
+          400: {
+            description: '필수값 누락 또는 잘못된 카테고리/좌표',
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: false }, message: { type: 'string' } } } } },
+          },
+          409: {
+            description: '저장된 스팟이 비활성 상태라 사용할 수 없음',
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: false }, message: { type: 'string', example: 'This spot is not available' } } } } },
+          },
+        },
+      },
+    },
     '/api/spots': {
       get: {
         tags: ['스팟'],
