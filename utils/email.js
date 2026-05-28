@@ -44,4 +44,10 @@ exports.sendVerificationEmail = async (to, code) => {
       </div>
     `,
   });
+
+};
+exports.sendEmail = async ({ to, subject, text, html }) => {
+  const transporter = createTransporter();
+  const from = process.env.MAIL_FROM || `WalkBuddy <${process.env.MAIL_USER}>`;
+  await transporter.sendMail({ from, to, subject, text, html });
 };
