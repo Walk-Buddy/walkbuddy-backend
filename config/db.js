@@ -39,6 +39,10 @@ function buildPoolConfig() {
     cfg.password = process.env.DB_PASSWORD;
   }
 
+  if (process.env.DB_SSL === 'true') {
+    cfg.ssl = { rejectUnauthorized: false };
+  }
+
   return cfg;
 }
 
