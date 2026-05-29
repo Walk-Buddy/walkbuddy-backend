@@ -150,6 +150,102 @@ function normalizeDifficulty(value) {
   return normalized;
 }
 
+// 두루누비 description 문자열을 파싱하는 함수
+// 예: "@@summary\n- ..." 형태를 { summary: [...] } 형태로 변환합니다.
+
+function parseDescriptionSections(description){
+  const sections={
+    summary: [],
+    content: null,
+    tour_info:[],
+    traveler_info:[],
+    stamp_location: null,
+    region: null,
+    cycle:null,
+
+  };
+
+  //description이 없으면 빈 sections 반환
+  if(!description) return sections;
+  
+  const blocks = description
+  .split(/\n(?=@@)/)
+  .map((block)=>block.trim())
+  .filter(Boolean);
+
+  for(const block of blocks)
+  {
+    const [firstLine, ...bodyLines]=block.split('\n');
+    const key=firstLine.replace(/^@@/,'').trim();
+    const body=bodyLines.join('\n').trim();
+
+    if(key==='summary'){
+      sections.summary = parseListLines(body);
+    }
+    if(key==='content'){
+      sections.content=body||null;
+    }
+     if (key === 'tour_info') {
+      sections.tour_info = parseListLines(body);
+    }
+    if(key==='traveler_info'){
+      const{list,stampLocation}=parseTravelerInfo(body);
+      sections.traveler_info=list;
+      sections.stamp_location=stampLocation;
+    }
+    if(key==='region'){
+      sections.region=body||null;
+    }
+    if(key==='cycle'){
+      sections.cycle=body||null;
+    }
+  }
+  
+  return sections;
+}
+
+function parseListLines(text){
+  if(!text) return [];
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/^[-*]\s*/, '').trim())
+    .filter(Boolean);
+} 
+
+function parseTravelerInfo(text){
+  if(!text) {
+    return{list:[],stampLocation:null};
+  }
+
+  const stampMatch=text.match(/\*\s*[^\n]*스탬프함 위치\n([\s\S]*)/);
+
+  const travelerText=stampMatch
+  ?text.slice(0,stampMatch.index).trim()
+  : text.trim();
+
+  return{
+    list:parseListLines(travelerText),
+    stampLocation:stampMatch? stampMatch[1].trim():null,
+  };
+}
+
+function buildCourseDetailDescription(course) {
+  if (course.data_source !== '한국관광공사_두루누비') {
+    return {
+      description: course.description,
+    };
+  }
+
+  const sections = parseDescriptionSections(course.description);
+
+  return {
+    description: sections.summary.join('\n') || sections.content || course.description,
+    description_sections: sections,
+  };
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // 코스 미리보기 (저장 없이 거리·시간·경로 계산)
 // ──────────────────────────────────────────────────────────────────────
@@ -661,7 +757,7 @@ exports.getCourseById = async (courseId, userId) => {
       `SELECT
          c.course_id, c.name, c.description, c.category,
          c.total_distance, c.estimated_duration,
-         c.is_public, c.owner_id, c.created_at, c.updated_at,
+         c.is_public, c.owner_id, c.data_source, c.created_at, c.updated_at,
          ST_AsGeoJSON(c.route_geometry)::json AS route,
          ROUND(AVG(cr.rating)::numeric, 1)        AS avg_rating,
          ROUND(AVG(CASE cr.difficulty
@@ -696,7 +792,7 @@ exports.getCourseById = async (courseId, userId) => {
          s.name AS spot_name,
          ST_Y(s.location::geometry) AS spot_lat,
          ST_X(s.location::geometry) AS spot_lng,
-         s.category AS spot_category
+         s.categories AS spot_categories
        FROM course_waypoints cw
        LEFT JOIN spots s ON s.spot_id = cw.spot_id
        WHERE cw.course_id = $1
@@ -729,7 +825,7 @@ exports.getCourseById = async (courseId, userId) => {
       is_bookmarked = bm.length > 0;
     }
 
-    return { ...course, waypoints: spots, tags, is_bookmarked };
+    return { ...course,  ...buildCourseDetailDescription(course), waypoints: spots, tags, is_bookmarked };
   } finally { client.release(); }
 };
 
