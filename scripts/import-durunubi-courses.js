@@ -372,7 +372,7 @@ async function importCourse(client, item, ownerId, tagId) {
        $5, $6, TRUE,
        $7, $8, 'active'
      )
-     ON CONFLICT (source_id) WHERE source_id IS NOT NULL
+     ON CONFLICT (data_source, source_id) WHERE source_id IS NOT NULL
      DO UPDATE SET
        owner_id = EXCLUDED.owner_id,
        name = EXCLUDED.name,

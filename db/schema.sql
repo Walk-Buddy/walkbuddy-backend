@@ -535,9 +535,10 @@ CREATE INDEX ix_courses_owner_id
     ON courses (owner_id);
 
 -- 공공 데이터 중복 등록 방지용 Partial Index
--- source_id 가 있는 행에만 적용
-CREATE UNIQUE INDEX uix_courses_source_id
-    ON courses (source_id)
+-- 같은 출처(data_source) 안에서 같은 원본 ID(source_id)만 중복으로 판단
+-- 예: 두루누비 source_id='1' 과 서울시 source_id='1' 은 서로 다른 코스로 허용
+CREATE UNIQUE INDEX uix_courses_data_source_source_id
+    ON courses (data_source, source_id)
     WHERE source_id IS NOT NULL;
 
 -- 공개 여부 + 상태 복합 인덱스
