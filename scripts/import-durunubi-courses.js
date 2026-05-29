@@ -135,22 +135,35 @@ function pick(item, keys) {
 }
 
 function buildDescription(item) {
-  const parts = [
-    ['코스 개요', pick(item, ['crsSummary'])],
-    ['코스 설명', pick(item, ['crsContents'])],
-    ['관광 포인트', pick(item, ['crsTourInfo'])],
-    ['여행자 정보', pick(item, ['travelerinfo', 'travelerInfo'])],
-    ['행정구역', pick(item, ['sigun'])],
-    ['순환형태', pick(item, ['crsCycle'])],
+  //파싱하기 쉬운 내부 섹션 키로 저장
+  //crsSummary -> @@summary, crsContents -> @@content
+  const sections = [
+    // 배열의 첫 번째 값은 우리가 정한 내부 key입니다.
+    // 배열의 두 번째 값은 두루누비 API 원본 필드에서 꺼낸 값입니다.
+    ['summary', pick(item, ['crsSummary'])],
+    ['content', pick(item, ['crsContents'])],
+    ['tour_info', pick(item, ['crsTourInfo'])],
+    ['traveler_info', pick(item, ['travelerinfo', 'travelerInfo'])],
+    ['region', pick(item, ['sigun'])],
+    ['cycle', pick(item, ['crsCycle'])],
   ];
 
-  return parts
-    .filter(([, value]) => value)
-    .map(([label, value]) => `[${label}]\n${cleanText(value)}`)
+  return sections
+    .map(([key, value]) => {
+      const text = cleanText(value);
+
+      if (!text) { return null; }
+
+      return `@@${key}\n${text}`;
+    })
+
+    .filter(Boolean)
     .join('\n\n') || null;
 }
 
 function cleanText(value) {
+  if (!value) return null;
+
   return decodeHtmlEntities(String(value))
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/p\s*>/gi, '\n')
