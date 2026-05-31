@@ -337,7 +337,74 @@ const swaggerDefinition = {
         summary: '코스 등록',
         requestBody: {
           required: true,
-          content: { 'application/json': { schema: { type: 'object', required: ['name', 'route'], properties: { name: { type: 'string' }, description: { type: 'string' }, route: { type: 'object' }, spots: { type: 'array', items: { type: 'string', format: 'uuid' } }, tags: { type: 'array', items: { type: 'string', format: 'uuid' } }, difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'] }, is_public: { type: 'boolean' } } } } },
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name'],
+                properties: {
+                  name: { type: 'string', example: '산책로' },
+                  description: { type: 'string', example: '설명' },
+                  category: { type: 'string', example: '둘레길' },
+                  route: {
+                    type: 'object',
+                    description: 'GeoJSON LineString. route 또는 waypoints 중 하나를 보내야 합니다.',
+                    required: ['type', 'coordinates'],
+                    properties: {
+                      type: { type: 'string', enum: ['LineString'], example: 'LineString' },
+                      coordinates: {
+                        type: 'array',
+                        minItems: 2,
+                        items: {
+                          type: 'array',
+                          minItems: 2,
+                          maxItems: 2,
+                          items: { type: 'number' },
+                          example: [126.9490481, 37.5457837],
+                        },
+                      },
+                    },
+                  },
+                  waypoints: {
+                    type: 'array',
+                    description: '경유지 객체 배열. route 또는 waypoints 중 하나를 보내야 합니다.',
+                    minItems: 2,
+                    items: {
+                      oneOf: [
+                        {
+                          type: 'object',
+                          required: ['type', 'spot_id'],
+                          properties: {
+                            type: { type: 'string', enum: ['spot'], example: 'spot' },
+                            spot_id: { type: 'string', format: 'uuid' },
+                          },
+                        },
+                        {
+                          type: 'object',
+                          required: ['type', 'lat', 'lng'],
+                          properties: {
+                            type: { type: 'string', enum: ['pin'], example: 'pin' },
+                            lat: { type: 'number', example: 37.5457837 },
+                            lng: { type: 'number', example: 126.9490481 },
+                          },
+                        },
+                      ],
+                    },
+                  },
+                  tag_ids: {
+                    type: 'array',
+                    items: { type: 'string', format: 'uuid' },
+                    example: [],
+                  },
+                  is_public: { type: 'boolean', example: true },
+                },
+                oneOf: [
+                  { required: ['route'] },
+                  { required: ['waypoints'] },
+                ],
+              },
+            },
+          },
         },
         responses: {
           201: {
