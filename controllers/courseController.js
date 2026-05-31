@@ -78,12 +78,17 @@ exports.getCourseById = async (req, res, next) => {
 
 exports.updateCourse = async (req, res, next) => {
   try {
-    const { name, waypoints } = req.body;
+    const { name } = req.body;
+    const hasWaypointInput = req.body.waypoints !== undefined || req.body.route !== undefined;
+    const waypoints = hasWaypointInput ? normalizeCourseWaypoints(req.body) : undefined;
     if (name !== undefined && !name?.trim())
       return res.status(400).json({ success: false, message: '코스 이름은 필수입니다.' });
-    if (waypoints !== undefined && (!Array.isArray(waypoints) || waypoints.length < 2))
+    if (hasWaypointInput && (!Array.isArray(waypoints) || waypoints.length < 2))
       return res.status(400).json({ success: false, message: '경유지는 최소 2개 이상이어야 합니다.' });
-    const result = await courseService.updateCourse(req.user.user_id, req.params.course_id, req.body);
+    const result = await courseService.updateCourse(req.user.user_id, req.params.course_id, {
+      ...req.body,
+      ...(hasWaypointInput ? { waypoints } : {}),
+    });
     return res.status(200).json(result);
   } catch (err) { next(err); }
 };
