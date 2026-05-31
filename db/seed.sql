@@ -20,7 +20,7 @@ INSERT INTO users (
 (
     '00000000-0000-4000-8000-000000000001',
     'admin@walkbuddy.test',
-    '$2b$10$walkbuddyseedadminpasswordhash000000000000000000',
+    '$2b$10$CYZf.uTRaYS7e8Sdz6BjM.A2lf9Ms.wvHmc77oCm39Pt4B0azAvh6',
     '관리자',
     'https://example.com/profiles/admin.png',
     NULL,
@@ -36,7 +36,7 @@ INSERT INTO users (
 (
     '00000000-0000-4000-8000-000000000002',
     'yuna@test.com',
-    '$2b$10$walkbuddyseedyunapasswordhash0000000000000000000',
+    '$2b$10$CYZf.uTRaYS7e8Sdz6BjM.A2lf9Ms.wvHmc77oCm39Pt4B0azAvh6',
     '유나',
     'https://example.com/profiles/yuna.png',
     NULL,
@@ -52,7 +52,7 @@ INSERT INTO users (
 (
     '00000000-0000-4000-8000-000000000003',
     'minjun@test.com',
-    '$2b$10$walkbuddyseedminjunpasswordhash00000000000000000',
+    '$2b$10$CYZf.uTRaYS7e8Sdz6BjM.A2lf9Ms.wvHmc77oCm39Pt4B0azAvh6',
     '민준',
     'https://example.com/profiles/minjun.png',
     NULL,
@@ -84,7 +84,7 @@ INSERT INTO users (
 (
     '00000000-0000-4000-8000-000000000005',
     'stop@test.com',
-    '$2b$10$walkbuddyseedsuspendedhash00000000000000000000',
+    '$2b$10$CYZf.uTRaYS7e8Sdz6BjM.A2lf9Ms.wvHmc77oCm39Pt4B0azAvh6',
     '정지유저',
     NULL,
     NULL,
