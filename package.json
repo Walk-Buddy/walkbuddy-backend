@@ -11,7 +11,8 @@
     "db:migrate": "node db/run-sql.js",
     "import:durunubi": "node scripts/import-durunubi-courses.js",
     "erd:gen": "node db/generate-erd-data.js",
-    "erd:dev": "npm run erd:gen && npm --prefix db/erd-viewer run dev"
+    "erd:dev": "npm run erd:gen && npm --prefix db/erd-viewer run dev",
+    "db:seed": "node db/run-sql.js db/seed.sql"
   },
   "dependencies": {
     "axios": "^1.6.0",
