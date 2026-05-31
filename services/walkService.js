@@ -8,13 +8,12 @@ const buildLineString = (gps_points) => {
 
 // ──────────────────────────────────────────────────────────────────────
 // 산책 시작
-// course_id: 기존 코스 기반 산책이면 전달, 자유 경로면 null
 // ──────────────────────────────────────────────────────────────────────
 exports.startWalk = async (userId, courseId) => {
   const { rows: [record] } = await pool.query(
     `INSERT INTO walk_records (user_id, course_id)
      VALUES ($1, $2)
-     RETURNING walk_record_id, started_at`,
+     RETURNING walk_record_id, course_id, started_at`,
     [userId, courseId]
   );
   return record;
@@ -22,12 +21,10 @@ exports.startWalk = async (userId, courseId) => {
 
 // ──────────────────────────────────────────────────────────────────────
 // 산책 종료
-// gps_points: 프론트에서 수집한 GPS 좌표 배열 [{ lat, lng }, ...]
-// actual_route, total_distance, duration 저장
 // ──────────────────────────────────────────────────────────────────────
 exports.endWalk = async (userId, walkRecordId, gps_points) => {
   const { rows } = await pool.query(
-    `SELECT walk_record_id FROM walk_records
+    `SELECT walk_record_id, course_id FROM walk_records
      WHERE walk_record_id = $1 AND user_id = $2 AND ended_at IS NULL`,
     [walkRecordId, userId]
   );
@@ -39,44 +36,77 @@ exports.endWalk = async (userId, walkRecordId, gps_points) => {
 
   const wkt = buildLineString(gps_points);
 
+  // 완주 여부: 실제 이동거리가 코스 총거리의 95% 이상
   const { rows: [updated] } = await pool.query(
     `UPDATE walk_records
      SET actual_route   = $1::geography,
          ended_at       = NOW(),
-         total_distance = ROUND(ST_Length($1::geography)),
-         duration       = ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60)
+         total_distance = ROUND(ST_Length($1::geography))::int,
+         duration       = ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60)::int,
+         is_completed   = (
+           SELECT COALESCE(
+             ROUND(ST_Length($1::geography)) >= c.total_distance * 0.95,
+             false
+           )
+           FROM courses c
+           WHERE c.course_id = walk_records.course_id
+         )
      WHERE walk_record_id = $2
-     RETURNING walk_record_id, total_distance, duration, started_at, ended_at`,
+     RETURNING walk_record_id, total_distance, duration, is_completed, started_at, ended_at`,
     [wkt, walkRecordId]
   );
   return updated;
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 이동 중 스팟 등록
-// 현재 위치(lat, lng)를 기준으로 spots INSERT
+// 산책 기록 목록 조회
 // ──────────────────────────────────────────────────────────────────────
-exports.addSpotDuringWalk = async (userId, walkRecordId, body) => {
-  const { lat, lng, name, description } = body;
-
-  // 진행 중인 기록인지 확인
+exports.getWalkList = async (userId) => {
   const { rows } = await pool.query(
-    `SELECT walk_record_id FROM walk_records
-     WHERE walk_record_id = $1 AND user_id = $2 AND ended_at IS NULL`,
+    `SELECT
+       wr.walk_record_id,
+       c.name        AS course_name,
+       wr.total_distance,
+       wr.duration,
+       wr.is_completed,
+       wr.started_at
+     FROM walk_records wr
+     LEFT JOIN courses c ON c.course_id = wr.course_id
+     WHERE wr.user_id = $1
+     ORDER BY wr.started_at DESC`,
+    [userId]
+  );
+  return { total: rows.length, walks: rows };
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 산책 기록 상세 조회
+// ──────────────────────────────────────────────────────────────────────
+exports.getWalkDetail = async (userId, walkRecordId) => {
+  const { rows } = await pool.query(
+    `SELECT
+       wr.walk_record_id,
+       wr.total_distance,
+       wr.duration,
+       wr.is_completed,
+       wr.started_at,
+       wr.ended_at,
+       ST_AsGeoJSON(wr.actual_route)::json AS actual_route,
+       json_build_object(
+         'course_id',          c.course_id,
+         'name',               c.name,
+         'total_distance',     c.total_distance,
+         'estimated_duration', c.estimated_duration
+       ) AS course
+     FROM walk_records wr
+     LEFT JOIN courses c ON c.course_id = wr.course_id
+     WHERE wr.walk_record_id = $1 AND wr.user_id = $2`,
     [walkRecordId, userId]
   );
   if (!rows.length) {
-    const err = new Error('진행 중인 산책 기록을 찾을 수 없습니다.');
+    const err = new Error('산책 기록을 찾을 수 없습니다.');
     err.status = 404;
     throw err;
   }
-
-  const { rows: [spot] } = await pool.query(
-    `INSERT INTO spots (name, location, address)
-     VALUES ($1, ST_Point($2, $3)::geography, $4)
-     RETURNING spot_id, name`,
-    [name, lng, lat, description || null]
-  );
-
-  return spot;
+  return rows[0];
 };
