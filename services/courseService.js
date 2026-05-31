@@ -393,7 +393,7 @@ exports.getCourses = async (query) => {
   const offset = (page - 1) * limit;
   const client = await pool.connect();
   try {
-    const conditions = [`c.status = 'active'`];
+    const conditions = [`c.status = 'active'`, `c.is_public=TRUE`];
     const params = [];
     let idx = 1;
 
