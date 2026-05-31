@@ -871,7 +871,7 @@ exports.updateCourse = async (userId, courseId, body) => {
     // 경유지 변경 시 route_geometry 재계산
     let extraSets = '';
     let extraParams = [];
-    let paramIdx = 4; // $1=name $2=description $3=category $4=is_public 이후
+    let paramIdx = 5; // $1=name $2=description $3=category $4=is_public 이후
 
     if (waypoints) {
       const wkt = await buildLineString(waypoints, client);
