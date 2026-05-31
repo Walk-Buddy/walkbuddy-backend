@@ -38,23 +38,26 @@ exports.endWalk = async (userId, walkRecordId, gps_points) => {
 
   // 완주 여부: 실제 이동거리가 코스 총거리의 95% 이상
   const { rows: [updated] } = await pool.query(
-    `UPDATE walk_records
-     SET actual_route   = $1::geography,
-         ended_at       = NOW(),
-         total_distance = ROUND(ST_Length($1::geography))::int,
-         duration       = ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60)::int,
-         is_completed   = (
-           SELECT COALESCE(
-             ROUND(ST_Length($1::geography)) >= c.total_distance * 0.95,
-             false
-           )
-           FROM courses c
-           WHERE c.course_id = walk_records.course_id
+  `UPDATE walk_records
+   SET actual_route   = $1::geography,
+       ended_at       = NOW(),
+       total_distance = ROUND(ST_Length($1::geography))::int,
+       duration       = ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60)::int,
+       is_completed   = CASE
+         WHEN walk_records.course_id IS NULL THEN true  -- 자유 산책: 종료 = 완료
+         ELSE COALESCE(
+           (
+             SELECT ROUND(ST_Length($1::geography)) >= c.total_distance * 0.95
+             FROM courses c
+             WHERE c.course_id = walk_records.course_id
+           ),
+           false
          )
-     WHERE walk_record_id = $2
-     RETURNING walk_record_id, total_distance, duration, is_completed, started_at, ended_at`,
-    [wkt, walkRecordId]
-  );
+       END
+   WHERE walk_record_id = $2
+   RETURNING walk_record_id, total_distance, duration, is_completed, started_at, ended_at`,
+  [wkt, walkRecordId]
+);
   return updated;
 };
 

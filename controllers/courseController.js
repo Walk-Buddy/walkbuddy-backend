@@ -19,7 +19,7 @@ exports.createCourse = async (req, res, next) => {
       return res.status(400).json({ success: false, message: '코스 이름은 100자 이하여야 합니다.' });
     if (!Array.isArray(waypoints) || waypoints.length < 2)
       return res.status(400).json({ success: false, message: '경유지는 최소 2개 이상이어야 합니다.' });
-    const course = await courseService.createCourse(req.userId, req.body);
+    const course = await courseService.createCourse(req.user.user_id, req.body);
     return res.status(201).json(course);
   } catch (err) { next(err); }
 };
@@ -29,7 +29,7 @@ exports.createCourseFromWalk = async (req, res, next) => {
     const { walk_record_id, name } = req.body;
     if (!walk_record_id || !name)
       return res.status(400).json({ success: false, message: 'walk_record_id, name은 필수입니다.' });
-    const course = await courseService.createCourseFromWalk(req.userId, req.body);
+    const course = await courseService.createCourseFromWalk(req.user.user_id, req.body);
     return res.status(201).json(course);
   } catch (err) { next(err); }
 };
