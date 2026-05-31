@@ -96,7 +96,7 @@ const swaggerDefinition = {
         responses: {
           200: {
             description: '인증 결과',
-            content: { 'application/json': { schema: { type: 'object', properties: { verified: { type: 'boolean', example: true } } } } },
+            content: { 'application/json': { schema: { type: 'object', properties: { verified: { type: 'boolean', example: true }, verify_token: { type: 'string', description: '회원가입 시 사용할 인증 토큰' } } } } },
           },
         },
       },
@@ -107,7 +107,7 @@ const swaggerDefinition = {
         summary: '회원가입',
         requestBody: {
           required: true,
-          content: { 'application/json': { schema: { type: 'object', required: ['email', 'password', 'nickname'], properties: { email: { type: 'string', format: 'email' }, password: { type: 'string', format: 'password' }, nickname: { type: 'string' } } } } },
+          content: { 'application/json': { schema: { type: 'object', required: ['email', 'password', 'nickname', 'verify_token'], properties: { email: { type: 'string', format: 'email' }, password: { type: 'string', format: 'password' }, nickname: { type: 'string' }, verify_token: { type: 'string', description: '이메일 인증 확인 후 받은 토큰' } } } } },
         },
         responses: {
           201: {
@@ -145,7 +145,7 @@ const swaggerDefinition = {
         security: [],
         requestBody: {
           required: true,
-          content: { 'application/json': { schema: { type: 'object', required: ['kakao_access_token'], properties: { kakao_access_token: { type: 'string' } } } } },
+          content: { 'application/json': { schema: { type: 'object', required: ['code'], properties: { code: { type: 'string', description: '카카오 OAuth 인가코드 (?code= 값)' } } } } },
         },
         responses: {
           200: {
