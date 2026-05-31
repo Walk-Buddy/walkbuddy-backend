@@ -50,7 +50,7 @@ exports.searchCourses = async (req, res, next) => {
 
 exports.getCourseById = async (req, res, next) => {
   try {
-    const result = await courseService.getCourseById(req.params.course_id, req.userId);
+    const result = await courseService.getCourseById(req.params.course_id, req.user?.user_id);
     return res.status(200).json(result);
   } catch (err) { next(err); }
 };
@@ -62,14 +62,14 @@ exports.updateCourse = async (req, res, next) => {
       return res.status(400).json({ success: false, message: '코스 이름은 필수입니다.' });
     if (waypoints !== undefined && (!Array.isArray(waypoints) || waypoints.length < 2))
       return res.status(400).json({ success: false, message: '경유지는 최소 2개 이상이어야 합니다.' });
-    const result = await courseService.updateCourse(req.userId, req.params.course_id, req.body);
+    const result = await courseService.updateCourse(req.user.user_id, req.params.course_id, req.body);
     return res.status(200).json(result);
   } catch (err) { next(err); }
 };
 
 exports.deleteCourse = async (req, res, next) => {
   try {
-    const result = await courseService.deleteCourse(req.userId, req.params.course_id);
+    const result = await courseService.deleteCourse(req.user.user_id, req.params.course_id);
     return res.status(200).json(result);
   } catch (err) { next(err); }
 };
