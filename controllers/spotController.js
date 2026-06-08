@@ -1,4 +1,5 @@
 const spotService = require('../services/spotService');
+const aiContentService = require('../services/aiContentService');
 
 exports.getSpots = async (req, res, next) => {
     try {
@@ -56,7 +57,7 @@ exports.filterSpots = async (req, res, next) => {
 
 exports.getAiContents = async (req, res, next) => {
     try {
-        const result = await spotService.getAiContents(req.params.spot_id);
+        const result = await aiContentService.getAiContents(req.params.spot_id);
         return res.json({ success: true, ...result });
     } catch (err) { next(err); }
 };
