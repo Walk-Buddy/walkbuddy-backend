@@ -1,20 +1,21 @@
 const courseService = require('../services/courseService');
 
 function normalizeCourseWaypoints(body) {
+  // route가 있으면 waypoints 무시하고 route로 변환
+  const coordinates = body.route?.coordinates;
+  if (Array.isArray(coordinates)) {
+    return coordinates.map(([lng, lat]) => ({
+      type: 'pin',
+      lat,
+      lng,
+    }));
+  }
+
   if (Array.isArray(body.waypoints)) {
     return body.waypoints;
   }
 
-  const coordinates = body.route?.coordinates;
-  if (!Array.isArray(coordinates)) {
-    return null;
-  }
-
-  return coordinates.map(([lng, lat]) => ({
-    type: 'pin',
-    lat,
-    lng,
-  }));
+  return null;
 }
 
 exports.previewCourse = async (req, res, next) => {
