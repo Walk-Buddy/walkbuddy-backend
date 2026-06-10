@@ -89,7 +89,7 @@ ${sourceText}
 - 마침표로 문장 마무리
     `.trim();
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
     const result = await model.generateContent(prompt);
     const script = result.response.text().trim();
 
