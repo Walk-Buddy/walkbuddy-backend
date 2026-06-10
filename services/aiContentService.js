@@ -38,7 +38,7 @@ async function uploadToS3(audioBuffer, spotId, contentType) {
 
 exports.getAiContents = async (spotId) => {
   const { rows: spotRows } = await pool.query(
-    `SELECT name, content_place, content_history, content_tour
+    `SELECT name, address, content_place, content_history, content_tour
      FROM spots WHERE spot_id = $1 AND status = 'active'`,
     [spotId]
   );
@@ -57,8 +57,6 @@ exports.getAiContents = async (spotId) => {
   const contents = [];
 
   for (const [contentType, { label, source }] of Object.entries(typeMap)) {
-    if (!source) continue;
-
     // 캐시 확인
     const { rows: cached } = await pool.query(
       `SELECT content_type, script, audio_url
@@ -71,13 +69,18 @@ exports.getAiContents = async (spotId) => {
       continue;
     }
 
-    // Gemini로 스크립트 생성
+    // 원본 소스 있으면 활용, 없으면 이름+주소만으로 생성
+    const sourceText = source
+      ? `원본 정보: ${source}`
+      : `이 장소에 대한 추가 정보는 없습니다. 장소명과 주소를 바탕으로 자연스럽게 작성해주세요.`;
+
     const prompt = `
 당신은 도보 산책 앱의 AI 음성 가이드입니다.
 아래 정보를 바탕으로 산책 중 들을 수 있는 자연스러운 ${label} 멘트를 작성해주세요.
 
 장소명: ${spot.name}
-원본 정보: ${source}
+주소: ${spot.address || ''}
+${sourceText}
 
 조건:
 - 말하는 속도 기준 60초 이내 (200자 내외)
