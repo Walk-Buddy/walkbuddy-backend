@@ -34,7 +34,7 @@ const courseRoutes       = require('./routes/courses');
 const spotRoutes         = require('./routes/spots');
 const walkRoutes         = require('./routes/walks');
 
-// const reviewRoutes       = require('./routes/reviews');
+const reviewRoutes       = require('./routes/reviews');
 // const reactionRoutes     = require('./routes/reactions');
 // const bookmarkRoutes     = require('./routes/bookmarks');
 // const reportRoutes       = require('./routes/reports');
@@ -48,7 +48,7 @@ app.use('/api/courses',       courseRoutes);
 app.use('/api/spots',         spotRoutes);
 app.use('/api/walks',         walkRoutes);
 
-// app.use('/api/reviews',       reviewRoutes);
+app.use('/api/reviews',       reviewRoutes);
 // app.use('/api/reactions',     reactionRoutes);
 // app.use('/api/bookmarks',     bookmarkRoutes);
 // app.use('/api/reports',       reportRoutes);
