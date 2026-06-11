@@ -189,7 +189,7 @@ exports.login = async (req, res, next) => {
 // ──────────────────────────────────────────────────────────────────────
 exports.kakaoLogin = async (req, res, next) => {
   try {
-    const { code } = req.body;
+    const code = req.body.code || req.query.code;
 
     if (!code) {
       return res.status(400).json({ success: false, message: '카카오 인가코드가 없습니다.' });

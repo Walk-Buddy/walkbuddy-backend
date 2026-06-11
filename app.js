@@ -35,7 +35,7 @@ const spotRoutes         = require('./routes/spots');
 const walkRoutes         = require('./routes/walks');
 
 const reviewRoutes       = require('./routes/reviews');
-// const reactionRoutes     = require('./routes/reactions');
+const reactionRoutes     = require('./routes/reactions');
 // const bookmarkRoutes     = require('./routes/bookmarks');
 // const reportRoutes       = require('./routes/reports');
 // const adminRoutes        = require('./routes/admin');
@@ -49,7 +49,7 @@ app.use('/api/spots',         spotRoutes);
 app.use('/api/walks',         walkRoutes);
 
 app.use('/api/reviews',       reviewRoutes);
-// app.use('/api/reactions',     reactionRoutes);
+app.use('/api/reactions',     reactionRoutes);
 // app.use('/api/bookmarks',     bookmarkRoutes);
 // app.use('/api/reports',       reportRoutes);
 // app.use('/api/admin',         adminRoutes);

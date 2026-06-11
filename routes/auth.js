@@ -25,6 +25,7 @@ router.post('/login', authController.login);
 
 // POST /api/auth/login/kakao          → 카카오 소셜 로그인 (인가코드로 토큰 교환 및 JWT 발급)
 router.post('/login/kakao', authController.kakaoLogin);
+router.get('/login/kakao', authController.kakaoLogin);
 
 // ── 기타 인증 ─────────────────────────────────────────────────────────
 // POST /api/auth/password/reset       → 비밀번호 찾기 (임시 비밀번호 이메일 발송)
