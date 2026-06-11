@@ -1,25 +1,8 @@
 const courseService = require('../services/courseService');
 
-function normalizeCourseWaypoints(body) {
-  if (Array.isArray(body.waypoints)) {
-    return body.waypoints;
-  }
-
-  const coordinates = body.route?.coordinates;
-  if (!Array.isArray(coordinates)) {
-    return null;
-  }
-
-  return coordinates.map(([lng, lat]) => ({
-    type: 'pin',
-    lat,
-    lng,
-  }));
-}
-
 exports.previewCourse = async (req, res, next) => {
   try {
-    const waypoints = normalizeCourseWaypoints(req.body);
+    const waypoints = Array.isArray(req.body.waypoints) ? req.body.waypoints : null;
     if (!Array.isArray(waypoints) || waypoints.length < 2)
       return res.status(400).json({ success: false, message: '경유지는 최소 2개 이상이어야 합니다.' });
     const preview = await courseService.previewCourse(waypoints);
@@ -30,15 +13,19 @@ exports.previewCourse = async (req, res, next) => {
 exports.createCourse = async (req, res, next) => {
   try {
     const { name } = req.body;
-    const waypoints = normalizeCourseWaypoints(req.body);
+    const route = req.body.route ?? null;
+    const waypoints = Array.isArray(req.body.waypoints) ? req.body.waypoints : null;
+
     if (!name?.trim())
       return res.status(400).json({ success: false, message: '코스 이름은 필수입니다.' });
     if (name.length > 100)
       return res.status(400).json({ success: false, message: '코스 이름은 100자 이하여야 합니다.' });
-    if (!Array.isArray(waypoints) || waypoints.length < 2)
+    if (!waypoints || waypoints.length < 2)
       return res.status(400).json({ success: false, message: '경유지는 최소 2개 이상이어야 합니다.' });
+
     const course = await courseService.createCourse(req.user.user_id, {
       ...req.body,
+      route,
       waypoints,
     });
     return res.status(201).json(course);
@@ -79,15 +66,20 @@ exports.getCourseById = async (req, res, next) => {
 exports.updateCourse = async (req, res, next) => {
   try {
     const { name } = req.body;
-    const hasWaypointInput = req.body.waypoints !== undefined || req.body.route !== undefined;
-    const waypoints = hasWaypointInput ? normalizeCourseWaypoints(req.body) : undefined;
+    const route = req.body.route !== undefined ? req.body.route : undefined;
+    const waypoints = req.body.waypoints !== undefined
+      ? (Array.isArray(req.body.waypoints) ? req.body.waypoints : null)
+      : undefined;
+
     if (name !== undefined && !name?.trim())
       return res.status(400).json({ success: false, message: '코스 이름은 필수입니다.' });
-    if (hasWaypointInput && (!Array.isArray(waypoints) || waypoints.length < 2))
+    if (waypoints !== undefined && (!Array.isArray(waypoints) || waypoints.length < 2))
       return res.status(400).json({ success: false, message: '경유지는 최소 2개 이상이어야 합니다.' });
+
     const result = await courseService.updateCourse(req.user.user_id, req.params.course_id, {
       ...req.body,
-      ...(hasWaypointInput ? { waypoints } : {}),
+      ...(route !== undefined ? { route } : {}),
+      ...(waypoints !== undefined ? { waypoints } : {}),
     });
     return res.status(200).json(result);
   } catch (err) { next(err); }
