@@ -26,70 +26,71 @@ const fetchSpotCoords = async (spotIds, client) => {
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 내부 헬퍼: waypoints → 카카오 모빌리티 도보 경로 WKT LINESTRING
+// 내부 헬퍼: waypoints → T맵 보행자 경로 WKT LINESTRING
 // ──────────────────────────────────────────────────────────────────────
 const buildLineString = async (waypoints, client) => {
   const spotIds = waypoints.filter((w) => w.type === 'spot').map((w) => w.spot_id);
   const coords = await fetchSpotCoords(spotIds, client);
 
-  // 좌표 배열 추출
   const points = waypoints.map((w) =>
     w.type === 'spot'
       ? { lng: coords[w.spot_id].lng, lat: coords[w.spot_id].lat }
       : { lng: w.lng, lat: w.lat }
   );
 
-  // 카카오 모빌리티 API 호출 실패 시 직선 경로로 폴백
   try {
     const origin      = points[0];
     const destination = points[points.length - 1];
     const middle      = points.slice(1, -1);
 
-    const body = {
-      origin:      { x: origin.lng,      y: origin.lat      },
-      destination: { x: destination.lng, y: destination.lat },
-      waypoints:   middle.map((p) => ({ name: '', x: p.lng, y: p.lat })),
-      priority:    'RECOMMEND',
-      car_fuel:    'GASOLINE',
-      car_hipass:  false,
-      alternatives: false,
-      road_details: false,
-      summary:     false,
-    };
+    // T맵은 경유지 없이 출발-목적지만 지원 → 구간별로 나눠서 호출 후 합치기
+    const segments = [];
+    const allPoints = [origin, ...middle, destination];
 
-    const res = await fetch('https://apis-navi.kakaomobility.com/v1/waypoints/directions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `KakaoAK ${process.env.KAKAO_REST_API_KEY}`,
-      },
-      body: JSON.stringify(body),
-    });
+    for (let i = 0; i < allPoints.length - 1; i++) {
+      const from = allPoints[i];
+      const to   = allPoints[i + 1];
 
-    const data = await res.json();
+      const res = await fetch('https://apis.openapi.sk.com/tmap/routes/pedestrian?version=1', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'appKey': process.env.TMAP_API_KEY,
+        },
+        body: JSON.stringify({
+          startX:        String(from.lng),
+          startY:        String(from.lat),
+          endX:          String(to.lng),
+          endY:          String(to.lat),
+          startName:     '출발',
+          endName:       '도착',
+          reqCoordType:  'WGS84GEO',
+          resCoordType:  'WGS84GEO',
+          searchOption:  '0', // 추천 경로
+        }),
+      });
 
-    if (data.routes?.[0]?.result_code !== 0) {
-      throw new Error(data.routes?.[0]?.result_msg ?? '카카오 경로 계산 실패');
-    }
+      const data = await res.json();
 
-    // sections → roads → vertexes 에서 전체 좌표 추출
-    const allCoords = [];
-    for (const section of data.routes[0].sections) {
-      for (const road of section.roads) {
-        const v = road.vertexes; // [lng, lat, lng, lat, ...]
-        for (let i = 0; i < v.length; i += 2) {
-          allCoords.push(`${v[i]} ${v[i + 1]}`);
+      if (!data.features?.length) {
+        throw new Error(`T맵 경로 없음: ${from.lng},${from.lat} → ${to.lng},${to.lat}`);
+      }
+
+      // features에서 LineString 좌표 추출
+      for (const feature of data.features) {
+        if (feature.geometry.type === 'LineString') {
+          segments.push(...feature.geometry.coordinates);
         }
       }
     }
 
-    if (allCoords.length < 2) throw new Error('경로 좌표 부족');
+    if (segments.length < 2) throw new Error('경로 좌표 부족');
 
-    return `SRID=4326;LINESTRING(${allCoords.join(', ')})`;
+    const allCoords = segments.map(([lng, lat]) => `${lng} ${lat}`).join(', ');
+    return `SRID=4326;LINESTRING(${allCoords})`;
 
   } catch (err) {
-    // 카카오 모빌리티 실패 시 직선 경로로 폴백
-    console.warn('[buildLineString] 카카오 모빌리티 실패, 직선 경로로 폴백:', err.message);
+    console.warn('[buildLineString] T맵 실패, 직선 경로로 폴백:', err.message);
     const fallbackPoints = points.map((p) => `${p.lng} ${p.lat}`);
     return `SRID=4326;LINESTRING(${fallbackPoints.join(', ')})`;
   }
