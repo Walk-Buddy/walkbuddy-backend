@@ -3,8 +3,8 @@ const courseService = require('../services/courseService');
 exports.previewCourse = async (req, res, next) => {
   try {
     const waypoints = Array.isArray(req.body.waypoints) ? req.body.waypoints : null;
-    if (!Array.isArray(waypoints) || waypoints.length < 2)
-      return res.status(400).json({ success: false, message: '경유지는 최소 2개 이상이어야 합니다.' });
+        if (!Array.isArray(waypoints))
+      return res.status(400).json({ success: false, message: 'waypoints 형식이 올바르지 않습니다.'});
     const preview = await courseService.previewCourse(waypoints);
     return res.status(200).json(preview);
   } catch (err) { next(err); }
@@ -20,9 +20,8 @@ exports.createCourse = async (req, res, next) => {
       return res.status(400).json({ success: false, message: '코스 이름은 필수입니다.' });
     if (name.length > 100)
       return res.status(400).json({ success: false, message: '코스 이름은 100자 이하여야 합니다.' });
-    if (!waypoints || waypoints.length < 2)
-      return res.status(400).json({ success: false, message: '경유지는 최소 2개 이상이어야 합니다.' });
-
+    if (!Array.isArray(waypoints))
+      return res.status(400).json({ success: false, message: 'waypoints 형식이 올바르지 않습니다.'});
     const course = await courseService.createCourse(req.user.user_id, {
       ...req.body,
       route,
@@ -73,8 +72,8 @@ exports.updateCourse = async (req, res, next) => {
 
     if (name !== undefined && !name?.trim())
       return res.status(400).json({ success: false, message: '코스 이름은 필수입니다.' });
-    if (waypoints !== undefined && (!Array.isArray(waypoints) || waypoints.length < 2))
-      return res.status(400).json({ success: false, message: '경유지는 최소 2개 이상이어야 합니다.' });
+    if (waypoints !== undefined && (!Array.isArray(waypoints)))
+      return res.status(400).json({ success: false, message: 'waypoints 형식이 올바르지 않습니다.' });
 
     const result = await courseService.updateCourse(req.user.user_id, req.params.course_id, {
       ...req.body,
