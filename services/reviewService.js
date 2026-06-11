@@ -1,0 +1,286 @@
+const pool = require('../config/db');
+
+// ──────────────────────────────────────────────────────────────────────
+// 코스 후기 등록
+// ──────────────────────────────────────────────────────────────────────
+exports.createCourseReview = async (userId, courseId, body) => {
+  const { walk_record_id, description, difficulty, rating, is_public = true, tag_ids = [] } = body;
+
+  // walk_record_id 유효성 확인 (본인 산책 기록 + 해당 코스)
+  const { rows: walkRows } = await pool.query(
+    `SELECT walk_record_id FROM walk_records
+     WHERE walk_record_id = $1 AND user_id = $2 AND course_id = $3 AND ended_at IS NOT NULL`,
+    [walk_record_id, userId, courseId]
+  );
+  if (!walkRows.length) {
+    const err = new Error('유효한 산책 기록이 없습니다.');
+    err.status = 400; throw err;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: [review] } = await client.query(
+      `INSERT INTO course_reviews
+         (user_id, course_id, walk_record_id, description, difficulty, rating, is_public)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING course_review_id, course_id, rating, created_at`,
+      [userId, courseId, walk_record_id, description || null, difficulty || null, rating || null, is_public]
+    );
+
+    // 태그 저장
+    if (tag_ids.length) {
+      const { rows: validTags } = await client.query(
+        `SELECT tag_id FROM tags WHERE tag_id = ANY($1::uuid[]) AND type = 'course' AND is_active = TRUE`,
+        [tag_ids]
+      );
+      for (const { tag_id } of validTags) {
+        await client.query(
+          `INSERT INTO taggings (tag_id, target_id, target_type, user_id)
+           VALUES ($1, $2, 'course', $3) ON CONFLICT DO NOTHING`,
+          [tag_id, courseId, userId]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    return review;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 코스 후기 목록 조회
+// ──────────────────────────────────────────────────────────────────────
+exports.getCourseReviews = async (courseId, query) => {
+  const { page = 1, limit = 20 } = query;
+  const offset = (page - 1) * limit;
+
+  const { rows } = await pool.query(
+    `SELECT
+       cr.course_review_id, cr.description, cr.difficulty, cr.rating,
+       cr.is_public, cr.created_at,
+       json_build_object(
+         'user_id',   u.user_id,
+         'nickname',  u.nickname,
+         'profile_image_url', u.profile_image_url
+       ) AS user,
+       COALESCE(
+         json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
+         FILTER (WHERE t.tag_id IS NOT NULL), '[]'
+       ) AS tags
+     FROM course_reviews cr
+     JOIN users u ON u.user_id = cr.user_id
+     LEFT JOIN taggings tg ON tg.target_id = cr.course_id AND tg.target_type = 'course' AND tg.user_id = cr.user_id
+     LEFT JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+     WHERE cr.course_id = $1 AND cr.status = 'active' AND cr.is_public = TRUE
+     GROUP BY cr.course_review_id, u.user_id
+     ORDER BY cr.created_at DESC
+     LIMIT $2 OFFSET $3`,
+    [courseId, +limit, +offset]
+  );
+
+  const { rows: countRows } = await pool.query(
+    `SELECT COUNT(*) AS total FROM course_reviews
+     WHERE course_id = $1 AND status = 'active' AND is_public = TRUE`,
+    [courseId]
+  );
+
+  return { total: +countRows[0].total, reviews: rows };
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 스팟 후기 등록
+// ──────────────────────────────────────────────────────────────────────
+exports.createSpotReview = async (userId, spotId, body) => {
+  const { walk_record_id, description, is_recommended, photos = [], is_public = true, tag_ids = [] } = body;
+
+  // walk_record_id 유효성 확인
+  const { rows: walkRows } = await pool.query(
+    `SELECT walk_record_id FROM walk_records
+     WHERE walk_record_id = $1 AND user_id = $2 AND ended_at IS NOT NULL`,
+    [walk_record_id, userId]
+  );
+  if (!walkRows.length) {
+    const err = new Error('유효한 산책 기록이 없습니다.');
+    err.status = 400; throw err;
+  }
+
+  if (photos.length > 5) {
+    const err = new Error('사진은 최대 5장까지 첨부 가능합니다.');
+    err.status = 400; throw err;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: [review] } = await client.query(
+      `INSERT INTO spot_reviews
+         (user_id, spot_id, walk_record_id, description, is_recommended, photos, is_public)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING spot_review_id, spot_id, is_recommended, created_at`,
+      [userId, spotId, walk_record_id, description || null,
+       is_recommended ?? null, photos.length ? photos : null, is_public]
+    );
+
+    // 태그 저장
+    if (tag_ids.length) {
+      const { rows: validTags } = await client.query(
+        `SELECT tag_id FROM tags WHERE tag_id = ANY($1::uuid[]) AND type = 'spot' AND is_active = TRUE`,
+        [tag_ids]
+      );
+      for (const { tag_id } of validTags) {
+        await client.query(
+          `INSERT INTO taggings (tag_id, target_id, target_type, user_id)
+           VALUES ($1, $2, 'spot', $3) ON CONFLICT DO NOTHING`,
+          [tag_id, spotId, userId]
+        );
+      }
+    }
+
+    // 추천도 업데이트
+    await client.query(
+      `UPDATE spots
+       SET recommend_pct = (
+         SELECT ROUND(
+           COUNT(*) FILTER (WHERE is_recommended = TRUE) * 100.0 / COUNT(*), 2
+         )
+         FROM spot_reviews
+         WHERE spot_id = $1 AND status = 'active'
+       )
+       WHERE spot_id = $1`,
+      [spotId]
+    );
+
+    await client.query('COMMIT');
+    return review;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 스팟 후기 목록 조회
+// ──────────────────────────────────────────────────────────────────────
+exports.getSpotReviews = async (spotId, query) => {
+  const { page = 1, limit = 20 } = query;
+  const offset = (page - 1) * limit;
+
+  const { rows } = await pool.query(
+    `SELECT
+       sr.spot_review_id, sr.description, sr.is_recommended,
+       sr.photos, sr.is_public, sr.created_at,
+       json_build_object(
+         'user_id',  u.user_id,
+         'nickname', u.nickname,
+         'profile_image_url', u.profile_image_url
+       ) AS user,
+       COALESCE(
+         json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
+         FILTER (WHERE t.tag_id IS NOT NULL), '[]'
+       ) AS tags
+     FROM spot_reviews sr
+     JOIN users u ON u.user_id = sr.user_id
+     LEFT JOIN taggings tg ON tg.target_id = sr.spot_id AND tg.target_type = 'spot' AND tg.user_id = sr.user_id
+     LEFT JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+     WHERE sr.spot_id = $1 AND sr.status = 'active' AND sr.is_public = TRUE
+     GROUP BY sr.spot_review_id, u.user_id
+     ORDER BY sr.created_at DESC
+     LIMIT $2 OFFSET $3`,
+    [spotId, +limit, +offset]
+  );
+
+  const { rows: countRows } = await pool.query(
+    `SELECT COUNT(*) AS total FROM spot_reviews
+     WHERE spot_id = $1 AND status = 'active' AND is_public = TRUE`,
+    [spotId]
+  );
+
+  return { total: +countRows[0].total, reviews: rows };
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 후기 수정 (코스/스팟 공통)
+// ──────────────────────────────────────────────────────────────────────
+exports.updateReview = async (userId, reviewType, reviewId, body) => {
+  const { description, difficulty, rating, is_recommended, is_public } = body;
+
+  if (reviewType === 'course') {
+    const { rows: [updated] } = await pool.query(
+      `UPDATE course_reviews
+       SET description = COALESCE($1, description),
+           difficulty  = COALESCE($2, difficulty),
+           rating      = COALESCE($3, rating),
+           is_public   = COALESCE($4, is_public),
+           updated_at  = NOW()
+       WHERE course_review_id = $5 AND user_id = $6 AND status = 'active'
+       RETURNING course_review_id AS review_id, updated_at`,
+      [description ?? null, difficulty ?? null, rating ?? null, is_public ?? null, reviewId, userId]
+    );
+    if (!updated) {
+      const err = new Error('후기를 찾을 수 없습니다.'); err.status = 404; throw err;
+    }
+    return updated;
+  }
+
+  if (reviewType === 'spot') {
+    const { rows: [updated] } = await pool.query(
+      `UPDATE spot_reviews
+       SET description    = COALESCE($1, description),
+           is_recommended = COALESCE($2, is_recommended),
+           is_public      = COALESCE($3, is_public),
+           updated_at     = NOW()
+       WHERE spot_review_id = $4 AND user_id = $5 AND status = 'active'
+       RETURNING spot_review_id AS review_id, updated_at`,
+      [description ?? null, is_recommended ?? null, is_public ?? null, reviewId, userId]
+    );
+    if (!updated) {
+      const err = new Error('후기를 찾을 수 없습니다.'); err.status = 404; throw err;
+    }
+    return updated;
+  }
+
+  const err = new Error('유효하지 않은 review_type입니다.'); err.status = 400; throw err;
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 후기 삭제 (코스/스팟 공통)
+// ──────────────────────────────────────────────────────────────────────
+exports.deleteReview = async (userId, reviewType, reviewId) => {
+  if (reviewType === 'course') {
+    const { rows } = await pool.query(
+      `UPDATE course_reviews SET status = 'hidden', updated_at = NOW()
+       WHERE course_review_id = $1 AND user_id = $2 AND status = 'active'
+       RETURNING course_review_id`,
+      [reviewId, userId]
+    );
+    if (!rows.length) {
+      const err = new Error('후기를 찾을 수 없습니다.'); err.status = 404; throw err;
+    }
+    return { message: '삭제되었습니다.' };
+  }
+
+  if (reviewType === 'spot') {
+    const { rows } = await pool.query(
+      `UPDATE spot_reviews SET status = 'hidden', updated_at = NOW()
+       WHERE spot_review_id = $1 AND user_id = $2 AND status = 'active'
+       RETURNING spot_review_id`,
+      [reviewId, userId]
+    );
+    if (!rows.length) {
+      const err = new Error('후기를 찾을 수 없습니다.'); err.status = 404; throw err;
+    }
+    return { message: '삭제되었습니다.' };
+  }
+
+  const err = new Error('유효하지 않은 review_type입니다.'); err.status = 400; throw err;
+};
