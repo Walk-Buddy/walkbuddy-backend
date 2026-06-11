@@ -26,7 +26,7 @@ WalkBuddy는 사용자가 직접 산책 코스를 등록하고 공유할 수 있
 | Database | PostgreSQL (PostGIS) |
 | 인증 | JWT |
 | API 문서 | Swagger (OpenAPI 3.0) |
-| 외부 API | Kakao Local API, Gemini AI |
+| 외부 API | Kakao, Gemini, T Map, Google TTS |
 
 ---
 
