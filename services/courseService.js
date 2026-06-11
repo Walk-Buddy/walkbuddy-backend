@@ -26,17 +26,74 @@ const fetchSpotCoords = async (spotIds, client) => {
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 내부 헬퍼: waypoints → WKT LINESTRING
+// 내부 헬퍼: waypoints → T맵 보행자 경로 WKT LINESTRING
 // ──────────────────────────────────────────────────────────────────────
 const buildLineString = async (waypoints, client) => {
   const spotIds = waypoints.filter((w) => w.type === 'spot').map((w) => w.spot_id);
   const coords = await fetchSpotCoords(spotIds, client);
+
   const points = waypoints.map((w) =>
     w.type === 'spot'
-      ? `${coords[w.spot_id].lng} ${coords[w.spot_id].lat}`
-      : `${w.lng} ${w.lat}`
+      ? { lng: coords[w.spot_id].lng, lat: coords[w.spot_id].lat }
+      : { lng: w.lng, lat: w.lat }
   );
-  return `SRID=4326;LINESTRING(${points.join(', ')})`;
+
+  try {
+    const origin      = points[0];
+    const destination = points[points.length - 1];
+    const middle      = points.slice(1, -1);
+
+    // T맵은 경유지 없이 출발-목적지만 지원 → 구간별로 나눠서 호출 후 합치기
+    const segments = [];
+    const allPoints = [origin, ...middle, destination];
+
+    for (let i = 0; i < allPoints.length - 1; i++) {
+      const from = allPoints[i];
+      const to   = allPoints[i + 1];
+
+      const res = await fetch('https://apis.openapi.sk.com/tmap/routes/pedestrian?version=1', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'appKey': process.env.TMAP_API_KEY,
+        },
+        body: JSON.stringify({
+          startX:        String(from.lng),
+          startY:        String(from.lat),
+          endX:          String(to.lng),
+          endY:          String(to.lat),
+          startName:     '출발',
+          endName:       '도착',
+          reqCoordType:  'WGS84GEO',
+          resCoordType:  'WGS84GEO',
+          searchOption:  '0', // 추천 경로
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!data.features?.length) {
+        throw new Error(`T맵 경로 없음: ${from.lng},${from.lat} → ${to.lng},${to.lat}`);
+      }
+
+      // features에서 LineString 좌표 추출
+      for (const feature of data.features) {
+        if (feature.geometry.type === 'LineString') {
+          segments.push(...feature.geometry.coordinates);
+        }
+      }
+    }
+
+    if (segments.length < 2) throw new Error('경로 좌표 부족');
+
+    const allCoords = segments.map(([lng, lat]) => `${lng} ${lat}`).join(', ');
+    return `SRID=4326;LINESTRING(${allCoords})`;
+
+  } catch (err) {
+    console.warn('[buildLineString] T맵 실패, 직선 경로로 폴백:', err.message);
+    const fallbackPoints = points.map((p) => `${p.lng} ${p.lat}`);
+    return `SRID=4326;LINESTRING(${fallbackPoints.join(', ')})`;
+  }
 };
 
 // ──────────────────────────────────────────────────────────────────────
