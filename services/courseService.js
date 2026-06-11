@@ -270,7 +270,7 @@ exports.previewCourse = async (waypoints) => {
 // waypoints: [{ type: 'spot', spot_id }, { type: 'pin', lat, lng }]
 // ──────────────────────────────────────────────────────────────────────
 exports.createCourse = async (userId, body) => {
-  const { name, description, category, is_public = true, tag_ids = [], waypoints } = body;
+  const { name, description, category, is_public = true, tag_ids = [], waypoints, route } = body;
 
   for (const [i, w] of waypoints.entries()) {
     if (w.type === 'spot' && !w.spot_id) {
@@ -291,8 +291,26 @@ exports.createCourse = async (userId, body) => {
   try {
     await client.query('BEGIN');
 
-    const wkt = await buildLineString(waypoints, client);
-    const { totalDistance, estimatedDuration } = await calcStats(wkt, client);
+    // route가 있으면 GPS 경로로 route_geometry 저장
+    // 없으면 기존처럼 waypoints로 LINESTRING 생성
+    let wkt;
+    let totalDistance;
+    let estimatedDuration;
+
+    if (route) {
+      // GeoJSON → WKT 변환
+      const coordinates = route.coordinates ?? route;
+      const points = coordinates.map(([lng, lat]) => `${lng} ${lat}`).join(', ');
+      wkt = `SRID=4326;LINESTRING(${points})`;
+      const stats = await calcStats(wkt, client);
+      totalDistance = stats.totalDistance;
+      estimatedDuration = stats.estimatedDuration;
+    } else {
+      wkt = await buildLineString(waypoints, client);
+      const stats = await calcStats(wkt, client);
+      totalDistance = stats.totalDistance;
+      estimatedDuration = stats.estimatedDuration;
+    }
 
     const { rows: [course] } = await client.query(
       `INSERT INTO courses (owner_id, name, description, category, route_geometry, total_distance, estimated_duration, is_public)
@@ -301,6 +319,7 @@ exports.createCourse = async (userId, body) => {
       [userId, name, description || null, category || null, wkt, totalDistance, estimatedDuration, is_public]
     );
 
+    // waypoints: 장소 목록 독립적으로 저장
     for (const [i, w] of waypoints.entries()) {
       if (w.type === 'spot')
         await client.query(
