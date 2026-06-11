@@ -196,7 +196,8 @@ exports.kakaoLogin = async (req, res, next) => {
     }
 
     const result = await authService.kakaoLogin(code);
-    return res.status(200).json(result);
+    const { access_token, refresh_token } = result;
+return res.redirect(`walkbuddy://login-success?access_token=${access_token}&refresh_token=${refresh_token}`);
   } catch (err) {
     next(err);
   }
