@@ -26,17 +26,73 @@ const fetchSpotCoords = async (spotIds, client) => {
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 내부 헬퍼: waypoints → WKT LINESTRING
+// 내부 헬퍼: waypoints → 카카오 모빌리티 도보 경로 WKT LINESTRING
 // ──────────────────────────────────────────────────────────────────────
 const buildLineString = async (waypoints, client) => {
   const spotIds = waypoints.filter((w) => w.type === 'spot').map((w) => w.spot_id);
   const coords = await fetchSpotCoords(spotIds, client);
+
+  // 좌표 배열 추출
   const points = waypoints.map((w) =>
     w.type === 'spot'
-      ? `${coords[w.spot_id].lng} ${coords[w.spot_id].lat}`
-      : `${w.lng} ${w.lat}`
+      ? { lng: coords[w.spot_id].lng, lat: coords[w.spot_id].lat }
+      : { lng: w.lng, lat: w.lat }
   );
-  return `SRID=4326;LINESTRING(${points.join(', ')})`;
+
+  // 카카오 모빌리티 API 호출 실패 시 직선 경로로 폴백
+  try {
+    const origin      = points[0];
+    const destination = points[points.length - 1];
+    const middle      = points.slice(1, -1);
+
+    const body = {
+      origin:      { x: origin.lng,      y: origin.lat      },
+      destination: { x: destination.lng, y: destination.lat },
+      waypoints:   middle.map((p) => ({ name: '', x: p.lng, y: p.lat })),
+      priority:    'RECOMMEND',
+      car_fuel:    'GASOLINE',
+      car_hipass:  false,
+      alternatives: false,
+      road_details: false,
+      summary:     false,
+    };
+
+    const res = await fetch('https://apis-navi.kakaomobility.com/v1/waypoints/directions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `KakaoAK ${process.env.KAKAO_REST_API_KEY}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await res.json();
+
+    if (data.routes?.[0]?.result_code !== 0) {
+      throw new Error(data.routes?.[0]?.result_msg ?? '카카오 경로 계산 실패');
+    }
+
+    // sections → roads → vertexes 에서 전체 좌표 추출
+    const allCoords = [];
+    for (const section of data.routes[0].sections) {
+      for (const road of section.roads) {
+        const v = road.vertexes; // [lng, lat, lng, lat, ...]
+        for (let i = 0; i < v.length; i += 2) {
+          allCoords.push(`${v[i]} ${v[i + 1]}`);
+        }
+      }
+    }
+
+    if (allCoords.length < 2) throw new Error('경로 좌표 부족');
+
+    return `SRID=4326;LINESTRING(${allCoords.join(', ')})`;
+
+  } catch (err) {
+    // 카카오 모빌리티 실패 시 직선 경로로 폴백
+    console.warn('[buildLineString] 카카오 모빌리티 실패, 직선 경로로 폴백:', err.message);
+    const fallbackPoints = points.map((p) => `${p.lng} ${p.lat}`);
+    return `SRID=4326;LINESTRING(${fallbackPoints.join(', ')})`;
+  }
 };
 
 // ──────────────────────────────────────────────────────────────────────
