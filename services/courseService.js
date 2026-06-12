@@ -71,6 +71,8 @@ const buildLineString = async (waypoints, client) => {
       });
 
       const data = await res.json();
+      console.log('[Tmap 응답 상태]', res.status);
+      console.log('[Tmap 응답 내용]', JSON.stringify(data).slice(0, 1000));
 
       if (!data.features?.length) {
         throw new Error(`T맵 경로 없음: ${from.lng},${from.lat} → ${to.lng},${to.lat}`);
