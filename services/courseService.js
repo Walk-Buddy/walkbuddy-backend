@@ -327,7 +327,7 @@ exports.previewCourse = async (waypoints) => {
 // waypoints: [{ type: 'spot', spot_id }, { type: 'pin', lat, lng }]
 // ──────────────────────────────────────────────────────────────────────
 exports.createCourse = async (userId, body) => {
-  const { name, description, category, is_public = true, tag_ids = [], waypoints, route } = body;
+  const { name, description, category, is_public = true, tag_ids = [], waypoints = [], route } = body;
 
   for (const [i, w] of waypoints.entries()) {
     if (w.type === 'spot' && !w.spot_id) {
@@ -355,19 +355,19 @@ exports.createCourse = async (userId, body) => {
     let estimatedDuration;
 
     if (route) {
-      // GeoJSON → WKT 변환
-      const coordinates = route.coordinates ?? route;
-      const points = coordinates.map(([lng, lat]) => `${lng} ${lat}`).join(', ');
-      wkt = `SRID=4326;LINESTRING(${points})`;
-      const stats = await calcStats(wkt, client);
-      totalDistance = stats.totalDistance;
-      estimatedDuration = stats.estimatedDuration;
-    } else {
-      wkt = await buildLineString(waypoints, client);
-      const stats = await calcStats(wkt, client);
-      totalDistance = stats.totalDistance;
-      estimatedDuration = stats.estimatedDuration;
-    }
+  // route 좌표를 waypoints로 변환해서 Tmap 경로 생성
+    const coordinates = route.coordinates ?? route;
+    const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
+    wkt = await buildLineString(routeWaypoints, client);
+    const stats = await calcStats(wkt, client);
+    totalDistance = stats.totalDistance;
+    estimatedDuration = stats.estimatedDuration;
+  } else {
+    wkt = await buildLineString(waypoints, client);
+    const stats = await calcStats(wkt, client);
+    totalDistance = stats.totalDistance;
+    estimatedDuration = stats.estimatedDuration;
+  }
 
     const { rows: [course] } = await client.query(
       `INSERT INTO courses (owner_id, name, description, category, route_geometry, total_distance, estimated_duration, is_public)
