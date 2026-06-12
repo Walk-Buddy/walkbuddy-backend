@@ -29,7 +29,7 @@ app.get('/health', async (req, res) => {
 // ── Routes ───────────────────────────────────────────────────────────
 const authRoutes = require('./routes/auth');
 // const userRoutes         = require('./routes/users');
-// const tagRoutes          = require('./routes/tags');
+const tagRoutes          = require('./routes/tags');
 const courseRoutes       = require('./routes/courses');
 const spotRoutes         = require('./routes/spots');
 const walkRoutes         = require('./routes/walks');
@@ -43,7 +43,7 @@ const walkRoutes         = require('./routes/walks');
 
 app.use('/api/auth', authRoutes);
 // app.use('/api/users',         userRoutes);
-// app.use('/api/tags',          tagRoutes);
+app.use('/api/tags',          tagRoutes);
 app.use('/api/courses',       courseRoutes);
 app.use('/api/spots',         spotRoutes);
 app.use('/api/walks',         walkRoutes);
