@@ -357,18 +357,21 @@ exports.createCourse = async (userId, body) => {
     let estimatedDuration;
 
     if (route) {
-  // route 좌표를 waypoints로 변환해서 Tmap 경로 생성
     const coordinates = route.coordinates ?? route;
     const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
     wkt = await buildLineString(routeWaypoints, client);
     const stats = await calcStats(wkt, client);
     totalDistance = stats.totalDistance;
-    estimatedDuration = stats.estimatedDuration;
+    estimatedDuration = body.estimated_duration
+      ? Math.ceil(body.estimated_duration / 60)
+      : stats.estimatedDuration;
   } else {
     wkt = await buildLineString(waypoints, client);
     const stats = await calcStats(wkt, client);
     totalDistance = stats.totalDistance;
-    estimatedDuration = stats.estimatedDuration;
+    estimatedDuration = body.estimated_duration
+      ? Math.ceil(body.estimated_duration / 60)
+      : stats.estimatedDuration;
   }
 
     const { rows: [course] } = await client.query(
