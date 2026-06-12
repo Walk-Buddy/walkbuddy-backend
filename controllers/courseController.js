@@ -14,14 +14,14 @@ exports.createCourse = async (req, res, next) => {
   try {
     const { name } = req.body;
     const route = req.body.route ?? null;
-    const waypoints = Array.isArray(req.body.waypoints) ? req.body.waypoints : null;
-
+    const waypoints = Array.isArray(req.body.waypoints) ? req.body.waypoints : [];
     if (!name?.trim())
       return res.status(400).json({ success: false, message: '코스 이름은 필수입니다.' });
     if (name.length > 100)
       return res.status(400).json({ success: false, message: '코스 이름은 100자 이하여야 합니다.' });
-    if (!Array.isArray(waypoints))
-      return res.status(400).json({ success: false, message: 'waypoints 형식이 올바르지 않습니다.'});
+    // route가 없을 때만 waypoints 검사
+    if (!route && waypoints.length < 2)
+      return res.status(400).json({ success: false, message: '경유지는 최소 2개 이상이어야 합니다.' });
     const course = await courseService.createCourse(req.user.user_id, {
       ...req.body,
       route,
