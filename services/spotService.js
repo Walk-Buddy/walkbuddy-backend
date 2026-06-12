@@ -1,6 +1,10 @@
 const pool = require('../config/db');
 const axios = require('axios');
-const { SPOT_CATEGORIES, SPOT_CATEGORY_SEARCH_RULES, inferSpotCategories } = require('../constants/spotCategoryRules');
+const {
+    SPOT_CATEGORIES,
+    SPOT_CATEGORY_SEARCH_RULES,
+    inferSpotCategoriesWithFallback,
+} = require('../constants/spotCategoryRules');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
@@ -10,6 +14,11 @@ const TOUR_API_FALLBACK_MATCH_RADIUS = 500;
 
 function getTourApiServiceKey() {
     return process.env.TOUR_API_SERVICE_KEY || process.env.TOURAPI_SERVICE_KEY;
+}
+
+function normalizeSpotCategoriesInput(categories) {
+    if (!Array.isArray(categories) || categories.length === 0) return [];
+    return [...new Set(categories.map(c => String(c).trim()).filter(Boolean))];
 }
 
 function getKakaoAddress(document) {
@@ -359,17 +368,11 @@ exports.getSpotById = async (spotId) => {
 // ──────────────────────────────────────────────────────────────────────
 exports.createSpot = async (body) => {
     const { name, x, y, address, categories, kakao_category_name, content_place, content_history, content_tour } = body;
+    const normalizedCategories = normalizeSpotCategoriesInput(categories);
 
-    if (!categories || !Array.isArray(categories) || categories.length === 0) {
-        const err = new Error('categories는 비어있지 않은 배열이어야 합니다.');
+    if (normalizedCategories.length === 0) {
+        const err = new Error('categories는 비어있지 않은 문자열 배열이어야 합니다.');
         err.status = 400; throw err;
-    }
-    const hasInvalidCategory = categories.some(c => !SPOT_CATEGORIES.includes(c));
-    if (hasInvalidCategory) {
-        const err = new Error('categories에 허용되지 않은 값이 있습니다.');
-        err.status = 400;
-        err.supported_categories = SPOT_CATEGORIES;
-        throw err;
     }
 
     const lng = Number(x);
@@ -393,7 +396,7 @@ exports.createSpot = async (body) => {
             recommend_pct, status, created_at,
             ST_X(location::GEOMETRY) AS x,
             ST_Y(location::GEOMETRY) AS y`,
-        [name, lng, lat, address || null, categories, kakao_category_name || null,
+        [name, lng, lat, address || null, normalizedCategories, kakao_category_name || null,
          content_place || null, content_history || null, content_tour || null]
     );
 
@@ -406,17 +409,11 @@ exports.createSpot = async (body) => {
 // ──────────────────────────────────────────────────────────────────────
 exports.saveKakaoSpot = async (body) => {
     const { kakao_place_id, name, kakao_category_name, categories, address, road_address_name, address_name, x, y } = body;
+    const normalizedCategories = normalizeSpotCategoriesInput(categories);
 
-    if (!Array.isArray(categories) || categories.length === 0) {
-        const err = new Error('categories must be a non-empty array');
+    if (normalizedCategories.length === 0) {
+        const err = new Error('categories must be a non-empty string array');
         err.status = 400; throw err;
-    }
-    const hasInvalidCategory = categories.some(c => !SPOT_CATEGORIES.includes(c));
-    if (hasInvalidCategory) {
-        const err = new Error('categories contain unsupported value');
-        err.status = 400;
-        err.supported_categories = SPOT_CATEGORIES;
-        throw err;
     }
 
     const lng = Number(x);
@@ -436,7 +433,7 @@ exports.saveKakaoSpot = async (body) => {
                    recommend_pct, content_tour,
                    ST_X(location::GEOMETRY) AS x,
                    ST_Y(location::GEOMETRY) AS y`,
-        [kakao_place_id, name, lng, lat, selectedAddress, categories, kakao_category_name || null]
+        [kakao_place_id, name, lng, lat, selectedAddress, normalizedCategories, kakao_category_name || null]
     );
 
     if (createdResult.rows.length > 0) {
@@ -586,7 +583,7 @@ exports.searchSpots = async (query) => {
 
     const uniqueKakaoSpotMap = new Map();
     for (const document of allDocuments) {
-        const categories = inferSpotCategories(document);
+        const categories = inferSpotCategoriesWithFallback(document);
         if (categories.length === 0) continue;
         if (category && !categories.includes(category)) continue;
         uniqueKakaoSpotMap.set(document.id, {

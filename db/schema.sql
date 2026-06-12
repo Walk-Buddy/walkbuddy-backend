@@ -124,7 +124,7 @@ CREATE TABLE users (
     --   "course": ["둘레길", "숲길"]       -- 선호 코스 카테고리 목록
     -- }
     -- 미설정 시 NULL, key 생략 가능 (spot 만 설정하고 course 생략 허용)
-    -- [주의] spots.categories 는 chk_spots_categories 로 허용값을 제한하지만,
+    -- [주의] spots.categories 는 앱 기준 카테고리와 카카오 원본 마지막 카테고리를 함께 저장할 수 있음
     --        JSONB 배열인 users.pref_categories 는 FK/CHECK 로 세부 값을 검증하기 어려움
     --        courses.category 도 자유 문자열이므로 앱단 validation 병행 필요
     -- GIN 인덱스로 JSONB 검색 성능 보완 (하단 인덱스 참고)
@@ -295,7 +295,7 @@ CREATE TABLE spots (
 
     categories          TEXT[]          NOT NULL DEFAULT '{}',
     -- 앱 검색용 카테고리 목록
-    -- 카카오 category_name의 마지막 값과 장소명 예외 규칙을 앱 기준 카테고리 배열로 변환해 저장
+    -- 카카오 category_name과 장소명 예외 규칙을 앱 기준 카테고리 배열로 변환해 저장
     -- 예:
     --   "여행 > 관광,명소 > 강"       → ARRAY['강·하천']
     --   "여행 > 공원 > 도시근린공원" → ARRAY['공원·광장']
@@ -353,26 +353,14 @@ CREATE TABLE spots (
         CHECK (source IN ('admin', 'kakao')),
 
     CONSTRAINT chk_spots_recommend_pct
-        CHECK (recommend_pct IS NULL OR recommend_pct BETWEEN 0 AND 100),
+        CHECK (recommend_pct IS NULL OR recommend_pct BETWEEN 0 AND 100)
     -- 추천도 0~100% 범위 검증
-
-    CONSTRAINT chk_spots_categories
-        CHECK (
-            categories <@ ARRAY[
-            '산',
-            '숲·휴양림',
-            '수목원·정원',
-            '강·하천',
-            '호수·저수지',
-            '계곡·폭포',
-            '해수욕장·해변',
-            '생태·서식지',
-            '공원·광장'
-            ]::TEXT[]
-        )
-    -- categories 배열에는 앱에서 허용한 카테고리명만 저장
-    -- <@ 연산자는 왼쪽 배열이 오른쪽 배열의 부분집합인지 확인
 );
+
+-- categories 배열은 앱 기준 카테고리와 카카오 원본 중간 카테고리를 함께 저장할 수 있다.
+-- 예: 앱 기준 매핑 성공 → ARRAY['공원·광장']
+--     앱 기준 매핑 실패 → category_name의 3번째 값, 없으면 2번째 값 저장
+--     예: "여행 > 관광,명소 > 문화유적 > 탑,비석" → ARRAY['문화유적']
 
 -- 위치 기반 반경 검색·거리 정렬용 GiST 인덱스
 -- ST_DWithin(), ST_Distance() 등 PostGIS 함수와 함께 사용
