@@ -106,7 +106,7 @@ const calcStats = async (wkt, client) => {
     `SELECT ST_Length($1::geography) AS dist`, [wkt]
   );
   const totalDistance = Math.round(+rows[0].dist);
-  const estimatedDuration = Math.ceil(totalDistance / WALK_SPEED_MPS / 60);
+  const estimatedDuration = Math.ceil(totalDistance / WALK_SPEED_MPS); // 초 단위
   return { totalDistance, estimatedDuration };
 };
 
@@ -363,14 +363,14 @@ exports.createCourse = async (userId, body) => {
     const stats = await calcStats(wkt, client);
     totalDistance = stats.totalDistance;
     estimatedDuration = body.estimated_duration
-      ? Math.ceil(body.estimated_duration / 60)
+      ? Math.ceil(body.estimated_duration)
       : stats.estimatedDuration;
   } else {
     wkt = await buildLineString(waypoints, client);
     const stats = await calcStats(wkt, client);
     totalDistance = stats.totalDistance;
     estimatedDuration = body.estimated_duration
-      ? Math.ceil(body.estimated_duration / 60)
+      ? Math.ceil(body.estimated_duration)
       : stats.estimatedDuration;
   }
 
