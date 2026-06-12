@@ -86,6 +86,11 @@ function getLastCategory(categoryName=''){
     return categoryName.split('>').pop().trim();
 }
 
+function getFallbackCategory(categoryName = '') {
+    const parts = categoryName.split('>').map(part => part.trim()).filter(Boolean);
+    return parts[2] || parts[1] || '';
+}
+
 function includesAny(text='', keywords=[]){
     return keywords.some(keyword=> text.includes(keyword));   
 }
@@ -115,6 +120,12 @@ const EXCLUDED_PLACE_KEYWORDS=[
   '빌딩',
 ];
 
+function isExcludedKakaoPlace(kakaoPlace = {}) {
+  const placeName = kakaoPlace.place_name || '';
+  const categoryName = kakaoPlace.category_name || '';
+  return includesAny(placeName, EXCLUDED_PLACE_KEYWORDS) || includesAny(categoryName, EXCLUDED_PLACE_KEYWORDS);
+}
+
 //카카오 장소 응답을 앱 스팟 카테고리 배열로 변환
 function inferSpotCategories(kakaoPlace={}){
     const placeName=kakaoPlace.place_name || '';
@@ -122,7 +133,7 @@ function inferSpotCategories(kakaoPlace={}){
     const lastCategory=getLastCategory(categoryName);
 
 //EXCLUDED_PLACE_KEYWORDS에 포함된 장소는 제외
-    if(includesAny(placeName,EXCLUDED_PLACE_KEYWORDS) || includesAny(categoryName,EXCLUDED_PLACE_KEYWORDS)){
+    if(isExcludedKakaoPlace(kakaoPlace)){
         return [];
     }
 
@@ -233,9 +244,20 @@ if(
   return [...new Set(categories)];
 }
 
+function inferSpotCategoriesWithFallback(kakaoPlace = {}) {
+  const appCategories = inferSpotCategories(kakaoPlace);
+  if (appCategories.length > 0) return appCategories;
+  if (isExcludedKakaoPlace(kakaoPlace)) return [];
+
+  const fallbackCategory = getFallbackCategory(kakaoPlace.category_name || '');
+  return fallbackCategory ? [fallbackCategory] : [];
+}
+
 module.exports={
     SPOT_CATEGORIES,
     SPOT_CATEGORY_SEARCH_RULES,
     getLastCategory,
+    getFallbackCategory,
     inferSpotCategories,
+    inferSpotCategoriesWithFallback,
 };
