@@ -57,7 +57,7 @@ exports.createCourseReview = async (userId, courseId, body) => {
 // ──────────────────────────────────────────────────────────────────────
 // 코스 후기 목록 조회
 // ──────────────────────────────────────────────────────────────────────
-exports.getCourseReviews = async (courseId, query) => {
+exports.getCourseReviews = async (courseId, query, userId) => {
   const { page = 1, limit = 20 } = query;
   const offset = (page - 1) * limit;
 
@@ -73,16 +73,22 @@ exports.getCourseReviews = async (courseId, query) => {
        COALESCE(
          json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
          FILTER (WHERE t.tag_id IS NOT NULL), '[]'
-       ) AS tags
+       ) AS tags,
+       COUNT(DISTINCT r_like.user_id) AS like_count,
+       COUNT(DISTINCT r_dislike.user_id) AS dislike_count,
+       MAX(my_r.reaction) AS my_reaction
      FROM course_reviews cr
      JOIN users u ON u.user_id = cr.user_id
      LEFT JOIN taggings tg ON tg.target_id = cr.course_id AND tg.target_type = 'course' AND tg.user_id = cr.user_id
      LEFT JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+     LEFT JOIN reactions r_like ON r_like.target_id = cr.course_review_id AND r_like.target_type = 'course_review' AND r_like.reaction = 'like'
+     LEFT JOIN reactions r_dislike ON r_dislike.target_id = cr.course_review_id AND r_dislike.target_type = 'course_review' AND r_dislike.reaction = 'dislike'
+     LEFT JOIN reactions my_r ON my_r.target_id = cr.course_review_id AND my_r.target_type = 'course_review' AND my_r.user_id = $4
      WHERE cr.course_id = $1 AND cr.status = 'active' AND cr.is_public = TRUE
      GROUP BY cr.course_review_id, u.user_id
      ORDER BY cr.created_at DESC
      LIMIT $2 OFFSET $3`,
-    [courseId, +limit, +offset]
+    [courseId, +limit, +offset, userId || null]
   );
 
   const { rows: countRows } = await pool.query(
@@ -171,7 +177,7 @@ exports.createSpotReview = async (userId, spotId, body) => {
 // ──────────────────────────────────────────────────────────────────────
 // 스팟 후기 목록 조회
 // ──────────────────────────────────────────────────────────────────────
-exports.getSpotReviews = async (spotId, query) => {
+exports.getSpotReviews = async (spotId, query, userId) => {
   const { page = 1, limit = 20 } = query;
   const offset = (page - 1) * limit;
 
@@ -187,16 +193,22 @@ exports.getSpotReviews = async (spotId, query) => {
        COALESCE(
          json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
          FILTER (WHERE t.tag_id IS NOT NULL), '[]'
-       ) AS tags
+       ) AS tags,
+       COUNT(DISTINCT r_like.user_id) AS like_count,
+       COUNT(DISTINCT r_dislike.user_id) AS dislike_count,
+       MAX(my_r.reaction) AS my_reaction
      FROM spot_reviews sr
      JOIN users u ON u.user_id = sr.user_id
      LEFT JOIN taggings tg ON tg.target_id = sr.spot_id AND tg.target_type = 'spot' AND tg.user_id = sr.user_id
      LEFT JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+     LEFT JOIN reactions r_like ON r_like.target_id = sr.spot_review_id AND r_like.target_type = 'spot_review' AND r_like.reaction = 'like'
+     LEFT JOIN reactions r_dislike ON r_dislike.target_id = sr.spot_review_id AND r_dislike.target_type = 'spot_review' AND r_dislike.reaction = 'dislike'
+     LEFT JOIN reactions my_r ON my_r.target_id = sr.spot_review_id AND my_r.target_type = 'spot_review' AND my_r.user_id = $4
      WHERE sr.spot_id = $1 AND sr.status = 'active' AND sr.is_public = TRUE
      GROUP BY sr.spot_review_id, u.user_id
      ORDER BY sr.created_at DESC
      LIMIT $2 OFFSET $3`,
-    [spotId, +limit, +offset]
+    [spotId, +limit, +offset, userId || null]
   );
 
   const { rows: countRows } = await pool.query(

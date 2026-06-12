@@ -11,7 +11,9 @@ exports.createCourseReview = async (req, res, next) => {
 
 exports.getCourseReviews = async (req, res, next) => {
   try {
-    const result = await reviewService.getCourseReviews(req.params.course_id, req.query);
+    const result = await reviewService.getCourseReviews(
+      req.params.course_id, req.query, req.user?.user_id
+    );
     return res.status(200).json(result);
   } catch (err) { next(err); }
 };
@@ -27,7 +29,9 @@ exports.createSpotReview = async (req, res, next) => {
 
 exports.getSpotReviews = async (req, res, next) => {
   try {
-    const result = await reviewService.getSpotReviews(req.params.spot_id, req.query);
+    const result = await reviewService.getSpotReviews(
+      req.params.spot_id, req.query, req.user?.user_id
+    );
     return res.status(200).json(result);
   } catch (err) { next(err); }
 };
