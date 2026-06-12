@@ -4,8 +4,197 @@ const { SPOT_CATEGORIES, SPOT_CATEGORY_SEARCH_RULES, inferSpotCategories } = req
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+const TOUR_API_BASE_URL = 'https://apis.data.go.kr/B551011/KorService2';
+const TOUR_API_MATCH_RADIUS = Number(process.env.TOUR_API_MATCH_RADIUS || 300);
+const TOUR_API_FALLBACK_MATCH_RADIUS = 500;
+
+function getTourApiServiceKey() {
+    return process.env.TOUR_API_SERVICE_KEY || process.env.TOURAPI_SERVICE_KEY;
+}
+
 function getKakaoAddress(document) {
     return document.road_address_name || document.address_name || null;
+}
+
+function normalizeTourApiItems(item) {
+    if (!item) return [];
+    return Array.isArray(item) ? item : [item];
+}
+
+function normalizePlaceName(name = '') {
+    return String(name)
+        .replace(/\([^)]*\)/g, '')
+        .replace(/\[[^\]]*\]/g, '')
+        .replace(/\s+/g, '')
+        .replace(/[·ㆍ.,'"]/g, '')
+        .toLowerCase();
+}
+
+function isSameTourPlace(kakaoName, tourTitle) {
+    const kakao = normalizePlaceName(kakaoName);
+    const tour = normalizePlaceName(tourTitle);
+    if (!kakao || !tour) return false;
+    return kakao === tour || kakao.includes(tour) || tour.includes(kakao);
+}
+
+function cleanTourOverview(overview = '') {
+    return String(overview)
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+async function fetchTourLocationCandidates({ lng, lat, radius }) {
+    const serviceKey = getTourApiServiceKey();
+    if (!serviceKey) return [];
+
+    const response = await axios.get(`${TOUR_API_BASE_URL}/locationBasedList2`, {
+        params: {
+            serviceKey,
+            MobileOS: process.env.TOUR_API_MOBILE_OS || 'ETC',
+            MobileApp: process.env.TOUR_API_MOBILE_APP || 'WalkBuddy',
+            _type: 'json',
+            arrange: 'E',
+            mapX: lng,
+            mapY: lat,
+            radius,
+            numOfRows: 20,
+            pageNo: 1,
+        },
+    });
+
+    const item = response.data?.response?.body?.items?.item;
+    return normalizeTourApiItems(item);
+}
+
+async function fetchTourOverview(contentId) {
+    const serviceKey = getTourApiServiceKey();
+    if (!serviceKey || !contentId) return null;
+
+    const response = await axios.get(`${TOUR_API_BASE_URL}/detailCommon2`, {
+        params: {
+            serviceKey,
+            MobileOS: process.env.TOUR_API_MOBILE_OS || 'ETC',
+            MobileApp: process.env.TOUR_API_MOBILE_APP || 'WalkBuddy',
+            _type: 'json',
+            contentId,
+        },
+    });
+
+    const item = response.data?.response?.body?.items?.item;
+    const detail = normalizeTourApiItems(item)[0];
+    return cleanTourOverview(detail?.overview || '');
+}
+
+async function enrichKakaoSpotTourContent(spot) {
+    const result = {
+        tour_content_enriched: false,
+        tour_content_status: 'skipped',
+        tour_content_match: null,
+    };
+
+    if (!getTourApiServiceKey()) {
+        result.tour_content_status = 'skipped_missing_tour_api_key';
+        return { spot, ...result };
+    }
+
+    if (spot.content_tour) {
+        result.tour_content_status = 'skipped_existing_content_tour';
+        return { spot, ...result };
+    }
+
+    const lng = Number(spot.x);
+    const lat = Number(spot.y);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+        result.tour_content_status = 'skipped_invalid_location';
+        return { spot, ...result };
+    }
+
+    try {
+        let candidates = await fetchTourLocationCandidates({
+            lng,
+            lat,
+            radius: TOUR_API_MATCH_RADIUS,
+        });
+
+        let matched = candidates
+            .filter(candidate => isSameTourPlace(spot.name, candidate.title))
+            .sort((a, b) => Number(a.dist || 0) - Number(b.dist || 0))[0];
+
+        if (!matched && TOUR_API_MATCH_RADIUS < TOUR_API_FALLBACK_MATCH_RADIUS) {
+            candidates = await fetchTourLocationCandidates({
+                lng,
+                lat,
+                radius: TOUR_API_FALLBACK_MATCH_RADIUS,
+            });
+            matched = candidates
+                .filter(candidate => isSameTourPlace(spot.name, candidate.title))
+                .sort((a, b) => Number(a.dist || 0) - Number(b.dist || 0))[0];
+        }
+
+        if (!matched?.contentid) {
+            result.tour_content_status = 'no_matching_tour_place';
+            return { spot, ...result };
+        }
+
+        const overview = await fetchTourOverview(matched.contentid);
+        if (!overview) {
+            result.tour_content_status = 'matched_without_overview';
+            result.tour_content_match = {
+                content_id: String(matched.contentid),
+                title: matched.title,
+                distance: matched.dist == null ? null : Number(matched.dist),
+            };
+            return { spot, ...result };
+        }
+
+        const updatedResult = await pool.query(
+            `UPDATE spots
+             SET content_tour = $2
+             WHERE spot_id = $1 AND content_tour IS NULL
+             RETURNING spot_id, kakao_place_id, name, address, categories, kakao_category_name,
+                       recommend_pct, content_tour,
+                       ST_X(location::GEOMETRY) AS x,
+                       ST_Y(location::GEOMETRY) AS y`,
+            [spot.spot_id, overview]
+        );
+
+        const updatedSpot = updatedResult.rows[0];
+        if (!updatedSpot) {
+            result.tour_content_status = 'skipped_existing_content_tour';
+            return { spot, ...result };
+        }
+
+        result.tour_content_enriched = true;
+        result.tour_content_status = 'enriched';
+        result.tour_content_match = {
+            content_id: String(matched.contentid),
+            title: matched.title,
+            distance: matched.dist == null ? null : Number(matched.dist),
+        };
+
+        return {
+            spot: {
+                ...updatedSpot,
+                x: Number(updatedSpot.x),
+                y: Number(updatedSpot.y),
+                recommend_pct: updatedSpot.recommend_pct == null ? null : Number(updatedSpot.recommend_pct),
+            },
+            ...result,
+        };
+    } catch (err) {
+        console.error('[TourAPI enrich failed]', err.message);
+        result.tour_content_status = 'tour_api_error';
+        return { spot, ...result };
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -243,17 +432,30 @@ exports.saveKakaoSpot = async (body) => {
         `INSERT INTO spots (kakao_place_id, name, location, address, categories, kakao_category_name, source, last_synced_at)
          VALUES ($1, $2, ST_Point($3, $4)::GEOGRAPHY, $5, $6::TEXT[], $7, 'kakao', NOW())
          ON CONFLICT (kakao_place_id) DO NOTHING
-         RETURNING spot_id, kakao_place_id, name, address, categories, kakao_category_name, recommend_pct`,
+         RETURNING spot_id, kakao_place_id, name, address, categories, kakao_category_name,
+                   recommend_pct, content_tour,
+                   ST_X(location::GEOMETRY) AS x,
+                   ST_Y(location::GEOMETRY) AS y`,
         [kakao_place_id, name, lng, lat, selectedAddress, categories, kakao_category_name || null]
     );
 
     if (createdResult.rows.length > 0) {
         const spot = createdResult.rows[0];
-        return { is_created: true, spot: { ...spot, recommend_pct: spot.recommend_pct == null ? null : Number(spot.recommend_pct) } };
+        const normalizedSpot = {
+            ...spot,
+            x: Number(spot.x),
+            y: Number(spot.y),
+            recommend_pct: spot.recommend_pct == null ? null : Number(spot.recommend_pct),
+        };
+        const enriched = await enrichKakaoSpotTourContent(normalizedSpot);
+        return { is_created: true, ...enriched };
     }
 
     const existingResult = await pool.query(
-        `SELECT spot_id, kakao_place_id, name, address, categories, kakao_category_name, recommend_pct, status
+        `SELECT spot_id, kakao_place_id, name, address, categories, kakao_category_name,
+                recommend_pct, content_tour, status,
+                ST_X(location::GEOMETRY) AS x,
+                ST_Y(location::GEOMETRY) AS y
          FROM spots WHERE kakao_place_id = $1`,
         [kakao_place_id]
     );
@@ -268,14 +470,24 @@ exports.saveKakaoSpot = async (body) => {
     if (selectedAddress && existingSpot.address !== selectedAddress) {
         const updatedResult = await pool.query(
             `UPDATE spots SET address = $2, last_synced_at = NOW() WHERE spot_id = $1
-             RETURNING spot_id, kakao_place_id, name, address, categories, kakao_category_name, recommend_pct`,
+             RETURNING spot_id, kakao_place_id, name, address, categories, kakao_category_name,
+                       recommend_pct, content_tour,
+                       ST_X(location::GEOMETRY) AS x,
+                       ST_Y(location::GEOMETRY) AS y`,
             [existingSpot.spot_id, selectedAddress]
         );
         currentSpot = updatedResult.rows[0];
     }
 
     const { status, ...spot } = currentSpot;
-    return { is_created: false, spot: { ...spot, recommend_pct: spot.recommend_pct == null ? null : Number(spot.recommend_pct) } };
+    const normalizedSpot = {
+        ...spot,
+        x: Number(spot.x),
+        y: Number(spot.y),
+        recommend_pct: spot.recommend_pct == null ? null : Number(spot.recommend_pct),
+    };
+    const enriched = await enrichKakaoSpotTourContent(normalizedSpot);
+    return { is_created: false, ...enriched };
 };
 
 // ──────────────────────────────────────────────────────────────────────

@@ -26,7 +26,24 @@ WalkBuddy는 사용자가 직접 산책 코스를 등록하고 공유할 수 있
 | Database | PostgreSQL (PostGIS) |
 | 인증 | JWT |
 | API 문서 | Swagger (OpenAPI 3.0) |
-| 외부 API | Kakao, Gemini, T Map, Google TTS |
+| 외부 API | Kakao Local API, TourAPI, Gemini AI, T Map, Google TTS |
+
+---
+
+## 환경변수
+
+TourAPI 관광 설명 보강을 사용하려면 `.env`에 아래 값을 추가합니다.
+
+```env
+TOUR_API_SERVICE_KEY=공공데이터포털_일반_인증키
+TOUR_API_MOBILE_OS=ETC
+TOUR_API_MOBILE_APP=WalkBuddy
+TOUR_API_MATCH_RADIUS=300
+```
+
+기존 `.env`에 `TOURAPI_SERVICE_KEY` 이름으로 저장해둔 경우도 백엔드에서 함께 인식합니다.
+
+`TOUR_API_MATCH_RADIUS`는 카카오 장소 좌표 주변에서 TourAPI 후보를 찾는 반경이며, 단위는 m입니다.
 
 ---
 
