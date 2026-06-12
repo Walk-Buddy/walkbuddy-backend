@@ -39,9 +39,9 @@ exports.saveKakaoSpot = async (req, res, next) => {
 
 exports.searchSpots = async (req, res, next) => {
     try {
-        const { category } = req.query;
-        if (!category) {
-            return res.status(400).json({ success: false, message: 'category query parameter is required' });
+        const { category, keyword, q } = req.query;
+        if (!category && !keyword && !q) {
+            return res.status(400).json({ success: false, message: 'category or keyword query parameter is required' });
         }
         const result = await spotService.searchSpots(req.query);
         return res.json({ success: true, ...result });

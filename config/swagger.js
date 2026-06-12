@@ -523,14 +523,15 @@ const swaggerDefinition = {
       get: {
         tags: ['스팟'],
         summary: '스팟 통합 검색',
-        description: '선택한 앱 스팟 카테고리 기준으로 카카오 API 후보와 DB 저장 스팟을 함께 검색합니다. DB 저장 스팟에는 태그, 추천도, 반경 필터를 적용할 수 있습니다.',
+        description: '키워드 또는 앱 스팟 카테고리 기준으로 카카오 API 후보와 DB 저장 스팟을 함께 검색합니다. keyword 또는 q로 장소명·주소·설명 등을 검색할 수 있고, x와 y를 함께 전달하면 거리 계산을 합니다. radius는 x,y와 함께 전달한 경우에만 반경 제한으로 적용됩니다.',
         security: [],
         parameters: [
-          { name: 'category', in: 'query', required: true, schema: { type: 'string', enum: ['산', '숲·휴양림', '수목원·정원', '강·하천', '호수·저수지', '계곡·폭포', '해수욕장·해변', '생태·서식지', '공원·광장'] }, description: '앱 기준 스팟 카테고리' },
+          { name: 'keyword', in: 'query', schema: { type: 'string' }, description: '장소명, 주소, 설명 키워드 검색. q도 같은 의미로 사용할 수 있습니다.' },
+          { name: 'category', in: 'query', schema: { type: 'string', enum: ['산', '숲·휴양림', '수목원·정원', '강·하천', '호수·저수지', '계곡·폭포', '해수욕장·해변', '생태·서식지', '공원·광장'] }, description: '앱 기준 스팟 카테고리. keyword가 없으면 category가 필요합니다.' },
           { name: 'tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표로 구분한 스팟 태그 UUID 목록. 선택한 태그를 모두 가진 DB 저장 스팟만 saved_spots에 포함됩니다.' },
-          { name: 'x', in: 'query', schema: { type: 'number' }, description: '기준 경도(lng). y와 함께 전달하면 카카오 API와 DB 모두 반경 검색을 적용합니다.' },
-          { name: 'y', in: 'query', schema: { type: 'number' }, description: '기준 위도(lat). x와 함께 전달하면 카카오 API와 DB 모두 반경 검색을 적용합니다.' },
-          { name: 'radius', in: 'query', schema: { type: 'number', default: 3000 }, description: '검색 반경(m). x, y가 있을 때 사용됩니다.' },
+          { name: 'x', in: 'query', schema: { type: 'number' }, description: '기준 경도(lng). y와 함께 전달하면 거리 계산에 사용됩니다.' },
+          { name: 'y', in: 'query', schema: { type: 'number' }, description: '기준 위도(lat). x와 함께 전달하면 거리 계산에 사용됩니다.' },
+          { name: 'radius', in: 'query', schema: { type: 'number' }, description: '검색 반경(m). x, y와 함께 전달한 경우에만 반경 제한을 적용합니다.' },
           { name: 'min_recommend_pct', in: 'query', schema: { type: 'number', minimum: 0, maximum: 100 }, description: 'DB 저장 스팟의 최소 추천도' },
         ],
         responses: {
