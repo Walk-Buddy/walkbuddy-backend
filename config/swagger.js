@@ -265,11 +265,13 @@ const swaggerDefinition = {
     '/api/tags': {
       get: {
         tags: ['태그'],
-        summary: '태그 목록 조회',
+        summary: '전체 태그 목록 조회',
+        description: '사용자가 선택할 수 있는 활성 태그를 코스 태그와 스팟 태그로 나누어 반환합니다.',
+        security: [],
         responses: {
           200: {
             description: '태그 목록',
-            content: { 'application/json': { schema: { type: 'object', properties: { tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string', example: '#자연' }, type: { type: 'string', example: 'course' } } } } } } } },
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, total: { type: 'integer', example: 20 }, course_count: { type: 'integer', example: 7 }, spot_count: { type: 'integer', example: 13 }, course_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string', example: '추천산책로' }, type: { type: 'string', example: 'course' } } } }, spot_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string', example: '포토존' }, type: { type: 'string', example: 'spot' } } } } } } } },
           },
         },
       },
