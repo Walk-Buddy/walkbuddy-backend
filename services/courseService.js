@@ -51,6 +51,8 @@ const buildLineString = async (waypoints, client) => {
       const from = allPoints[i];
       const to   = allPoints[i + 1];
 
+      console.log('[Tmap 요청]', from.lng, from.lat, '->', to.lng, to.lat);
+
       const res = await fetch('https://apis.openapi.sk.com/tmap/routes/pedestrian?version=1', {
         method: 'POST',
         headers: {
@@ -95,6 +97,7 @@ const buildLineString = async (waypoints, client) => {
     console.warn('[buildLineString] T맵 실패, 직선 경로로 폴백:', err.message);
     const fallbackPoints = points.map((p) => `${p.lng} ${p.lat}`);
     return `SRID=4326;LINESTRING(${fallbackPoints.join(', ')})`;
+    
   }
 };
 
