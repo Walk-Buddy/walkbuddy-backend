@@ -282,12 +282,13 @@ const swaggerDefinition = {
       get: {
         tags: ['코스'],
         summary: '코스 검색',
-        description: '기준 좌표 반경 안의 공개 코스를 거리/시간, 후기 기반 난이도·평점, 코스 태그, 포함 스팟 태그로 검색합니다. x는 경도, y는 위도입니다.',
+        description: '공개 코스를 키워드, 위치, 거리/시간, 후기 기반 난이도·평점, 코스 태그, 포함 스팟 태그로 검색합니다. x는 경도, y는 위도이며 x와 y를 함께 전달하면 거리 계산을 합니다. radius를 함께 전달한 경우에만 반경 제한을 적용합니다.',
         security: [],
         parameters: [
-          { name: 'x', in: 'query', required: true, schema: { type: 'number' }, description: '기준 경도(lng)' },
-          { name: 'y', in: 'query', required: true, schema: { type: 'number' }, description: '기준 위도(lat)' },
-          { name: 'radius', in: 'query', schema: { type: 'number', default: 5000 }, description: '검색 반경(m)' },
+          { name: 'keyword', in: 'query', schema: { type: 'string' }, description: '코스명, 설명, 카테고리 키워드 검색. q도 같은 의미로 사용할 수 있습니다.' },
+          { name: 'x', in: 'query', schema: { type: 'number' }, description: '기준 경도(lng). y와 함께 전달하면 거리 계산에 사용됩니다.' },
+          { name: 'y', in: 'query', schema: { type: 'number' }, description: '기준 위도(lat). x와 함께 전달하면 거리 계산에 사용됩니다.' },
+          { name: 'radius', in: 'query', schema: { type: 'number' }, description: '검색 반경(m). x, y와 함께 전달한 경우에만 반경 제한을 적용합니다.' },
           { name: 'min_total_distance', in: 'query', schema: { type: 'number' }, description: '최소 총 길이(m)' },
           { name: 'max_total_distance', in: 'query', schema: { type: 'number' }, description: '최대 총 길이(m)' },
           { name: 'min_estimated_duration', in: 'query', schema: { type: 'number' }, description: '최소 예상 소요 시간(분)' },

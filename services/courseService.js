@@ -472,9 +472,11 @@ exports.getCourses = async (query) => {
 // 기준 좌표 반경, 거리/시간, 후기 기반 난이도·평점, 코스 태그, 포함 스팟 태그로 필터링
 // ──────────────────────────────────────────────────────────────────────
 exports.searchCourses = async (query) => {
-  const lng = parseNumberParam(readQueryValue(query.x, query.lng), 'x', { required: true });
-  const lat = parseNumberParam(readQueryValue(query.y, query.lat), 'y', { required: true });
-  const radius = parseNumberParam(query.radius, 'radius', { min: 1 }) ?? 5000;
+  const keyword = readQueryValue(query.keyword, query.q);
+  const normalizedKeyword = isMissing(keyword) ? null : String(keyword).trim();
+  const lng = parseNumberParam(readQueryValue(query.x, query.lng), 'x');
+  const lat = parseNumberParam(readQueryValue(query.y, query.lat), 'y');
+  const radius = parseNumberParam(query.radius, 'radius', { min: 1 });
   const minTotalDistance = parseNumberParam(query.min_total_distance, 'min_total_distance', { min: 0 });
   const maxTotalDistance = parseNumberParam(query.max_total_distance, 'max_total_distance', { min: 0 });
   const minEstimatedDuration = parseNumberParam(query.min_estimated_duration, 'min_estimated_duration', { min: 0 });
@@ -487,6 +489,12 @@ exports.searchCourses = async (query) => {
   const limit = parseIntegerParam(query.limit, 'limit', { defaultValue: 20, min: 1, max: 100 });
   const offset = (page - 1) * limit;
 
+  if ((lng === null) !== (lat === null)) {
+    throw createBadRequest('x and y must be provided together');
+  }
+
+  const hasLocation = lng !== null && lat !== null;
+
   if (maxTotalDistance !== null && minTotalDistance !== null && maxTotalDistance < minTotalDistance) {
     throw createBadRequest('max_total_distance must be greater than or equal to min_total_distance');
   }
@@ -498,17 +506,14 @@ exports.searchCourses = async (query) => {
   const params = [];
   const conditions = [`c.status = 'active'`, `c.is_public = TRUE`];
 
-  params.push(lng);
-  const lngParamIndex = params.length;
-  params.push(lat);
-  const latParamIndex = params.length;
-  params.push(radius);
-  const radiusParamIndex = params.length;
-
-  const referencePointSql = `ST_Point($${lngParamIndex}, $${latParamIndex})::geography`;
-  const distanceSelectSql = `ST_Distance(c.route_geometry, ${referencePointSql}) AS distance`;
-
-  conditions.push(`ST_DWithin(c.route_geometry, ${referencePointSql}, $${radiusParamIndex})`);
+  if (normalizedKeyword) {
+    params.push(`%${normalizedKeyword}%`);
+    conditions.push(`(
+      c.name ILIKE $${params.length}
+      OR c.description ILIKE $${params.length}
+      OR c.category ILIKE $${params.length}
+    )`);
+  }
 
   if (minTotalDistance !== null) {
     params.push(minTotalDistance);
@@ -588,14 +593,45 @@ exports.searchCourses = async (query) => {
     `);
   }
 
-  const sort = readQueryValue(query.sort) || 'distance';
+  const listOnlyParams = [];
+  let distanceSelectSql = 'NULL::double precision AS distance';
+
+  if (hasLocation) {
+    let lngParamIndex;
+    let latParamIndex;
+
+    if (radius !== null) {
+      params.push(lng);
+      lngParamIndex = params.length;
+      params.push(lat);
+      latParamIndex = params.length;
+
+      const referencePointSql = `ST_Point($${lngParamIndex}, $${latParamIndex})::geography`;
+      distanceSelectSql = `ST_Distance(c.route_geometry, ${referencePointSql}) AS distance`;
+
+      params.push(radius);
+      const radiusParamIndex = params.length;
+      conditions.push(`ST_DWithin(c.route_geometry, ${referencePointSql}, $${radiusParamIndex})`);
+    } else {
+      listOnlyParams.push(lng);
+      lngParamIndex = params.length + listOnlyParams.length;
+      listOnlyParams.push(lat);
+      latParamIndex = params.length + listOnlyParams.length;
+
+      const referencePointSql = `ST_Point($${lngParamIndex}, $${latParamIndex})::geography`;
+      distanceSelectSql = `ST_Distance(c.route_geometry, ${referencePointSql}) AS distance`;
+    }
+  }
+
+  const sort = readQueryValue(query.sort) || (hasLocation ? 'distance' : 'latest');
   const orderMap = {
-    distance: 'distance ASC',
-    rating: 'rs.avg_rating DESC NULLS LAST, distance ASC',
+    distance: hasLocation ? 'distance ASC' : 'c.created_at DESC',
+    rating: hasLocation ? 'rs.avg_rating DESC NULLS LAST, distance ASC' : 'rs.avg_rating DESC NULLS LAST, c.created_at DESC',
     latest: 'c.created_at DESC',
-    length: 'c.total_distance ASC, distance ASC',
-    duration: 'c.estimated_duration ASC, distance ASC',
+    length: hasLocation ? 'c.total_distance ASC, distance ASC' : 'c.total_distance ASC',
+    duration: hasLocation ? 'c.estimated_duration ASC, distance ASC' : 'c.estimated_duration ASC',
   };
+
   const orderBySql = orderMap[sort] || orderMap.distance;
 
   const baseSql = `
@@ -666,9 +702,9 @@ exports.searchCourses = async (query) => {
     WHERE ${conditions.join(' AND ')}
   `;
 
-  const listParams = [...params, limit, offset];
-  const limitParamIndex = params.length + 1;
-  const offsetParamIndex = params.length + 2;
+  const listParams = [...params, ...listOnlyParams, limit, offset];
+  const limitParamIndex = params.length + listOnlyParams.length + 1;
+  const offsetParamIndex = params.length + listOnlyParams.length + 2;
 
   const listSql = `
     ${baseSql}
@@ -726,6 +762,7 @@ exports.searchCourses = async (query) => {
     return {
       success: true,
       filters: {
+        keyword: normalizedKeyword || null,
         x: lng,
         y: lat,
         radius,
