@@ -11,6 +11,7 @@
     "db:migrate": "node db/run-sql.js",
     "seed": "node db/seed.js",
     "import:durunubi": "node scripts/import-durunubi-courses.js",
+    "seed:prewalk-course": "node scripts/create-prewalk-course-via-api.js",
     "erd:gen": "node db/generate-erd-data.js",
     "erd:dev": "npm run erd:gen && npm --prefix db/erd-viewer run dev",
     "db:seed": "node db/run-sql.js db/seed.sql"
