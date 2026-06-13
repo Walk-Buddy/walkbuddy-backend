@@ -428,7 +428,6 @@ exports.createCourseFromWalk = async (userId, body) => {
   try {
     await client.query('BEGIN');
 
-    // 종료된 산책 기록 조회
     const { rows } = await client.query(
       `SELECT actual_route, total_distance, duration
        FROM walk_records
@@ -447,11 +446,20 @@ exports.createCourseFromWalk = async (userId, body) => {
       err.status = 400; throw err;
     }
 
+    // actual_route GeoJSON → waypoints 변환 후 Tmap 경로 생성
+    const { rows: [geoRow] } = await client.query(
+      `SELECT ST_AsGeoJSON($1)::json AS geojson`, [actual_route]
+    );
+    const coordinates = geoRow.geojson.coordinates;
+    const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
+    const wkt = await buildLineString(routeWaypoints, client);
+    const stats = await calcStats(wkt, client);
+
     const { rows: [course] } = await client.query(
       `INSERT INTO courses (owner_id, name, description, route_geometry, total_distance, estimated_duration, is_public)
        VALUES ($1,$2,$3,$4,$5,$6,$7)
        RETURNING course_id, name, total_distance, estimated_duration, is_public, created_at`,
-      [userId, name, description || null, actual_route, total_distance, Math.ceil(duration), is_public]
+      [userId, name, description || null, wkt, stats.totalDistance, duration, is_public]
     );
 
     await insertTags(tag_ids, course.course_id, userId, client);
