@@ -5,10 +5,7 @@ const path = require('path');
 const axios = require('axios');
 const pool = require('../config/db');
 const { inferSpotCategoriesWithFallback } = require('../constants/spotCategoryRules');
-const {
-  getDurunubiSpotMapping,
-  normalizeDurunubiSpotName,
-} = require('../constants/durunubiSpotMappings');
+const { normalizeDurunubiSpotName } = require('../constants/durunubiSpotMappings');
 
 const KAKAO_LOCAL_SEARCH_URL = 'https://dapi.kakao.com/v2/local/search/keyword.json';
 const TOUR_API_BASE_URL = 'https://apis.data.go.kr/B551011/KorService2';
@@ -122,26 +119,13 @@ function extractSpotNamesFromTourInfo(tourInfo) {
   return [...new Set(names)];
 }
 
-function getCommonSuffixLength(a, b) {
-  let length = 0;
-  while (
-    length < a.length
-    && length < b.length
-    && a[a.length - 1 - length] === b[b.length - 1 - length]
-  ) {
-    length += 1;
-  }
-  return length;
-}
-
 function isSamePlace(expectedName, actualName) {
   const expected = normalizePlaceName(expectedName);
   const actual = normalizePlaceName(actualName);
   if (!expected || !actual) return false;
   return expected === actual
     || actual.includes(expected)
-    || expected.includes(actual)
-    || getCommonSuffixLength(expected, actual) >= 4;
+    || expected.includes(actual);
 }
 
 function getNameScore(expectedName, actualName) {
@@ -151,34 +135,20 @@ function getNameScore(expectedName, actualName) {
   if (expected === actual) return 100;
   if (actual.includes(expected)) return 85;
   if (expected.includes(actual)) return 70;
-  if (getCommonSuffixLength(expected, actual) >= 4) return 65;
   return 0;
 }
 
-function buildAliases(sourceName, courseName) {
-  const mapping = getDurunubiSpotMapping(sourceName, { courseName });
+function buildKakaoKeywords(sourceName, region) {
   const name = cleanSpotNameCandidate(sourceName);
-  const aliases = [name];
-
-  if (mapping?.canonicalName) aliases.push(mapping.canonicalName);
-  if (Array.isArray(mapping?.kakaoKeywords)) aliases.push(...mapping.kakaoKeywords);
-  if (Array.isArray(mapping?.tourApiKeywords)) aliases.push(...mapping.tourApiKeywords);
-
-  if (name.endsWith('해안길')) aliases.push(name.replace(/해안길$/, '해안산책로'));
-  if (name.includes('수산시장')) aliases.push(name.replace(/수산시장/g, '시장'));
-  if (name.endsWith('왜성') && name.length > 4) aliases.push(name.slice(-4));
-
-  return [...new Set(aliases.map(cleanSpotNameCandidate).filter(Boolean))];
-}
-
-function buildKakaoKeywords(sourceName, region, courseName) {
-  return buildAliases(sourceName, courseName)
-    .flatMap((alias) => [region ? `${region} ${alias}` : null, alias])
+  return [
+    region ? `${region} ${name}` : null,
+    name,
+  ]
     .filter(Boolean);
 }
 
-function buildTourKeywords(sourceName, courseName) {
-  return buildAliases(sourceName, courseName);
+function buildTourKeywords(sourceName) {
+  return [cleanSpotNameCandidate(sourceName)].filter(Boolean);
 }
 
 const kakaoCache = new Map();
@@ -264,15 +234,14 @@ async function getRoutePosition(courseId, lng, lat) {
 async function findKakaoMatch(course, sourceName, region) {
   const seenPlaceIds = new Set();
   const matches = [];
-  const aliases = buildAliases(sourceName, course.name);
 
-  for (const keyword of buildKakaoKeywords(sourceName, region, course.name)) {
+  for (const keyword of buildKakaoKeywords(sourceName, region)) {
     const documents = await searchKakao(keyword);
     for (const document of documents) {
       if (!document.id || seenPlaceIds.has(document.id)) continue;
       seenPlaceIds.add(document.id);
 
-      const score = Math.max(...aliases.map((alias) => getNameScore(alias, document.place_name)));
+      const score = getNameScore(sourceName, document.place_name);
       if (score <= 0) continue;
 
       const distance = await getRouteDistance(course.course_id, document.x, document.y);
@@ -296,21 +265,12 @@ async function findKakaoMatch(course, sourceName, region) {
 }
 
 async function findTourMatch(course, sourceName, kakaoMatch) {
-  const mapping = getDurunubiSpotMapping(sourceName, { courseName: course.name });
-  if (mapping?.tourApiContentId) {
-    return {
-      tourApiContentId: String(mapping.tourApiContentId),
-      tourApiTitle: mapping.canonicalName || sourceName,
-      tourRouteDistance: null,
-    };
-  }
-
   const seenContentIds = new Set();
   const matches = [];
-  const aliases = buildAliases(sourceName, course.name);
+  const aliases = [sourceName];
   if (kakaoMatch?.canonicalName) aliases.push(kakaoMatch.canonicalName);
 
-  for (const keyword of buildTourKeywords(sourceName, course.name)) {
+  for (const keyword of buildTourKeywords(sourceName)) {
     const items = await searchTour(keyword);
     for (const item of items) {
       if (!item.contentid || seenContentIds.has(String(item.contentid))) continue;
@@ -335,13 +295,10 @@ async function findTourMatch(course, sourceName, kakaoMatch) {
   return matches.sort((a, b) => a.tourRouteDistance - b.tourRouteDistance)[0] || null;
 }
 
-function mergeMapping(base, addition) {
+function cleanMapping(addition) {
   return Object.fromEntries(
     Object.entries({
-      ...base,
       ...addition,
-      kakaoKeywords: [...new Set([...(base.kakaoKeywords || []), ...(addition.kakaoKeywords || [])])],
-      tourApiKeywords: [...new Set([...(base.tourApiKeywords || []), ...(addition.tourApiKeywords || [])])],
     }).filter(([, value]) => (
       value !== null
       && value !== undefined
@@ -397,25 +354,20 @@ async function main() {
         sourceName,
         sourceIndex,
         normalizedSourceName: normalizePlaceName(sourceName),
-        mapping: mergeMapping(
-          getDurunubiSpotMapping(sourceName, { courseName: course.name }) || {},
-          {
-            canonicalName: kakaoMatch?.canonicalName || tourMatch?.tourApiTitle || null,
-            kakaoPlaceId: kakaoMatch?.kakaoPlaceId || null,
-            address: kakaoMatch?.address || null,
-            categories: kakaoMatch?.categories || [],
-            kakaoCategoryName: kakaoMatch?.kakaoCategoryName || null,
-            x: kakaoMatch?.x || null,
-            y: kakaoMatch?.y || null,
-            kakaoKeywords: kakaoMatch ? buildKakaoKeywords(sourceName, region, course.name) : [],
-            tourApiContentId: tourMatch?.tourApiContentId || null,
-            tourApiKeywords: tourMatch ? buildTourKeywords(sourceName, course.name) : [],
-            routeDistance: kakaoMatch?.routeDistance ?? null,
-            tourRouteDistance: tourMatch?.tourRouteDistance ?? null,
-            routeProgress: routePosition?.routeProgress ?? null,
-            distanceFromStartM: routePosition?.distanceFromStartM ?? null,
-          }
-        ),
+        mapping: cleanMapping({
+          canonicalName: kakaoMatch?.canonicalName || tourMatch?.tourApiTitle || null,
+          kakaoPlaceId: kakaoMatch?.kakaoPlaceId || null,
+          address: kakaoMatch?.address || null,
+          categories: kakaoMatch?.categories || [],
+          kakaoCategoryName: kakaoMatch?.kakaoCategoryName || null,
+          x: kakaoMatch?.x || null,
+          y: kakaoMatch?.y || null,
+          tourApiContentId: tourMatch?.tourApiContentId || null,
+          routeDistance: kakaoMatch?.routeDistance ?? null,
+          tourRouteDistance: tourMatch?.tourRouteDistance ?? null,
+          routeProgress: routePosition?.routeProgress ?? null,
+          distanceFromStartM: routePosition?.distanceFromStartM ?? null,
+        }),
       });
     }
 
@@ -424,14 +376,6 @@ async function main() {
     }
   }
 
-  const byNormalizedName = new Map();
-  for (const row of rawRows) {
-    if (!byNormalizedName.has(row.normalizedSourceName)) byNormalizedName.set(row.normalizedSourceName, []);
-    byNormalizedName.get(row.normalizedSourceName).push(row);
-  }
-
-  const byName = {};
-  const byCourseAndName = {};
   const byCourse = {};
   const unmapped = [];
 
@@ -455,35 +399,14 @@ async function main() {
     }));
   }
 
-  for (const [, rows] of byNormalizedName.entries()) {
-    const mappedRows = rows.filter((row) => row.mapping.kakaoPlaceId || row.mapping.tourApiContentId);
-    if (mappedRows.length === 0) {
-      unmapped.push(...rows.map((row) => ({ courseName: row.courseName, sourceName: row.sourceName })));
-      continue;
-    }
-
-    const signature = (row) => `${row.mapping.kakaoPlaceId || ''}:${row.mapping.tourApiContentId || ''}`;
-    const signatures = new Set(mappedRows.map(signature));
-
-    if (signatures.size === 1) {
-      const first = mappedRows[0];
-      byName[first.sourceName] = first.mapping;
-    } else {
-      for (const row of mappedRows) {
-        byCourseAndName[`${row.courseName}::${row.sourceName}`] = row.mapping;
-      }
-    }
-
-    const failedRows = rows.filter((row) => !row.mapping.kakaoPlaceId && !row.mapping.tourApiContentId);
-    unmapped.push(...failedRows.map((row) => ({ courseName: row.courseName, sourceName: row.sourceName })));
-  }
+  unmapped.push(...rawRows
+    .filter((row) => !row.mapping.kakaoPlaceId && !row.mapping.tourApiContentId)
+    .map((row) => ({ courseName: row.courseName, sourceName: row.sourceName })));
 
   const output = {
     generatedAt: new Date().toISOString(),
     stats,
     byCourse,
-    byName,
-    byCourseAndName,
     unmapped,
   };
 
@@ -492,8 +415,6 @@ async function main() {
   console.log(JSON.stringify({
     ...stats,
     byCourse: Object.keys(byCourse).length,
-    byName: Object.keys(byName).length,
-    byCourseAndName: Object.keys(byCourseAndName).length,
     unmapped: unmapped.length,
   }, null, 2));
 }

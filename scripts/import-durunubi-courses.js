@@ -3,10 +3,7 @@ require('dotenv').config();
 const axios = require('axios');
 const pool = require('../config/db');
 const spotService = require('../services/spotService');
-const {
-  getDurunubiCourseSpotMappings,
-  getDurunubiSpotMapping,
-} = require('../constants/durunubiSpotMappings');
+const { getDurunubiCourseSpotMappings } = require('../constants/durunubiSpotMappings');
 
 const BASE_URL = 'http://apis.data.go.kr/B551011/Durunubi';
 const DATA_SOURCE = '한국관광공사_두루누비';
@@ -15,8 +12,6 @@ const DEFAULT_MOBILE_OS = 'ETC';
 const DEFAULT_MOBILE_APP = 'WalkBuddy';
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_WAYPOINTS = 1200;
-const DEFAULT_SPOT_ROUTE_RADIUS = 700;
-const DEFAULT_SPOT_SEARCH_SIZE = 10;
 
 const serviceKey = process.env.DURUNUBI_SERVICE_KEY;
 const mobileOS = process.env.DURUNUBI_MOBILE_OS || DEFAULT_MOBILE_OS;
@@ -25,8 +20,6 @@ const brdDiv = process.env.DURUNUBI_BRD_DIV || '';
 const maxImport = toInt(process.env.DURUNUBI_MAX_IMPORT, 0);
 const startIndex = Math.max(0, toInt(process.env.DURUNUBI_START_INDEX, 0));
 const maxWaypoints = toInt(process.env.DURUNUBI_MAX_WAYPOINTS, DEFAULT_MAX_WAYPOINTS);
-const spotRouteRadius = toInt(process.env.DURUNUBI_SPOT_ROUTE_RADIUS, DEFAULT_SPOT_ROUTE_RADIUS);
-const spotSearchSize = toInt(process.env.DURUNUBI_SPOT_SEARCH_SIZE, DEFAULT_SPOT_SEARCH_SIZE);
 
 const http = axios.create({
   timeout: 30000,
@@ -186,176 +179,6 @@ function cleanText(value) {
     .replace(/\n{3,}/g, '\n\n')
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
-}
-
-function splitDescriptionSections(description) {
-  const sections = {};
-  if (!description) return sections;
-
-  let currentKey = null;
-
-  for (const line of String(description).split('\n')) {
-    const heading = line.match(/^@@([a-z_]+)\s*$/);
-    if (heading) {
-      currentKey = heading[1];
-      sections[currentKey] = '';
-      continue;
-    }
-
-    if (currentKey) {
-      sections[currentKey] += `${line}\n`;
-    }
-  }
-
-  for (const key of Object.keys(sections)) {
-    sections[key] = sections[key].trim();
-  }
-
-  return sections;
-}
-
-function cleanSpotNameCandidate(value) {
-  return String(value || '')
-    .replace(/^[\s"'‘’“”]+|[\s"'‘’“”]+$/g, '')
-    .replace(/^(?:봄이면|여름철|창원 유일의|마산의|웅산 서쪽의)\s*/g, '')
-    .replace(/^.*의\s+([^\s]+(?:\s+[^\s]+){0,2})$/g, '$1')
-    .replace(/^(?:일출|일몰|야경|노을)?\s*명소\s+/g, '')
-    .replace(/[.,。·ㆍ]+$/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function isLikelySpotNameCandidate(value) {
-  const normalized = normalizePlaceName(value);
-  if (normalized.length < 3) return false;
-  return !['봄', '여름', '가을', '겨울', '봄이면', '여름철'].includes(value);
-}
-
-function extractSpotNamesFromTourInfo(tourInfo) {
-  const text = cleanText(tourInfo);
-  if (!text) return [];
-
-  const names = [];
-  const lines = text
-    .split('\n')
-    .map((line) => line.replace(/^\s*[-*•]\s*/, '').trim())
-    .filter(Boolean);
-
-  for (const line of lines) {
-    const quotedMatches = [...line.matchAll(/['"‘’“”]([^'"‘’“”]+)['"‘’“”]/g)]
-      .map((match) => cleanSpotNameCandidate(match[1]))
-      .filter(Boolean);
-
-    if (quotedMatches.length > 0) {
-      names.push(...quotedMatches);
-      continue;
-    }
-
-    const locationParticleMatch = line.match(/(.+?)(?:에서|에는|에\s)/);
-    if (locationParticleMatch) {
-      const particleCandidate = cleanSpotNameCandidate(locationParticleMatch[1]);
-      if (isLikelySpotNameCandidate(particleCandidate)) {
-        names.push(particleCandidate);
-        continue;
-      }
-    }
-
-    const markers = [
-      '감상할 수 있는 ',
-      '느낄 수 있는 ',
-      '자랑하는 ',
-      '어우러진 ',
-      '구경할 수 있는 ',
-      '볼 수 있는 ',
-      '이어진 ',
-      '아기자기한 ',
-      '조성된 ',
-      '가능한 ',
-      '있는 ',
-    ];
-    let candidate = null;
-
-    for (const marker of markers) {
-      const index = line.lastIndexOf(marker);
-      if (index >= 0) {
-        candidate = line.slice(index + marker.length);
-        break;
-      }
-    }
-
-    if (!candidate) candidate = line;
-
-    const cleaned = cleanSpotNameCandidate(candidate);
-    if (cleaned) names.push(cleaned);
-  }
-
-  return [...new Set(names)];
-}
-
-function normalizePlaceName(name = '') {
-  return String(name)
-    .replace(/\([^)]*\)/g, '')
-    .replace(/\[[^\]]*\]/g, '')
-    .replace(/\s+/g, '')
-    .replace(/[·ㆍ.,'"]/g, '')
-    .toLowerCase();
-}
-
-function getSpotNameAliases(spotName, context = {}) {
-  const name = cleanSpotNameCandidate(spotName);
-  const mapping = getDurunubiSpotMapping(name, context);
-  const aliases = [name];
-
-  if (mapping?.canonicalName) {
-    aliases.push(mapping.canonicalName);
-  }
-
-  if (Array.isArray(mapping?.kakaoKeywords)) {
-    aliases.push(...mapping.kakaoKeywords);
-  }
-
-  if (name.endsWith('해안길')) {
-    aliases.push(name.replace(/해안길$/, '해안산책로'));
-  }
-
-  if (name.includes('수산시장')) {
-    aliases.push(name.replace(/수산시장/g, '시장'));
-  }
-
-  if (name.endsWith('왜성') && name.length > 4) {
-    aliases.push(name.slice(-4));
-  }
-
-  return [...new Set(aliases.map(cleanSpotNameCandidate).filter(Boolean))];
-}
-
-function getKakaoNameScore(expectedName, kakaoName) {
-  const expected = normalizePlaceName(expectedName);
-  const actual = normalizePlaceName(kakaoName);
-  if (!expected || !actual) return 0;
-  if (expected === actual) return 100;
-  if (actual.includes(expected)) return 80;
-  if (expected.includes(actual)) return 60;
-  return 0;
-}
-
-function buildSpotSearchKeywords(spotName, region, context = {}) {
-  const mapping = getDurunubiSpotMapping(spotName, context);
-  const mappedKeywords = Array.isArray(mapping?.kakaoKeywords) ? mapping.kakaoKeywords : [];
-  const aliases = [...mappedKeywords, ...getSpotNameAliases(spotName, context)];
-
-  return [...new Set(aliases.map(cleanSpotNameCandidate).filter(Boolean))]
-    .flatMap((alias) => [
-      region ? `${region} ${alias}` : null,
-      alias,
-    ])
-    .filter(Boolean);
-}
-
-function getBestKakaoNameScore(spotName, kakaoName, context = {}) {
-  return Math.max(
-    ...getSpotNameAliases(spotName, context).map((alias) => getKakaoNameScore(alias, kakaoName))
-  );
 }
 
 function decodeHtmlEntities(value) {
@@ -542,22 +365,6 @@ async function insertWaypoints(client, courseId, points, spotWaypoints = []) {
   );
 }
 
-async function getDistanceFromCourseRoute(client, courseId, spot) {
-  const lng = Number(spot.x);
-  const lat = Number(spot.y);
-
-  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
-
-  const { rows: [result] } = await client.query(
-    `SELECT ST_Distance(route_geometry, ST_Point($2, $3)::GEOGRAPHY) AS distance_m
-     FROM courses
-     WHERE course_id = $1`,
-    [courseId, lng, lat]
-  );
-
-  return result?.distance_m == null ? null : Number(result.distance_m);
-}
-
 async function getRoutePositionFromCourseRoute(client, courseId, spot) {
   const lng = Number(spot.x);
   const lat = Number(spot.y);
@@ -589,91 +396,37 @@ async function getRoutePositionFromCourseRoute(client, courseId, spot) {
   };
 }
 
-async function findDurunubiSpotCandidate(client, courseId, courseName, spotName, region, mappingOverride = null) {
-  const context = { courseName };
-  const mapping = mappingOverride || getDurunubiSpotMapping(spotName, context);
-  const searchedPlaceIds = new Set();
-  const matchedCandidates = [];
-
+function buildDurunubiSpotCandidate(spotName, mapping) {
   if (
-    mapping?.kakaoPlaceId
-    && mapping?.x != null
-    && mapping?.y != null
-    && Array.isArray(mapping?.categories)
-    && mapping.categories.length > 0
+    !mapping?.kakaoPlaceId
+    || mapping.x == null
+    || mapping.y == null
+    || !Array.isArray(mapping.categories)
+    || mapping.categories.length === 0
   ) {
-    const mappedCandidate = {
-      kakao_place_id: String(mapping.kakaoPlaceId),
-      name: mapping.canonicalName || spotName,
-      kakao_category_name: mapping.kakaoCategoryName || null,
-      categories: mapping.categories,
-      address: mapping.address || null,
-      x: mapping.x,
-      y: mapping.y,
-      source_spot_name: spotName,
-      canonical_name: mapping.canonicalName || null,
-      tour_api_content_id: mapping.tourApiContentId || null,
-      tour_api_keywords: Array.isArray(mapping.tourApiKeywords) ? mapping.tourApiKeywords : [],
-      route_progress: mapping.routeProgress ?? null,
-      distance_from_start_m: mapping.distanceFromStartM ?? null,
-    };
-    const routeDistance = await getDistanceFromCourseRoute(client, courseId, mappedCandidate);
-    if (routeDistance !== null && routeDistance <= spotRouteRadius) {
-      return {
-        ...mappedCandidate,
-        name_score: 100,
-        route_distance: routeDistance,
-      };
-    }
+    return null;
   }
 
-  for (const keyword of buildSpotSearchKeywords(spotName, region, context)) {
-    const candidates = await spotService.searchKakaoSpotCandidates({
-      keyword,
-      size: spotSearchSize,
-    });
-
-    for (const candidate of candidates) {
-      if (searchedPlaceIds.has(candidate.kakao_place_id)) continue;
-      searchedPlaceIds.add(candidate.kakao_place_id);
-      if (mapping?.kakaoPlaceId && String(candidate.kakao_place_id) !== String(mapping.kakaoPlaceId)) continue;
-
-      const nameScore = getBestKakaoNameScore(spotName, candidate.name, context);
-      if (nameScore <= 0) continue;
-
-      const routeDistance = await getDistanceFromCourseRoute(client, courseId, candidate);
-      if (routeDistance === null || routeDistance > spotRouteRadius) continue;
-
-      matchedCandidates.push({
-        ...candidate,
-        name_score: nameScore,
-        route_distance: routeDistance,
-        source_spot_name: spotName,
-        canonical_name: mapping?.canonicalName || null,
-        tour_api_content_id: mapping?.tourApiContentId || null,
-        tour_api_keywords: Array.isArray(mapping?.tourApiKeywords) ? mapping.tourApiKeywords : [],
-      });
-    }
-  }
-
-  return matchedCandidates.sort((a, b) => (
-    b.name_score - a.name_score ||
-    a.route_distance - b.route_distance ||
-    (a.distance || 0) - (b.distance || 0)
-  ))[0] || null;
+  return {
+    kakao_place_id: String(mapping.kakaoPlaceId),
+    name: mapping.canonicalName || spotName,
+    kakao_category_name: mapping.kakaoCategoryName || null,
+    categories: mapping.categories,
+    address: mapping.address || null,
+    x: mapping.x,
+    y: mapping.y,
+    source_spot_name: spotName,
+    canonical_name: mapping.canonicalName || null,
+    tour_api_content_id: mapping.tourApiContentId || null,
+    route_progress: mapping.routeProgress ?? null,
+    distance_from_start_m: mapping.distanceFromStartM ?? null,
+    route_distance: mapping.routeDistance ?? null,
+  };
 }
 
 async function importDurunubiSpotsForCourse(client, item, courseId, ownerId) {
-  const description = buildDescription(item);
-  const sections = splitDescriptionSections(description);
-  const tourInfo = sections.tour_info;
-  const region = sections.region || cleanText(pick(item, ['sigun'])) || '';
   const courseName = pick(item, ['crsKorNm']) || '';
-  const courseSpotMappings = getDurunubiCourseSpotMappings(courseName);
-  const parsedSpotNames = extractSpotNamesFromTourInfo(tourInfo);
-  const spotEntries = courseSpotMappings.length > 0
-    ? courseSpotMappings
-    : parsedSpotNames.map((sourceName, index) => ({ order: index + 1, sourceName, mapping: null }));
+  const spotEntries = getDurunubiCourseSpotMappings(courseName);
   const result = {
     candidates: spotEntries.length,
     saved: 0,
@@ -694,17 +447,10 @@ async function importDurunubiSpotsForCourse(client, item, courseId, ownerId) {
       : null;
 
     try {
-      const candidate = await findDurunubiSpotCandidate(
-        client,
-        courseId,
-        courseName,
-        spotName,
-        region,
-        mapping
-      );
+      const candidate = buildDurunubiSpotCandidate(spotName, mapping);
       if (!candidate) {
         result.skipped += 1;
-        result.details.push({ spotName, order: entry.order, status: 'skipped_no_route_match' });
+        result.details.push({ spotName, order: entry.order, status: 'skipped_unmapped' });
         continue;
       }
 
@@ -732,7 +478,7 @@ async function importDurunubiSpotsForCourse(client, item, courseId, ownerId) {
         order: entry.order,
         status: saved.is_created ? 'created' : 'existing',
         savedName: saved.spot.name,
-        routeDistance: Math.round(candidate.route_distance),
+        routeDistance: candidate.route_distance == null ? null : Math.round(candidate.route_distance),
         routeProgress: routePosition?.routeProgress ?? null,
         tourContentStatus: saved.tour_content_status,
       });
@@ -855,13 +601,16 @@ async function main() {
           if (spotResult.candidates > 0) {
             const savedLabels = spotResult.details
               .filter((detail) => detail.status === 'created' || detail.status === 'existing')
-              .map((detail) => `${detail.savedName}(${detail.status}, ${detail.routeDistance}m)`);
+              .map((detail) => {
+                const distanceLabel = detail.routeDistance == null ? 'mapped' : `${detail.routeDistance}m`;
+                return `${detail.savedName}(${detail.status}, ${distanceLabel})`;
+              });
             console.log(`  - tour_info 스팟: 후보 ${spotResult.candidates}개, 신규 ${spotResult.saved}개, 제외 ${spotResult.skipped}개, 실패 ${spotResult.failed}개`);
             if (savedLabels.length > 0) {
               console.log(`  - 저장/확인: ${savedLabels.join(', ')}`);
             }
             const skippedLabels = spotResult.details
-              .filter((detail) => detail.status === 'skipped_no_route_match')
+              .filter((detail) => detail.status === 'skipped_unmapped')
               .map((detail) => detail.spotName);
             if (skippedLabels.length > 0) {
               console.log(`  - 제외: ${skippedLabels.join(', ')}`);
