@@ -2,6 +2,8 @@ require('dotenv').config();
 
 const axios = require('axios');
 const pool = require('../config/db');
+const spotService = require('../services/spotService');
+const { getDurunubiCourseSpotMappings } = require('../constants/durunubiSpotMappings');
 
 const BASE_URL = 'http://apis.data.go.kr/B551011/Durunubi';
 const DATA_SOURCE = '한국관광공사_두루누비';
@@ -16,6 +18,7 @@ const mobileOS = process.env.DURUNUBI_MOBILE_OS || DEFAULT_MOBILE_OS;
 const mobileApp = process.env.DURUNUBI_MOBILE_APP || DEFAULT_MOBILE_APP;
 const brdDiv = process.env.DURUNUBI_BRD_DIV || '';
 const maxImport = toInt(process.env.DURUNUBI_MAX_IMPORT, 0);
+const startIndex = Math.max(0, toInt(process.env.DURUNUBI_START_INDEX, 0));
 const maxWaypoints = toInt(process.env.DURUNUBI_MAX_WAYPOINTS, DEFAULT_MAX_WAYPOINTS);
 
 const http = axios.create({
@@ -122,7 +125,8 @@ async function fetchAllCourses() {
     courses.push(...page.items);
   }
 
-  return maxImport > 0 ? courses.slice(0, maxImport) : courses;
+  const selectedCourses = startIndex > 0 ? courses.slice(startIndex) : courses;
+  return maxImport > 0 ? selectedCourses.slice(0, maxImport) : selectedCourses;
 }
 
 function pick(item, keys) {
@@ -318,18 +322,174 @@ async function ensureCourseTag(client) {
   return rows[0].tag_id;
 }
 
-async function insertWaypoints(client, courseId, points) {
-  const seqs = points.map((_, index) => index + 1);
-  const lats = points.map((point) => point.lat);
-  const lngs = points.map((point) => point.lng);
+async function insertWaypoints(client, courseId, points, spotWaypoints = []) {
+  const lastPointIndex = Math.max(1, points.length - 1);
+  const pinRows = points.map((point, index) => ({
+    type: 'pin',
+    progress: index / lastPointIndex,
+    spotId: null,
+    lat: point.lat,
+    lng: point.lng,
+  }));
+  const spotRows = spotWaypoints
+    .filter((spot) => spot.spotId && Number.isFinite(spot.routeProgress))
+    .map((spot) => ({
+      type: 'spot',
+      progress: spot.routeProgress,
+      spotId: spot.spotId,
+      lat: null,
+      lng: null,
+    }));
+  const rows = [...pinRows, ...spotRows].sort((a, b) => (
+    a.progress - b.progress
+    || (a.type === 'spot' ? -1 : 1)
+  ));
+  const seqs = rows.map((_, index) => index + 1);
+  const types = rows.map((row) => row.type);
+  const spotIds = rows.map((row) => row.spotId);
+  const lats = rows.map((row) => row.lat);
+  const lngs = rows.map((row) => row.lng);
 
   await client.query(`DELETE FROM course_waypoints WHERE course_id = $1`, [courseId]);
   await client.query(
-    `INSERT INTO course_waypoints (course_id, seq, type, lat, lng)
-     SELECT $1, seq, 'pin', lat, lng
-     FROM unnest($2::smallint[], $3::numeric[], $4::numeric[]) AS t(seq, lat, lng)`,
-    [courseId, seqs, lats, lngs]
+    `INSERT INTO course_waypoints (course_id, seq, type, spot_id, lat, lng)
+     SELECT $1, seq, type, spot_id, lat, lng
+     FROM unnest(
+       $2::smallint[],
+       $3::varchar[],
+       $4::uuid[],
+       $5::numeric[],
+       $6::numeric[]
+     ) AS t(seq, type, spot_id, lat, lng)`,
+    [courseId, seqs, types, spotIds, lats, lngs]
   );
+}
+
+async function getRoutePositionFromCourseRoute(client, courseId, spot) {
+  const lng = Number(spot.x);
+  const lat = Number(spot.y);
+
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+
+  const { rows: [result] } = await client.query(
+    `WITH located AS (
+       SELECT
+         route_geometry::geometry AS geom,
+         ST_LineLocatePoint(
+           route_geometry::geometry,
+           ST_SetSRID(ST_Point($2, $3), 4326)
+         ) AS progress
+       FROM courses
+       WHERE course_id = $1
+     )
+     SELECT
+       progress,
+       ST_Length(ST_LineSubstring(geom, 0, progress)::geography) AS distance_from_start_m
+     FROM located`,
+    [courseId, lng, lat]
+  );
+
+  if (!result || result.progress == null) return null;
+  return {
+    routeProgress: Number(result.progress),
+    distanceFromStartM: Math.round(Number(result.distance_from_start_m || 0)),
+  };
+}
+
+function buildDurunubiSpotCandidate(spotName, mapping) {
+  if (
+    !mapping?.kakaoPlaceId
+    || mapping.x == null
+    || mapping.y == null
+    || !Array.isArray(mapping.categories)
+    || mapping.categories.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    kakao_place_id: String(mapping.kakaoPlaceId),
+    name: mapping.canonicalName || spotName,
+    kakao_category_name: mapping.kakaoCategoryName || null,
+    categories: mapping.categories,
+    address: mapping.address || null,
+    x: mapping.x,
+    y: mapping.y,
+    source_spot_name: spotName,
+    canonical_name: mapping.canonicalName || null,
+    tour_api_content_id: mapping.tourApiContentId || null,
+    route_progress: mapping.routeProgress ?? null,
+    distance_from_start_m: mapping.distanceFromStartM ?? null,
+    route_distance: mapping.routeDistance ?? null,
+  };
+}
+
+async function importDurunubiSpotsForCourse(client, item, courseId, ownerId) {
+  const courseName = pick(item, ['crsKorNm']) || '';
+  const spotEntries = getDurunubiCourseSpotMappings(courseName);
+  const result = {
+    candidates: spotEntries.length,
+    saved: 0,
+    skipped: 0,
+    failed: 0,
+    details: [],
+    waypointSpots: [],
+  };
+
+  for (const entry of spotEntries) {
+    const spotName = entry.sourceName;
+    const mapping = entry.mapping && Object.keys(entry.mapping).length > 0
+      ? {
+        ...entry.mapping,
+        routeProgress: entry.mapping.routeProgress ?? entry.routeProgress ?? null,
+        distanceFromStartM: entry.mapping.distanceFromStartM ?? entry.distanceFromStartM ?? null,
+      }
+      : null;
+
+    try {
+      const candidate = buildDurunubiSpotCandidate(spotName, mapping);
+      if (!candidate) {
+        result.skipped += 1;
+        result.details.push({ spotName, order: entry.order, status: 'skipped_unmapped' });
+        continue;
+      }
+
+      const saved = await spotService.saveKakaoSpot(candidate, ownerId);
+      const routePosition = Number.isFinite(Number(candidate.route_progress))
+        ? {
+          routeProgress: Number(candidate.route_progress),
+          distanceFromStartM: candidate.distance_from_start_m == null
+            ? null
+            : Number(candidate.distance_from_start_m),
+        }
+        : await getRoutePositionFromCourseRoute(client, courseId, candidate);
+      if (saved.spot?.spot_id && routePosition && Number.isFinite(routePosition.routeProgress)) {
+        result.waypointSpots.push({
+          spotId: saved.spot.spot_id,
+          routeProgress: routePosition.routeProgress,
+          distanceFromStartM: routePosition.distanceFromStartM,
+          sourceName: spotName,
+          savedName: saved.spot.name,
+        });
+      }
+      result.saved += saved.is_created ? 1 : 0;
+      result.details.push({
+        spotName,
+        order: entry.order,
+        status: saved.is_created ? 'created' : 'existing',
+        savedName: saved.spot.name,
+        routeDistance: candidate.route_distance == null ? null : Math.round(candidate.route_distance),
+        routeProgress: routePosition?.routeProgress ?? null,
+        tourContentStatus: saved.tour_content_status,
+      });
+    } catch (err) {
+      result.failed += 1;
+      result.details.push({ spotName, order: entry.order, status: 'failed', reason: err.message });
+    }
+  }
+
+  result.waypointSpots.sort((a, b) => a.routeProgress - b.routeProgress);
+  return result;
 }
 
 async function importCourse(client, item, ownerId, tagId) {
@@ -397,7 +557,7 @@ async function importCourse(client, item, ownerId, tagId) {
     [tagId, course.course_id, ownerId]
   );
 
-  return { status: 'imported', name, pointCount: points.length };
+  return { status: 'imported', name, courseId: course.course_id, pointCount: points.length, points };
 }
 
 async function main() {
@@ -408,6 +568,10 @@ async function main() {
   const summary = {
     total: courses.length,
     imported: 0,
+    spot_candidates: 0,
+    spots_saved: 0,
+    spots_skipped: 0,
+    spots_failed: 0,
     skipped: 0,
     failed: 0,
   };
@@ -427,6 +591,38 @@ async function main() {
         if (result.status === 'imported') {
           summary.imported += 1;
           console.log(`[${index + 1}/${courses.length}] 저장: ${result.name} (${result.pointCount} points)`);
+
+          const spotResult = await importDurunubiSpotsForCourse(client, item, result.courseId, ownerId);
+          summary.spot_candidates += spotResult.candidates;
+          summary.spots_saved += spotResult.saved;
+          summary.spots_skipped += spotResult.skipped;
+          summary.spots_failed += spotResult.failed;
+
+          if (spotResult.candidates > 0) {
+            const savedLabels = spotResult.details
+              .filter((detail) => detail.status === 'created' || detail.status === 'existing')
+              .map((detail) => {
+                const distanceLabel = detail.routeDistance == null ? 'mapped' : `${detail.routeDistance}m`;
+                return `${detail.savedName}(${detail.status}, ${distanceLabel})`;
+              });
+            console.log(`  - tour_info 스팟: 후보 ${spotResult.candidates}개, 신규 ${spotResult.saved}개, 제외 ${spotResult.skipped}개, 실패 ${spotResult.failed}개`);
+            if (savedLabels.length > 0) {
+              console.log(`  - 저장/확인: ${savedLabels.join(', ')}`);
+            }
+            const skippedLabels = spotResult.details
+              .filter((detail) => detail.status === 'skipped_unmapped')
+              .map((detail) => detail.spotName);
+            if (skippedLabels.length > 0) {
+              console.log(`  - 제외: ${skippedLabels.join(', ')}`);
+            }
+          }
+
+          await client.query('BEGIN');
+          await insertWaypoints(client, result.courseId, result.points, spotResult.waypointSpots);
+          await client.query('COMMIT');
+          if (spotResult.waypointSpots.length > 0) {
+            console.log(`  - 코스 경유지 연결: 스팟 ${spotResult.waypointSpots.length}개`);
+          }
         } else {
           summary.skipped += 1;
           console.log(`[${index + 1}/${courses.length}] 건너뜀: ${result.name} - ${result.reason}`);

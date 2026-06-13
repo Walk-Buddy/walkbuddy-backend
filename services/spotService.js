@@ -25,6 +25,10 @@ function getKakaoAddress(document) {
     return document.road_address_name || document.address_name || null;
 }
 
+function getKakaoRestApiKey() {
+    return process.env.KAKAO_REST_API_KEY;
+}
+
 function normalizeTourApiItems(item) {
     if (!item) return [];
     return Array.isArray(item) ? item : [item];
@@ -84,6 +88,11 @@ async function fetchTourLocationCandidates({ lng, lat, radius }) {
     return normalizeTourApiItems(item);
 }
 
+async function findTourApiMatchByContentId(contentId) {
+    if (!contentId) return null;
+    return { contentid: String(contentId), title: null, dist: null };
+}
+
 async function fetchTourOverview(contentId) {
     const serviceKey = getTourApiServiceKey();
     if (!serviceKey || !contentId) return null;
@@ -107,13 +116,97 @@ async function addTourGuideTagToSpot(spotId, userId) {
     if (!spotId || !userId) return;
 
     await pool.query(
-        `INSERT INTO taggings (tag_id, target_id, target_type, user_id)
+        `WITH tag AS (
+            INSERT INTO tags (name, type, is_active)
+            VALUES ('관광해설', 'spot', TRUE)
+            ON CONFLICT (name, type)
+            DO UPDATE SET is_active = TRUE
+            RETURNING tag_id
+         )
+         INSERT INTO taggings (tag_id, target_id, target_type, user_id)
          SELECT tag_id, $1, 'spot', $2
-         FROM tags
-         WHERE name = '관광해설' AND type = 'spot' AND is_active = TRUE
+         FROM tag
          ON CONFLICT DO NOTHING`,
         [spotId, userId]
     );
+}
+
+async function searchKakaoSpotCandidates({ keyword, category, x, y, radius, size = 15 }) {
+    const kakaoRestApiKey = getKakaoRestApiKey();
+    if (!kakaoRestApiKey) {
+        const err = new Error('Kakao REST API key is not configured');
+        err.status = 500;
+        throw err;
+    }
+
+    if (!keyword && !category) {
+        const err = new Error('keyword or category is required');
+        err.status = 400;
+        throw err;
+    }
+
+    if (category && !SPOT_CATEGORIES.includes(category)) {
+        const err = new Error('unsupported spot category');
+        err.status = 400;
+        err.supported_categories = SPOT_CATEGORIES;
+        throw err;
+    }
+
+    const hasLocation = x !== undefined && x !== null && x !== '' && y !== undefined && y !== null && y !== '';
+    const lng = hasLocation ? Number(x) : null;
+    const lat = hasLocation ? Number(y) : null;
+
+    if (hasLocation && (!Number.isFinite(lng) || !Number.isFinite(lat))) {
+        const err = new Error('x and y must be valid numbers');
+        err.status = 400;
+        throw err;
+    }
+
+    const searchRadius = radius === undefined || radius === null || radius === '' ? null : Number(radius);
+    if (searchRadius !== null && (!Number.isFinite(searchRadius) || searchRadius <= 0)) {
+        const err = new Error('radius must be a valid number greater than 0');
+        err.status = 400;
+        throw err;
+    }
+
+    const rules = keyword ? [{ query: keyword }] : SPOT_CATEGORY_SEARCH_RULES[category];
+    const allDocuments = [];
+
+    for (const rule of rules) {
+        const params = { query: rule.query, size, page: 1 };
+        if (rule.category_group_code) params.category_group_code = rule.category_group_code;
+        if (hasLocation) {
+            params.x = lng;
+            params.y = lat;
+            params.sort = 'distance';
+            if (searchRadius !== null) params.radius = searchRadius;
+        }
+
+        const kakaoResponse = await axios.get('https://dapi.kakao.com/v2/local/search/keyword.json', {
+            params,
+            headers: { Authorization: `KakaoAK ${kakaoRestApiKey}` },
+        });
+        allDocuments.push(...(kakaoResponse.data.documents || []));
+    }
+
+    const uniqueKakaoSpotMap = new Map();
+    for (const document of allDocuments) {
+        const categories = inferSpotCategoriesWithFallback(document);
+        if (categories.length === 0) continue;
+        if (category && !categories.includes(category)) continue;
+        uniqueKakaoSpotMap.set(document.id, {
+            kakao_place_id: document.id,
+            name: document.place_name,
+            kakao_category_name: document.category_name,
+            categories,
+            address: getKakaoAddress(document),
+            x: document.x,
+            y: document.y,
+            distance: document.distance ? Number(document.distance) : null,
+        });
+    }
+
+    return Array.from(uniqueKakaoSpotMap.values());
 }
 
 async function enrichKakaoSpotTourContent(spot, userId) {
@@ -142,15 +235,20 @@ async function enrichKakaoSpotTourContent(spot, userId) {
     }
 
     try {
-        let candidates = await fetchTourLocationCandidates({
+        let matched = await findTourApiMatchByContentId(spot.tour_api_content_id);
+        let candidates = [];
+
+        if (!matched) {
+            candidates = await fetchTourLocationCandidates({
             lng,
             lat,
             radius: TOUR_API_MATCH_RADIUS,
-        });
+            });
 
-        let matched = candidates
-            .filter(candidate => isSameTourPlace(spot.name, candidate.title))
-            .sort((a, b) => Number(a.dist || 0) - Number(b.dist || 0))[0];
+            matched = candidates
+                .filter(candidate => isSameTourPlace(spot.name, candidate.title))
+                .sort((a, b) => Number(a.dist || 0) - Number(b.dist || 0))[0];
+        }
 
         if (!matched && TOUR_API_MATCH_RADIUS < TOUR_API_FALLBACK_MATCH_RADIUS) {
             candidates = await fetchTourLocationCandidates({
@@ -424,7 +522,18 @@ exports.createSpot = async (body) => {
 // 카카오 스팟 저장
 // ──────────────────────────────────────────────────────────────────────
 exports.saveKakaoSpot = async (body, userId) => {
-    const { kakao_place_id, name, kakao_category_name, categories, address, road_address_name, address_name, x, y } = body;
+    const {
+        kakao_place_id,
+        name,
+        kakao_category_name,
+        categories,
+        address,
+        road_address_name,
+        address_name,
+        x,
+        y,
+        tour_api_content_id,
+    } = body;
     const normalizedCategories = normalizeSpotCategoriesInput(categories);
 
     if (normalizedCategories.length === 0) {
@@ -459,6 +568,7 @@ exports.saveKakaoSpot = async (body, userId) => {
             x: Number(spot.x),
             y: Number(spot.y),
             recommend_pct: spot.recommend_pct == null ? null : Number(spot.recommend_pct),
+            tour_api_content_id,
         };
         const enriched = await enrichKakaoSpotTourContent(normalizedSpot, userId);
         return { is_created: true, ...enriched };
@@ -498,10 +608,13 @@ exports.saveKakaoSpot = async (body, userId) => {
         x: Number(spot.x),
         y: Number(spot.y),
         recommend_pct: spot.recommend_pct == null ? null : Number(spot.recommend_pct),
+        tour_api_content_id,
     };
     const enriched = await enrichKakaoSpotTourContent(normalizedSpot, userId);
     return { is_created: false, ...enriched };
 };
+
+exports.searchKakaoSpotCandidates = searchKakaoSpotCandidates;
 
 // ──────────────────────────────────────────────────────────────────────
 // 스팟 검색 (카카오 + DB 통합)
@@ -571,49 +684,13 @@ exports.searchSpots = async (query) => {
         }
     }
 
-    const kakaoRestApiKey = process.env.KAKAO_REST_API_KEY;
-    if (!kakaoRestApiKey) {
-        const err = new Error('Kakao REST API key is not configured');
-        err.status = 500; throw err;
-    }
-
-    const rules = keyword ? [{ query: keyword }] : SPOT_CATEGORY_SEARCH_RULES[category];
-    const allDocuments = [];
-
-    for (const rule of rules) {
-        const params = { query: rule.query, size: 15, page: 1 };
-        if (rule.category_group_code) params.category_group_code = rule.category_group_code;
-        if (hasLocation) {
-            params.x = lng;
-            params.y = lat;
-            params.sort = 'distance';
-            if (searchRadius !== null) params.radius = searchRadius;
-        }
-
-        const kakaoResponse = await axios.get('https://dapi.kakao.com/v2/local/search/keyword.json', {
-            params,
-            headers: { Authorization: `KakaoAK ${kakaoRestApiKey}` },
-        });
-        allDocuments.push(...kakaoResponse.data.documents);
-    }
-
-    const uniqueKakaoSpotMap = new Map();
-    for (const document of allDocuments) {
-        const categories = inferSpotCategoriesWithFallback(document);
-        if (categories.length === 0) continue;
-        if (category && !categories.includes(category)) continue;
-        uniqueKakaoSpotMap.set(document.id, {
-            kakao_place_id: document.id,
-            name: document.place_name,
-            kakao_category_name: document.category_name,
-            categories,
-            address: getKakaoAddress(document),
-            x: document.x, y: document.y,
-            distance: document.distance ? Number(document.distance) : null,
-        });
-    }
-
-    const kakaoSpots = Array.from(uniqueKakaoSpotMap.values());
+    const kakaoSpots = await searchKakaoSpotCandidates({
+        keyword,
+        category,
+        x: hasLocation ? lng : undefined,
+        y: hasLocation ? lat : undefined,
+        radius: searchRadius,
+    });
     const kakaoPlaceIds = kakaoSpots.map(s => s.kakao_place_id);
 
     let savedKakaoPlaceIdSet = new Set();
@@ -708,7 +785,7 @@ exports.searchSpots = async (query) => {
     return {
         category,
         filters: { keyword, category: category || null, tag_ids: tagIdList, x: hasLocation ? lng : null, y: hasLocation ? lat : null, radius: searchRadius, min_recommend_pct: minRecommendPct },
-        raw_count: allDocuments.length,
+        raw_count: kakaoSpots.length,
         saved_count: savedSpots.length,
         kakao_candidate_count: kakaoCandidates.length,
         total_count: savedSpots.length + kakaoCandidates.length,

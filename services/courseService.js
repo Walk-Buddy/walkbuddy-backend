@@ -1,6 +1,7 @@
 const pool = require('../config/db');
 
 const WALK_SPEED_MPS = 1.1; // 도보 평균 4km/h
+const COURSE_NEARBY_SPOT_RADIUS = Number(process.env.COURSE_NEARBY_SPOT_RADIUS || 500);
 
 // ──────────────────────────────────────────────────────────────────────
 // 내부 헬퍼: spot_id 배열 → { spot_id: { lat, lng } } 맵
@@ -935,6 +936,34 @@ exports.getCourseById = async (courseId, userId) => {
       segment_duration: i > 0 ? calcSegmentDuration(waypoints[i - 1], w) : null,
     }));
 
+    const { rows: nearbySpots } = await client.query(
+      `SELECT
+         s.spot_id,
+         s.name,
+         s.address,
+         s.categories,
+         s.kakao_category_name,
+         s.recommend_pct,
+         s.source,
+         ST_X(s.location::geometry) AS x,
+         ST_Y(s.location::geometry) AS y,
+         ST_Distance(s.location, c.route_geometry) AS route_distance,
+         COALESCE(
+           json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
+           FILTER (WHERE t.tag_id IS NOT NULL), '[]'
+         ) AS tags
+       FROM spots s
+       JOIN courses c ON c.course_id = $1
+       LEFT JOIN taggings tg ON tg.target_type = 'spot' AND tg.target_id = s.spot_id
+       LEFT JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'spot' AND t.is_active = TRUE
+       WHERE s.status = 'active'
+         AND ST_DWithin(s.location, c.route_geometry, $2)
+       GROUP BY s.spot_id, c.route_geometry
+       ORDER BY route_distance ASC
+       LIMIT 30`,
+      [courseId, COURSE_NEARBY_SPOT_RADIUS]
+    );
+
     // 태그
     const { rows: tags } = await client.query(
       `SELECT t.tag_id, t.name
@@ -954,7 +983,20 @@ exports.getCourseById = async (courseId, userId) => {
       is_bookmarked = bm.length > 0;
     }
 
-    return { ...course,  ...buildCourseDetailDescription(course), waypoints: spots, tags, is_bookmarked };
+    return {
+      ...course,
+      ...buildCourseDetailDescription(course),
+      waypoints: spots,
+      nearby_spots: nearbySpots.map((spot) => ({
+        ...spot,
+        x: Number(spot.x),
+        y: Number(spot.y),
+        route_distance: spot.route_distance == null ? null : Number(spot.route_distance),
+        recommend_pct: spot.recommend_pct == null ? null : Number(spot.recommend_pct),
+      })),
+      tags,
+      is_bookmarked,
+    };
   } finally { client.release(); }
 };
 
