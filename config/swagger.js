@@ -707,69 +707,81 @@ const swaggerDefinition = {
     // 후기
     // ─────────────────────────────────────────
     '/api/courses/{course_id}/reviews': {
-      post: {
-        tags: ['후기'],
-        summary: '코스 후기 등록',
-        parameters: [{ name: 'course_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
-        requestBody: {
-          required: true,
-          content: { 'application/json': { schema: { type: 'object', required: ['rating'], properties: { rating: { type: 'number', minimum: 0, maximum: 5 }, description: { type: 'string' }, tags: { type: 'array', items: { type: 'string', format: 'uuid' } }, difficulty: { type: 'string' } } } } },
-        },
-        responses: {
-          201: {
-            description: '후기 등록 완료',
-            content: { 'application/json': { schema: { type: 'object', properties: { course_review_id: { type: 'string', format: 'uuid' }, course_id: { type: 'string', format: 'uuid' }, rating: { type: 'number' }, created_at: { type: 'string', format: 'date-time' } } } } },
-          },
-        },
-      },
-      get: {
-        tags: ['후기'],
-        summary: '코스 후기 목록 조회',
-        parameters: [
-          { name: 'course_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
-          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
-          { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
-        ],
-        responses: {
-          200: {
-            description: '코스 후기 목록',
-            content: { 'application/json': { schema: { type: 'object', properties: { total: { type: 'integer' }, reviews: { type: 'array', items: { type: 'object', properties: { course_review_id: { type: 'string', format: 'uuid' }, user: { type: 'object' }, rating: { type: 'number' }, description: { type: 'string' }, tags: { type: 'array', items: { type: 'object' } }, created_at: { type: 'string', format: 'date-time' } } } } } } } },
-          },
-        },
+  post: {
+    tags: ['후기'],
+    summary: '코스 후기 등록',
+    parameters: [{ name: 'course_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+    requestBody: {
+      required: true,
+      content: { 'application/json': { schema: { type: 'object', required: ['rating', 'walk_record_id'], properties: {
+        walk_record_id: { type: 'string', format: 'uuid', description: '산책 기록 ID' },
+        rating: { type: 'number', minimum: 0, maximum: 5 },
+        description: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string', format: 'uuid' } },
+        difficulty: { type: 'string' }
+      } } } },
+    },
+    responses: {
+      201: {
+        description: '후기 등록 완료',
+        content: { 'application/json': { schema: { type: 'object', properties: { course_review_id: { type: 'string', format: 'uuid' }, course_id: { type: 'string', format: 'uuid' }, rating: { type: 'number' }, created_at: { type: 'string', format: 'date-time' } } } } },
       },
     },
+  },
+  get: {
+    tags: ['후기'],
+    summary: '코스 후기 목록 조회',
+    parameters: [
+      { name: 'course_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+      { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+      { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
+    ],
+    responses: {
+      200: {
+        description: '코스 후기 목록',
+        content: { 'application/json': { schema: { type: 'object', properties: { total: { type: 'integer' }, reviews: { type: 'array', items: { type: 'object', properties: { course_review_id: { type: 'string', format: 'uuid' }, user: { type: 'object' }, rating: { type: 'number' }, description: { type: 'string' }, tags: { type: 'array', items: { type: 'object' } }, created_at: { type: 'string', format: 'date-time' } } } } } } } },
+      },
+    },
+  },
+},
     '/api/spots/{spot_id}/reviews': {
-      post: {
-        tags: ['후기'],
-        summary: '스팟 후기 등록',
-        parameters: [{ name: 'spot_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
-        requestBody: {
-          required: true,
-          content: { 'application/json': { schema: { type: 'object', required: ['is_recommended'], properties: { is_recommended: { type: 'boolean' }, description: { type: 'string' }, tags: { type: 'array', items: { type: 'string', format: 'uuid' } }, images: { type: 'array', items: { type: 'string' } } } } } },
-        },
-        responses: {
-          201: {
-            description: '스팟 후기 등록 완료',
-            content: { 'application/json': { schema: { type: 'object', properties: { spot_review_id: { type: 'string', format: 'uuid' }, spot_id: { type: 'string', format: 'uuid' }, is_recommended: { type: 'boolean' }, created_at: { type: 'string', format: 'date-time' } } } } },
-          },
-        },
-      },
-      get: {
-        tags: ['후기'],
-        summary: '스팟 후기 목록 조회',
-        parameters: [
-          { name: 'spot_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
-          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
-          { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
-        ],
-        responses: {
-          200: {
-            description: '스팟 후기 목록',
-            content: { 'application/json': { schema: { type: 'object', properties: { total: { type: 'integer' }, reviews: { type: 'array', items: { type: 'object', properties: { spot_review_id: { type: 'string', format: 'uuid' }, user: { type: 'object' }, description: { type: 'string' }, is_recommended: { type: 'boolean' }, created_at: { type: 'string', format: 'date-time' } } } } } } } },
-          },
-        },
+  post: {
+    tags: ['후기'],
+    summary: '스팟 후기 등록',
+    parameters: [{ name: 'spot_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+    requestBody: {
+      required: true,
+      content: { 'application/json': { schema: { type: 'object', required: ['is_recommended', 'walk_record_id'], properties: {
+        walk_record_id: { type: 'string', format: 'uuid', description: '산책 기록 ID' },
+        is_recommended: { type: 'boolean' },
+        description: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string', format: 'uuid' } },
+        images: { type: 'array', items: { type: 'string' } }
+      } } } },
+    },
+    responses: {
+      201: {
+        description: '스팟 후기 등록 완료',
+        content: { 'application/json': { schema: { type: 'object', properties: { spot_review_id: { type: 'string', format: 'uuid' }, spot_id: { type: 'string', format: 'uuid' }, is_recommended: { type: 'boolean' }, created_at: { type: 'string', format: 'date-time' } } } } },
       },
     },
+  },
+  get: {
+    tags: ['후기'],
+    summary: '스팟 후기 목록 조회',
+    parameters: [
+      { name: 'spot_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+      { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+      { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
+    ],
+    responses: {
+      200: {
+        description: '스팟 후기 목록',
+        content: { 'application/json': { schema: { type: 'object', properties: { total: { type: 'integer' }, reviews: { type: 'array', items: { type: 'object', properties: { spot_review_id: { type: 'string', format: 'uuid' }, user: { type: 'object' }, description: { type: 'string' }, is_recommended: { type: 'boolean' }, created_at: { type: 'string', format: 'date-time' } } } } } } } },
+      },
+    },
+  },
+},
     '/api/reviews/{review_type}/{review_id}': {
       patch: {
         tags: ['후기'],
