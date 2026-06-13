@@ -199,6 +199,7 @@ function splitDescriptionSections(description) {
 function cleanSpotNameCandidate(value) {
   return String(value || '')
     .replace(/^[\s"'‘’“”]+|[\s"'‘’“”]+$/g, '')
+    .replace(/^(?:일출|일몰|야경|노을)?\s*명소\s+/g, '')
     .replace(/[.,。·ㆍ]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
