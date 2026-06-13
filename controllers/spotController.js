@@ -32,7 +32,7 @@ exports.saveKakaoSpot = async (req, res, next) => {
         if (!kakao_place_id || !name || x == null || y == null) {
             return res.status(400).json({ success: false, message: 'kakao_place_id, name, x, y are required' });
         }
-        const result = await spotService.saveKakaoSpot(req.body);
+        const result = await spotService.saveKakaoSpot(req.body, req.user.user_id);
         return res.status(result.is_created ? 201 : 200).json({ success: true, ...result });
     } catch (err) { next(err); }
 };
