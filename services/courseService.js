@@ -49,12 +49,21 @@ const buildLineString = async (waypoints, client) => {
     const allPoints = [origin, ...middle, destination];
 
     for (let i = 0; i < allPoints.length - 1; i++) {
-      const from = allPoints[i];
-      const to   = allPoints[i + 1];
+  const from = allPoints[i];
+  const to   = allPoints[i + 1];
 
-      console.log('[Tmap 요청]', from.lng, from.lat, '->', to.lng, to.lat);
+  // 출발지와 도착지가 같으면 스킵
+  if (from.lng === to.lng && from.lat === to.lat) continue;
 
-      const res = await fetch('https://apis.openapi.sk.com/tmap/routes/pedestrian?version=1', {
+  // 100m 이하로 너무 가까우면 스킵
+  const dLat = (to.lat - from.lat) * Math.PI / 180;
+  const dLng = (to.lng - from.lng) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(from.lat * Math.PI/180) * Math.cos(to.lat * Math.PI/180) * Math.sin(dLng/2)**2;
+  const dist = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  if (dist < 100) continue;
+
+  console.log('[Tmap 요청]', from.lng, from.lat, '->', to.lng, to.lat);
+  const res = await fetch('https://apis.openapi.sk.com/tmap/routes/pedestrian?version=1', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
