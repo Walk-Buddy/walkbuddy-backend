@@ -6,6 +6,7 @@ const http = require('http');
 const cwd = process.cwd();
 const port = process.env.PORT || '3000';
 const baseUrl = process.env.SEED_API_BASE_URL || `http://localhost:${port}`;
+const includeDurunubi = process.argv.includes('--with-durunubi');
 
 function runNode(args, label, extraEnv = {}) {
   return new Promise((resolve, reject) => {
@@ -78,7 +79,13 @@ async function main() {
   await runNode(['db/run-sql.js', 'db/reset.sql'], 'DB 초기화');
   await runNode(['db/run-sql.js', 'db/schema.sql'], 'DB 스키마 재구성');
   await runNode(['db/run-sql.js', 'db/seed.sql'], '기존 seed 데이터 입력');
-  await runNode(['scripts/import-durunubi-courses.js'], '두루누비 코스 import');
+
+  if (includeDurunubi) {
+    await runNode(['scripts/import-durunubi-courses.js'], '두루누비 코스 import');
+  } else {
+    console.log('\n[seed] 두루누비 코스 import 건너뜀');
+    console.log('[seed] 필요할 때만 실행: npm run import:durunubi 또는 npm run seed:full');
+  }
 
   const server = await ensureServer();
   try {

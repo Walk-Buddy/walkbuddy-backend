@@ -10,6 +10,7 @@
     "db:apply": "node db/run-sql.js db/reset.sql && node db/run-sql.js db/schema.sql && node db/generate-erd-data.js",
     "db:migrate": "node db/run-sql.js",
     "seed": "node scripts/seed-demo-data.js",
+    "seed:full": "node scripts/seed-demo-data.js --with-durunubi",
     "import:durunubi": "node scripts/import-durunubi-courses.js",
     "seed:prewalk-course": "node scripts/create-prewalk-course-via-api.js",
     "seed:prewalk-reviews": "node scripts/create-prewalk-course-via-api.js --reviews-only",

@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const axios = require('axios');
 const pool = require('../config/db');
+const spotService = require('../services/spotService');
 
 const BASE_URL = 'http://apis.data.go.kr/B551011/Durunubi';
 const DATA_SOURCE = '한국관광공사_두루누비';
@@ -10,6 +11,8 @@ const DEFAULT_MOBILE_OS = 'ETC';
 const DEFAULT_MOBILE_APP = 'WalkBuddy';
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_WAYPOINTS = 1200;
+const DEFAULT_SPOT_ROUTE_RADIUS = 500;
+const DEFAULT_SPOT_SEARCH_SIZE = 10;
 
 const serviceKey = process.env.DURUNUBI_SERVICE_KEY;
 const mobileOS = process.env.DURUNUBI_MOBILE_OS || DEFAULT_MOBILE_OS;
@@ -17,6 +20,8 @@ const mobileApp = process.env.DURUNUBI_MOBILE_APP || DEFAULT_MOBILE_APP;
 const brdDiv = process.env.DURUNUBI_BRD_DIV || '';
 const maxImport = toInt(process.env.DURUNUBI_MAX_IMPORT, 0);
 const maxWaypoints = toInt(process.env.DURUNUBI_MAX_WAYPOINTS, DEFAULT_MAX_WAYPOINTS);
+const spotRouteRadius = toInt(process.env.DURUNUBI_SPOT_ROUTE_RADIUS, DEFAULT_SPOT_ROUTE_RADIUS);
+const spotSearchSize = toInt(process.env.DURUNUBI_SPOT_SEARCH_SIZE, DEFAULT_SPOT_SEARCH_SIZE);
 
 const http = axios.create({
   timeout: 30000,
@@ -177,6 +182,101 @@ function cleanText(value) {
     .trim();
 }
 
+function splitDescriptionSections(description) {
+  const sections = {};
+  if (!description) return sections;
+
+  const sectionRegex = /^@@([a-z_]+)\n([\s\S]*?)(?=^@@[a-z_]+\n|\s*$)/gm;
+  let match;
+
+  while ((match = sectionRegex.exec(description)) !== null) {
+    sections[match[1]] = match[2].trim();
+  }
+
+  return sections;
+}
+
+function cleanSpotNameCandidate(value) {
+  return String(value || '')
+    .replace(/^[\s"'‘’“”]+|[\s"'‘’“”]+$/g, '')
+    .replace(/[.,。·ㆍ]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractSpotNamesFromTourInfo(tourInfo) {
+  const text = cleanText(tourInfo);
+  if (!text) return [];
+
+  const names = [];
+  const lines = text
+    .split('\n')
+    .map((line) => line.replace(/^\s*[-*•]\s*/, '').trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    const quotedMatches = [...line.matchAll(/['"‘’“”]([^'"‘’“”]+)['"‘’“”]/g)]
+      .map((match) => cleanSpotNameCandidate(match[1]))
+      .filter(Boolean);
+
+    if (quotedMatches.length > 0) {
+      names.push(...quotedMatches);
+      continue;
+    }
+
+    const markers = [
+      '감상할 수 있는 ',
+      '느낄 수 있는 ',
+      '자랑하는 ',
+      '어우러진 ',
+      '가능한 ',
+      '있는 ',
+    ];
+    let candidate = null;
+
+    for (const marker of markers) {
+      const index = line.lastIndexOf(marker);
+      if (index >= 0) {
+        candidate = line.slice(index + marker.length);
+        break;
+      }
+    }
+
+    if (!candidate) candidate = line;
+
+    const cleaned = cleanSpotNameCandidate(candidate);
+    if (cleaned) names.push(cleaned);
+  }
+
+  return [...new Set(names)];
+}
+
+function normalizePlaceName(name = '') {
+  return String(name)
+    .replace(/\([^)]*\)/g, '')
+    .replace(/\[[^\]]*\]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[·ㆍ.,'"]/g, '')
+    .toLowerCase();
+}
+
+function getKakaoNameScore(expectedName, kakaoName) {
+  const expected = normalizePlaceName(expectedName);
+  const actual = normalizePlaceName(kakaoName);
+  if (!expected || !actual) return 0;
+  if (expected === actual) return 100;
+  if (actual.includes(expected)) return 80;
+  if (expected.includes(actual)) return 60;
+  return 0;
+}
+
+function buildSpotSearchKeywords(spotName, region) {
+  return [
+    region ? `${region} ${spotName}` : null,
+    spotName,
+  ].filter(Boolean);
+}
+
 function decodeHtmlEntities(value) {
   return value
     .replace(/&nbsp;/gi, ' ')
@@ -332,6 +432,98 @@ async function insertWaypoints(client, courseId, points) {
   );
 }
 
+async function getDistanceFromCourseRoute(client, courseId, spot) {
+  const lng = Number(spot.x);
+  const lat = Number(spot.y);
+
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+
+  const { rows: [result] } = await client.query(
+    `SELECT ST_Distance(route_geometry, ST_Point($2, $3)::GEOGRAPHY) AS distance_m
+     FROM courses
+     WHERE course_id = $1`,
+    [courseId, lng, lat]
+  );
+
+  return result?.distance_m == null ? null : Number(result.distance_m);
+}
+
+async function findDurunubiSpotCandidate(client, courseId, spotName, region) {
+  const searchedPlaceIds = new Set();
+  const matchedCandidates = [];
+
+  for (const keyword of buildSpotSearchKeywords(spotName, region)) {
+    const candidates = await spotService.searchKakaoSpotCandidates({
+      keyword,
+      size: spotSearchSize,
+    });
+
+    for (const candidate of candidates) {
+      if (searchedPlaceIds.has(candidate.kakao_place_id)) continue;
+      searchedPlaceIds.add(candidate.kakao_place_id);
+
+      const nameScore = getKakaoNameScore(spotName, candidate.name);
+      if (nameScore <= 0) continue;
+
+      const routeDistance = await getDistanceFromCourseRoute(client, courseId, candidate);
+      if (routeDistance === null || routeDistance > spotRouteRadius) continue;
+
+      matchedCandidates.push({
+        ...candidate,
+        name_score: nameScore,
+        route_distance: routeDistance,
+      });
+    }
+  }
+
+  return matchedCandidates.sort((a, b) => (
+    b.name_score - a.name_score ||
+    a.route_distance - b.route_distance ||
+    (a.distance || 0) - (b.distance || 0)
+  ))[0] || null;
+}
+
+async function importDurunubiSpotsForCourse(client, item, courseId, ownerId) {
+  const description = buildDescription(item);
+  const sections = splitDescriptionSections(description);
+  const tourInfo = sections.tour_info;
+  const region = sections.region || cleanText(pick(item, ['sigun'])) || '';
+  const spotNames = extractSpotNamesFromTourInfo(tourInfo);
+  const result = {
+    candidates: spotNames.length,
+    saved: 0,
+    skipped: 0,
+    failed: 0,
+    details: [],
+  };
+
+  for (const spotName of spotNames) {
+    try {
+      const candidate = await findDurunubiSpotCandidate(client, courseId, spotName, region);
+      if (!candidate) {
+        result.skipped += 1;
+        result.details.push({ spotName, status: 'skipped_no_route_match' });
+        continue;
+      }
+
+      const saved = await spotService.saveKakaoSpot(candidate, ownerId);
+      result.saved += saved.is_created ? 1 : 0;
+      result.details.push({
+        spotName,
+        status: saved.is_created ? 'created' : 'existing',
+        savedName: saved.spot.name,
+        routeDistance: Math.round(candidate.route_distance),
+        tourContentStatus: saved.tour_content_status,
+      });
+    } catch (err) {
+      result.failed += 1;
+      result.details.push({ spotName, status: 'failed', reason: err.message });
+    }
+  }
+
+  return result;
+}
+
 async function importCourse(client, item, ownerId, tagId) {
   const routeIdx = pick(item, ['routeIdx']);
   const crsIdx = pick(item, ['crsIdx']);
@@ -397,7 +589,7 @@ async function importCourse(client, item, ownerId, tagId) {
     [tagId, course.course_id, ownerId]
   );
 
-  return { status: 'imported', name, pointCount: points.length };
+  return { status: 'imported', name, courseId: course.course_id, pointCount: points.length };
 }
 
 async function main() {
@@ -408,6 +600,10 @@ async function main() {
   const summary = {
     total: courses.length,
     imported: 0,
+    spot_candidates: 0,
+    spots_saved: 0,
+    spots_skipped: 0,
+    spots_failed: 0,
     skipped: 0,
     failed: 0,
   };
@@ -427,6 +623,22 @@ async function main() {
         if (result.status === 'imported') {
           summary.imported += 1;
           console.log(`[${index + 1}/${courses.length}] 저장: ${result.name} (${result.pointCount} points)`);
+
+          const spotResult = await importDurunubiSpotsForCourse(client, item, result.courseId, ownerId);
+          summary.spot_candidates += spotResult.candidates;
+          summary.spots_saved += spotResult.saved;
+          summary.spots_skipped += spotResult.skipped;
+          summary.spots_failed += spotResult.failed;
+
+          if (spotResult.candidates > 0) {
+            const savedLabels = spotResult.details
+              .filter((detail) => detail.status === 'created' || detail.status === 'existing')
+              .map((detail) => `${detail.savedName}(${detail.status}, ${detail.routeDistance}m)`);
+            console.log(`  - tour_info 스팟: 후보 ${spotResult.candidates}개, 신규 ${spotResult.saved}개, 제외 ${spotResult.skipped}개, 실패 ${spotResult.failed}개`);
+            if (savedLabels.length > 0) {
+              console.log(`  - 저장/확인: ${savedLabels.join(', ')}`);
+            }
+          }
         } else {
           summary.skipped += 1;
           console.log(`[${index + 1}/${courses.length}] 건너뜀: ${result.name} - ${result.reason}`);
