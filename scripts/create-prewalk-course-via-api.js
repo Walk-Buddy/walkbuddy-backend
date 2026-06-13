@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
+const aiContentService = require('../services/aiContentService');
 
 const API_BASE_URL = process.env.SEED_API_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 const KAKAO_LOCAL_SEARCH_URL = 'https://dapi.kakao.com/v2/local/search/keyword.json';
@@ -410,17 +411,19 @@ async function saveExtraWalkSpots(api) {
   return savedSpots;
 }
 
-async function generateAiContents(api, spots) {
+async function generateTourAiContents(spots) {
+  getPool();
+
   for (const spot of spots) {
     const spotId = spot.spot_id;
     const spotName = spot.label || spot.spot_name || spot.name || spotId;
     if (!spotId) continue;
 
-    const { data } = await api.get(`/api/spots/${spotId}/ai-contents`);
-    console.log(`generated ai contents: ${spotName}`, {
-      spot_id: data.spot_id,
-      count: data.contents?.length || 0,
-      content_types: (data.contents || []).map((content) => content.content_type),
+    const result = await aiContentService.getAiContentsByTypes(spotId, ['tour']);
+    console.log(`generated tour ai content: ${spotName}`, {
+      spot_id: result.spot_id,
+      count: result.contents?.length || 0,
+      content_types: (result.contents || []).map((content) => content.content_type),
     });
   }
 }
@@ -722,7 +725,7 @@ async function printPrewalkEngagementSummary(courseId, spotIds) {
 }
 
 async function createPrewalkCourse(api) {
-  const extraSpots = await saveExtraWalkSpots(api);
+  await saveExtraWalkSpots(api);
 
   const existingCourse = await findExistingCourse(api);
   if (existingCourse) {
@@ -734,7 +737,7 @@ async function createPrewalkCourse(api) {
         spot_id: waypoint.spot_id,
         spot_name: waypoint.spot_name,
       }));
-    await generateAiContents(api, [...courseSpots, ...extraSpots]);
+    await generateTourAiContents(courseSpots);
     return existingCourse;
   }
 
@@ -763,7 +766,7 @@ async function createPrewalkCourse(api) {
   });
 
   console.log('created course:', courseResponse.data);
-  await generateAiContents(api, [...savedSpots, ...extraSpots]);
+  await generateTourAiContents(savedSpots);
   return courseResponse.data;
 }
 

@@ -36,7 +36,7 @@ async function uploadToS3(audioBuffer, spotId, contentType) {
   return `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
 }
 
-exports.getAiContents = async (spotId) => {
+async function getAiContentsByTypes(spotId, contentTypes = ['place', 'history', 'tour']) {
   const { rows: spotRows } = await pool.query(
     `SELECT name, address, content_place, content_history, content_tour
      FROM spots WHERE spot_id = $1 AND status = 'active'`,
@@ -54,9 +54,19 @@ exports.getAiContents = async (spotId) => {
     tour:    { label: '관광 안내',  source: spot.content_tour    },
   };
 
+  const selectedContentTypes = [...new Set(contentTypes.map((type) => String(type).trim()))];
+  for (const contentType of selectedContentTypes) {
+    if (!typeMap[contentType]) {
+      const err = new Error('content_type은 place, history, tour 중 하나여야 합니다.');
+      err.status = 400; throw err;
+    }
+  }
+
   const contents = [];
 
-  for (const [contentType, { label, source }] of Object.entries(typeMap)) {
+  for (const contentType of selectedContentTypes) {
+    const { label, source } = typeMap[contentType];
+
     // 캐시 확인
     const { rows: cached } = await pool.query(
       `SELECT content_type, script, audio_url
@@ -113,4 +123,8 @@ ${sourceText}
   }
 
   return { spot_id: spotId, contents };
-};
+}
+
+exports.getAiContents = async (spotId) => getAiContentsByTypes(spotId);
+
+exports.getAiContentsByTypes = getAiContentsByTypes;
