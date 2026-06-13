@@ -103,7 +103,20 @@ async function fetchTourOverview(contentId) {
     return cleanTourOverview(detail?.overview || '');
 }
 
-async function enrichKakaoSpotTourContent(spot) {
+async function addTourGuideTagToSpot(spotId, userId) {
+    if (!spotId || !userId) return;
+
+    await pool.query(
+        `INSERT INTO taggings (tag_id, target_id, target_type, user_id)
+         SELECT tag_id, $1, 'spot', $2
+         FROM tags
+         WHERE name = '관광해설' AND type = 'spot' AND is_active = TRUE
+         ON CONFLICT DO NOTHING`,
+        [spotId, userId]
+    );
+}
+
+async function enrichKakaoSpotTourContent(spot, userId) {
     const result = {
         tour_content_enriched: false,
         tour_content_status: 'skipped',
@@ -116,6 +129,7 @@ async function enrichKakaoSpotTourContent(spot) {
     }
 
     if (spot.content_tour) {
+        await addTourGuideTagToSpot(spot.spot_id, userId);
         result.tour_content_status = 'skipped_existing_content_tour';
         return { spot, ...result };
     }
@@ -181,6 +195,8 @@ async function enrichKakaoSpotTourContent(spot) {
             result.tour_content_status = 'skipped_existing_content_tour';
             return { spot, ...result };
         }
+
+        await addTourGuideTagToSpot(updatedSpot.spot_id, userId);
 
         result.tour_content_enriched = true;
         result.tour_content_status = 'enriched';
@@ -407,7 +423,7 @@ exports.createSpot = async (body) => {
 // ──────────────────────────────────────────────────────────────────────
 // 카카오 스팟 저장
 // ──────────────────────────────────────────────────────────────────────
-exports.saveKakaoSpot = async (body) => {
+exports.saveKakaoSpot = async (body, userId) => {
     const { kakao_place_id, name, kakao_category_name, categories, address, road_address_name, address_name, x, y } = body;
     const normalizedCategories = normalizeSpotCategoriesInput(categories);
 
@@ -444,7 +460,7 @@ exports.saveKakaoSpot = async (body) => {
             y: Number(spot.y),
             recommend_pct: spot.recommend_pct == null ? null : Number(spot.recommend_pct),
         };
-        const enriched = await enrichKakaoSpotTourContent(normalizedSpot);
+        const enriched = await enrichKakaoSpotTourContent(normalizedSpot, userId);
         return { is_created: true, ...enriched };
     }
 
@@ -483,7 +499,7 @@ exports.saveKakaoSpot = async (body) => {
         y: Number(spot.y),
         recommend_pct: spot.recommend_pct == null ? null : Number(spot.recommend_pct),
     };
-    const enriched = await enrichKakaoSpotTourContent(normalizedSpot);
+    const enriched = await enrichKakaoSpotTourContent(normalizedSpot, userId);
     return { is_created: false, ...enriched };
 };
 
