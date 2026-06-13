@@ -11,6 +11,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const TOUR_API_BASE_URL = 'https://apis.data.go.kr/B551011/KorService2';
 const TOUR_API_MATCH_RADIUS = Number(process.env.TOUR_API_MATCH_RADIUS || 300);
 const TOUR_API_FALLBACK_MATCH_RADIUS = 500;
+const TOUR_API_KEYWORD_MATCH_RADIUS = Number(process.env.TOUR_API_KEYWORD_MATCH_RADIUS || 1000);
 
 function getTourApiServiceKey() {
     return process.env.TOUR_API_SERVICE_KEY || process.env.TOURAPI_SERVICE_KEY;
@@ -43,11 +44,26 @@ function normalizePlaceName(name = '') {
         .toLowerCase();
 }
 
+function getCommonSuffixLength(a, b) {
+    let length = 0;
+    while (
+        length < a.length
+        && length < b.length
+        && a[a.length - 1 - length] === b[b.length - 1 - length]
+    ) {
+        length += 1;
+    }
+    return length;
+}
+
 function isSameTourPlace(kakaoName, tourTitle) {
     const kakao = normalizePlaceName(kakaoName);
     const tour = normalizePlaceName(tourTitle);
     if (!kakao || !tour) return false;
-    return kakao === tour || kakao.includes(tour) || tour.includes(kakao);
+    return kakao === tour
+        || kakao.includes(tour)
+        || tour.includes(kakao)
+        || getCommonSuffixLength(kakao, tour) >= 4;
 }
 
 function cleanTourOverview(overview = '') {
@@ -86,6 +102,86 @@ async function fetchTourLocationCandidates({ lng, lat, radius }) {
 
     const item = response.data?.response?.body?.items?.item;
     return normalizeTourApiItems(item);
+}
+
+async function fetchTourKeywordCandidates(keyword) {
+    const serviceKey = getTourApiServiceKey();
+    if (!serviceKey || !keyword) return [];
+
+    const response = await axios.get(`${TOUR_API_BASE_URL}/searchKeyword2`, {
+        params: {
+            serviceKey,
+            MobileOS: process.env.TOUR_API_MOBILE_OS || 'ETC',
+            MobileApp: process.env.TOUR_API_MOBILE_APP || 'WalkBuddy',
+            _type: 'json',
+            keyword,
+            numOfRows: 10,
+            pageNo: 1,
+        },
+    });
+
+    const item = response.data?.response?.body?.items?.item;
+    return normalizeTourApiItems(item);
+}
+
+function getDistanceMeters(from, to) {
+    const fromLng = Number(from.lng);
+    const fromLat = Number(from.lat);
+    const toLng = Number(to.lng);
+    const toLat = Number(to.lat);
+
+    if (![fromLng, fromLat, toLng, toLat].every(Number.isFinite)) return null;
+
+    const earthRadius = 6371000;
+    const dLat = ((toLat - fromLat) * Math.PI) / 180;
+    const dLng = ((toLng - fromLng) * Math.PI) / 180;
+    const lat1 = (fromLat * Math.PI) / 180;
+    const lat2 = (toLat * Math.PI) / 180;
+    const a = Math.sin(dLat / 2) ** 2
+        + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+
+    return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+async function findTourApiMatchByKeyword(spot, lng, lat) {
+    const keywords = [
+        ...(Array.isArray(spot.tour_api_keywords) ? spot.tour_api_keywords : []),
+        spot.name,
+    ].map(keyword => String(keyword || '').trim()).filter(Boolean);
+
+    const candidates = [];
+    const seenContentIds = new Set();
+
+    for (const keyword of keywords) {
+        const keywordCandidates = await fetchTourKeywordCandidates(keyword);
+        for (const candidate of keywordCandidates) {
+            if (!candidate.contentid || seenContentIds.has(String(candidate.contentid))) continue;
+            seenContentIds.add(String(candidate.contentid));
+            candidates.push(candidate);
+        }
+    }
+
+    return candidates
+        .map(candidate => {
+            const distance = getDistanceMeters(
+                { lng, lat },
+                { lng: candidate.mapx, lat: candidate.mapy }
+            );
+
+            return { ...candidate, dist: distance };
+        })
+        .filter(candidate => (
+            candidate.contentid
+            && isSameTourPlace(spot.name, candidate.title)
+            && candidate.dist !== null
+            && candidate.dist <= TOUR_API_KEYWORD_MATCH_RADIUS
+        ))
+        .sort((a, b) => Number(a.dist || 0) - Number(b.dist || 0))[0];
+}
+
+async function findTourApiMatchByContentId(contentId) {
+    if (!contentId) return null;
+    return { contentid: String(contentId), title: null, dist: null };
 }
 
 async function fetchTourOverview(contentId) {
@@ -230,15 +326,20 @@ async function enrichKakaoSpotTourContent(spot, userId) {
     }
 
     try {
-        let candidates = await fetchTourLocationCandidates({
+        let matched = await findTourApiMatchByContentId(spot.tour_api_content_id);
+        let candidates = [];
+
+        if (!matched) {
+            candidates = await fetchTourLocationCandidates({
             lng,
             lat,
             radius: TOUR_API_MATCH_RADIUS,
-        });
+            });
 
-        let matched = candidates
-            .filter(candidate => isSameTourPlace(spot.name, candidate.title))
-            .sort((a, b) => Number(a.dist || 0) - Number(b.dist || 0))[0];
+            matched = candidates
+                .filter(candidate => isSameTourPlace(spot.name, candidate.title))
+                .sort((a, b) => Number(a.dist || 0) - Number(b.dist || 0))[0];
+        }
 
         if (!matched && TOUR_API_MATCH_RADIUS < TOUR_API_FALLBACK_MATCH_RADIUS) {
             candidates = await fetchTourLocationCandidates({
@@ -249,6 +350,10 @@ async function enrichKakaoSpotTourContent(spot, userId) {
             matched = candidates
                 .filter(candidate => isSameTourPlace(spot.name, candidate.title))
                 .sort((a, b) => Number(a.dist || 0) - Number(b.dist || 0))[0];
+        }
+
+        if (!matched) {
+            matched = await findTourApiMatchByKeyword(spot, lng, lat);
         }
 
         if (!matched?.contentid) {
@@ -512,7 +617,19 @@ exports.createSpot = async (body) => {
 // 카카오 스팟 저장
 // ──────────────────────────────────────────────────────────────────────
 exports.saveKakaoSpot = async (body, userId) => {
-    const { kakao_place_id, name, kakao_category_name, categories, address, road_address_name, address_name, x, y } = body;
+    const {
+        kakao_place_id,
+        name,
+        kakao_category_name,
+        categories,
+        address,
+        road_address_name,
+        address_name,
+        x,
+        y,
+        tour_api_content_id,
+        tour_api_keywords,
+    } = body;
     const normalizedCategories = normalizeSpotCategoriesInput(categories);
 
     if (normalizedCategories.length === 0) {
@@ -547,6 +664,8 @@ exports.saveKakaoSpot = async (body, userId) => {
             x: Number(spot.x),
             y: Number(spot.y),
             recommend_pct: spot.recommend_pct == null ? null : Number(spot.recommend_pct),
+            tour_api_content_id,
+            tour_api_keywords,
         };
         const enriched = await enrichKakaoSpotTourContent(normalizedSpot, userId);
         return { is_created: true, ...enriched };
@@ -586,6 +705,8 @@ exports.saveKakaoSpot = async (body, userId) => {
         x: Number(spot.x),
         y: Number(spot.y),
         recommend_pct: spot.recommend_pct == null ? null : Number(spot.recommend_pct),
+        tour_api_content_id,
+        tour_api_keywords,
     };
     const enriched = await enrichKakaoSpotTourContent(normalizedSpot, userId);
     return { is_created: false, ...enriched };
