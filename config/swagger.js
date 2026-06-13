@@ -271,7 +271,7 @@ const swaggerDefinition = {
         responses: {
           200: {
             description: '태그 목록',
-            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, total: { type: 'integer', example: 20 }, course_count: { type: 'integer', example: 7 }, spot_count: { type: 'integer', example: 13 }, course_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string', example: '추천산책로' }, type: { type: 'string', example: 'course' } } } }, spot_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string', example: '포토존' }, type: { type: 'string', example: 'spot' } } } } } } } },
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, total: { type: 'integer', example: 21 }, course_count: { type: 'integer', example: 7 }, spot_count: { type: 'integer', example: 14 }, course_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string', example: '추천산책로' }, type: { type: 'string', example: 'course' } } } }, spot_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string', example: '문화/예술' }, type: { type: 'string', example: 'spot' } } } } } } } },
           },
         },
       },
