@@ -6,8 +6,8 @@
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
-    "db": "node db/run-sql.js db/reset.sql && node db/run-sql.js db/schema.sql && node db/generate-erd-data.js && npm --prefix db/erd-viewer run dev",
-    "db:apply": "node db/run-sql.js db/reset.sql && node db/run-sql.js db/schema.sql && node db/generate-erd-data.js",
+    "db": "node db/run-sql.js db/reset.sql && node db/run-sql.js db/schema.sql",
+    "db:apply": "node db/run-sql.js db/reset.sql && node db/run-sql.js db/schema.sql",
     "db:migrate": "node db/run-sql.js",
     "seed": "node scripts/seed-demo-data.js",
     "seed:full": "node scripts/seed-demo-data.js --with-durunubi",
@@ -15,8 +15,6 @@
     "import:durunubi": "node scripts/import-durunubi-courses.js",
     "seed:prewalk-course": "node scripts/create-prewalk-course-via-api.js",
     "seed:prewalk-reviews": "node scripts/create-prewalk-course-via-api.js --reviews-only",
-    "erd:gen": "node db/generate-erd-data.js",
-    "erd:dev": "npm run erd:gen && npm --prefix db/erd-viewer run dev",
     "db:seed": "node db/run-sql.js db/seed.sql"
   },
   "dependencies": {
