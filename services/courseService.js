@@ -39,31 +39,35 @@ const buildLineString = async (waypoints, client) => {
       : { lng: w.lng, lat: w.lat }
   );
 
-  try {
-    const origin      = points[0];
-    const destination = points[points.length - 1];
-    const middle      = points.slice(1, -1);
+  const origin      = points[0];
+  const destination = points[points.length - 1];
+  const middle      = points.slice(1, -1);
 
-    // T맵은 경유지 없이 출발-목적지만 지원 → 구간별로 나눠서 호출 후 합치기
-    const segments = [];
-    const allPoints = [origin, ...middle, destination];
+  // T맵은 경유지 없이 출발-목적지만 지원 → 구간별로 나눠서 호출 후 합치기
+  const segments = [];
+  const allPoints = [origin, ...middle, destination];
 
-    for (let i = 0; i < allPoints.length - 1; i++) {
-  const from = allPoints[i];
-  const to   = allPoints[i + 1];
+  for (let i = 0; i < allPoints.length - 1; i++) {
+    const from = allPoints[i];
+    const to   = allPoints[i + 1];
 
-  // 출발지와 도착지가 같으면 스킵
-  if (from.lng === to.lng && from.lat === to.lat) continue;
+    // 출발지와 도착지가 같으면 스킵
+    if (from.lng === to.lng && from.lat === to.lat) continue;
 
-  // 100m 이하로 너무 가까우면 스킵
-  const dLat = (to.lat - from.lat) * Math.PI / 180;
-  const dLng = (to.lng - from.lng) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(from.lat * Math.PI/180) * Math.cos(to.lat * Math.PI/180) * Math.sin(dLng/2)**2;
-  const dist = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  if (dist < 100) continue;
+    // 100m 이하로 너무 가까우면 두 점을 직선으로 바로 연결
+    const dLat = (to.lat - from.lat) * Math.PI / 180;
+    const dLng = (to.lng - from.lng) * Math.PI / 180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(from.lat * Math.PI/180) * Math.cos(to.lat * Math.PI/180) * Math.sin(dLng/2)**2;
+    const dist = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    if (dist < 100) {
+      segments.push([from.lng, from.lat], [to.lng, to.lat]);
+      continue;
+    }
 
-  console.log('[Tmap 요청]', from.lng, from.lat, '->', to.lng, to.lat);
-  const res = await fetch('https://apis.openapi.sk.com/tmap/routes/pedestrian?version=1', {
+    // 구간 단위로 T맵 호출 → 이 구간만 실패해도 나머지 구간의 실제 경로는 보존
+    try {
+      console.log('[Tmap 요청]', from.lng, from.lat, '->', to.lng, to.lat);
+      const res = await fetch('https://apis.openapi.sk.com/tmap/routes/pedestrian?version=1', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -84,31 +88,35 @@ const buildLineString = async (waypoints, client) => {
 
       const data = await res.json();
       console.log('[Tmap 응답 상태]', res.status);
-      console.log('[Tmap 응답 내용]', JSON.stringify(data).slice(0, 1000));
 
       if (!data.features?.length) {
         throw new Error(`T맵 경로 없음: ${from.lng},${from.lat} → ${to.lng},${to.lat}`);
       }
 
       // features에서 LineString 좌표 추출
+      const segmentCoords = [];
       for (const feature of data.features) {
         if (feature.geometry.type === 'LineString') {
-          segments.push(...feature.geometry.coordinates);
+          segmentCoords.push(...feature.geometry.coordinates);
         }
       }
+      if (!segmentCoords.length) throw new Error('경로 좌표 없음');
+
+      segments.push(...segmentCoords);
+    } catch (err) {
+      console.warn(`[buildLineString] 구간(${i}) T맵 실패, 해당 구간만 직선으로 대체:`, err.message);
+      segments.push([from.lng, from.lat], [to.lng, to.lat]);
     }
+  }
 
-    if (segments.length < 2) throw new Error('경로 좌표 부족');
-
-    const allCoords = segments.map(([lng, lat]) => `${lng} ${lat}`).join(', ');
-    return `SRID=4326;LINESTRING(${allCoords})`;
-
-  } catch (err) {
-    console.warn('[buildLineString] T맵 실패, 직선 경로로 폴백:', err.message);
+  if (segments.length < 2) {
+    // 모든 구간이 스킵될 만큼 포인트가 붙어있는 경우 → 원본 포인트로 폴백
     const fallbackPoints = points.map((p) => `${p.lng} ${p.lat}`);
     return `SRID=4326;LINESTRING(${fallbackPoints.join(', ')})`;
-    
   }
+
+  const allCoords = segments.map(([lng, lat]) => `${lng} ${lat}`).join(', ');
+  return `SRID=4326;LINESTRING(${allCoords})`;
 };
 
 // ──────────────────────────────────────────────────────────────────────
