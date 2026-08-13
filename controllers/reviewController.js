@@ -21,7 +21,7 @@ exports.getCourseReviews = async (req, res, next) => {
 exports.createSpotReview = async (req, res, next) => {
   try {
     const result = await reviewService.createSpotReview(
-      req.user.user_id, req.params.spot_id, req.body
+      req.user.user_id, req.params.spot_id, req.body, req.files
     );
     return res.status(201).json(result);
   } catch (err) { next(err); }
