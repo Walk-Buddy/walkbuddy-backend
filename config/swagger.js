@@ -752,12 +752,13 @@ const swaggerDefinition = {
     parameters: [{ name: 'spot_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
     requestBody: {
       required: true,
-      content: { 'application/json': { schema: { type: 'object', required: ['is_recommended', 'walk_record_id'], properties: {
+      content: { 'multipart/form-data': { schema: { type: 'object', required: ['walk_record_id'], properties: {
         walk_record_id: { type: 'string', format: 'uuid', description: '산책 기록 ID' },
         is_recommended: { type: 'boolean' },
+        is_public: { type: 'boolean', default: true },
         description: { type: 'string' },
-        tags: { type: 'array', items: { type: 'string', format: 'uuid' } },
-        images: { type: 'array', items: { type: 'string' } }
+        tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
+        photos: { type: 'array', items: { type: 'string', format: 'binary' }, maxItems: 5, description: '첨부 사진 파일 (최대 5장, 장당 5MB)' }
       } } } },
     },
     responses: {

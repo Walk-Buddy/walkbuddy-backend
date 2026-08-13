@@ -1,5 +1,9 @@
 const pool = require('../config/db');
 
+function isMissing(value) {
+  return value === undefined || value === null || value === '';
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // 코스 후기 등록
 // ──────────────────────────────────────────────────────────────────────
@@ -103,8 +107,14 @@ exports.getCourseReviews = async (courseId, query, userId) => {
 // ──────────────────────────────────────────────────────────────────────
 // 스팟 후기 등록
 // ──────────────────────────────────────────────────────────────────────
-exports.createSpotReview = async (userId, spotId, body) => {
-  const { walk_record_id, description, is_recommended, photos = [], is_public = true, tag_ids = [] } = body;
+exports.createSpotReview = async (userId, spotId, body, files = []) => {
+  const { walk_record_id, description } = body;
+  const is_recommended = isMissing(body.is_recommended) ? null : body.is_recommended === 'true' || body.is_recommended === true;
+  const is_public = isMissing(body.is_public) ? true : body.is_public === 'true' || body.is_public === true;
+  const tag_ids = isMissing(body.tag_ids) ? [] : [].concat(body.tag_ids);
+
+  // 업로드된 사진 파일 → S3 key 배열
+  const photos = (files || []).map((file) => file.key);
 
   // walk_record_id 유효성 확인
   const { rows: walkRows } = await pool.query(
