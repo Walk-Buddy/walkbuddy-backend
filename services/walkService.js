@@ -68,18 +68,47 @@ exports.getWalkList = async (userId) => {
   const { rows } = await pool.query(
     `SELECT
        wr.walk_record_id,
+       wr.course_id,
        c.name        AS course_name,
        wr.total_distance,
        wr.duration,
        wr.is_completed,
-       wr.started_at
+       wr.started_at,
+       wr.ended_at,
+       cr.course_review_id,
+       cr.description AS review_description,
+       cr.rating       AS review_rating,
+       cr.difficulty   AS review_difficulty,
+       cr.is_public     AS review_is_public,
+       (wr.is_completed AND wr.course_id IS NOT NULL AND cr.course_review_id IS NULL) AS needs_review
      FROM walk_records wr
      LEFT JOIN courses c ON c.course_id = wr.course_id
+     LEFT JOIN course_reviews cr ON cr.walk_record_id = wr.walk_record_id AND cr.status = 'active'
      WHERE wr.user_id = $1
-     ORDER BY wr.started_at DESC`,
+     ORDER BY needs_review DESC, wr.started_at DESC`,
     [userId]
   );
-  return { total: rows.length, walks: rows };
+
+  const walks = rows.map((r) => ({
+    walk_record_id: r.walk_record_id,
+    course_id: r.course_id,
+    course_name: r.course_name,
+    total_distance: r.total_distance,
+    duration: r.duration,
+    is_completed: r.is_completed,
+    started_at: r.started_at,
+    ended_at: r.ended_at,
+    needs_review: r.needs_review,
+    review: r.course_review_id ? {
+      course_review_id: r.course_review_id,
+      description: r.review_description,
+      rating: r.review_rating,
+      difficulty: r.review_difficulty,
+      is_public: r.review_is_public,
+    } : null,
+  }));
+
+  return { total: walks.length, walks };
 };
 
 // ──────────────────────────────────────────────────────────────────────
