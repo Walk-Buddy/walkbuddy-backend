@@ -894,6 +894,41 @@ exports.searchCourses = async (query) => {
 };
 
 // ──────────────────────────────────────────────────────────────────────
+// 내가 등록한 코스 목록 (마이페이지)
+// ──────────────────────────────────────────────────────────────────────
+exports.getMyCourses = async (userId, query) => {
+  const { page = 1, limit = 20, is_public } = query;
+  const offset = (page - 1) * limit;
+
+  const conditions = [`owner_id = $1`, `status != 'deleted'`];
+  const params = [userId];
+  let idx = 2;
+  if (is_public !== undefined) {
+    conditions.push(`is_public = $${idx++}`);
+    params.push(is_public === 'true' || is_public === true);
+  }
+  const where = conditions.join(' AND ');
+
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query(
+      `SELECT course_id, name, description, category, total_distance, estimated_duration,
+              is_public, status, created_at, updated_at
+       FROM courses
+       WHERE ${where}
+       ORDER BY created_at DESC
+       LIMIT $${idx} OFFSET $${idx + 1}`,
+      [...params, +limit, +offset]
+    );
+    const { rows: countRows } = await client.query(
+      `SELECT COUNT(*) AS total FROM courses WHERE ${where}`,
+      params
+    );
+    return { total: +countRows[0].total, page: +page, courses: rows };
+  } finally { client.release(); }
+};
+
+// ──────────────────────────────────────────────────────────────────────
 // 코스 상세 조회
 // ──────────────────────────────────────────────────────────────────────
 exports.getCourseById = async (courseId, userId) => {
