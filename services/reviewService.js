@@ -231,6 +231,46 @@ exports.getSpotReviews = async (spotId, query, userId) => {
 };
 
 // ──────────────────────────────────────────────────────────────────────
+// 나의 후기 목록 (코스 후기 + 스팟 후기 통합, 마이페이지)
+// ──────────────────────────────────────────────────────────────────────
+exports.getMyReviews = async (userId, query) => {
+  const { page = 1, limit = 20 } = query;
+  const offset = (page - 1) * limit;
+
+  const unionSql = `
+    SELECT 'course' AS review_type, cr.course_review_id AS review_id,
+           cr.course_id AS target_id, c.name AS target_name,
+           cr.description, cr.rating, cr.difficulty, NULL::boolean AS is_recommended,
+           NULL::text[] AS photos, cr.is_public, cr.created_at
+    FROM course_reviews cr
+    JOIN courses c ON c.course_id = cr.course_id
+    WHERE cr.user_id = $1 AND cr.status = 'active'
+
+    UNION ALL
+
+    SELECT 'spot' AS review_type, sr.spot_review_id AS review_id,
+           sr.spot_id AS target_id, s.name AS target_name,
+           sr.description, NULL::decimal AS rating, NULL::varchar AS difficulty, sr.is_recommended,
+           sr.photos, sr.is_public, sr.created_at
+    FROM spot_reviews sr
+    JOIN spots s ON s.spot_id = sr.spot_id
+    WHERE sr.user_id = $1 AND sr.status = 'active'
+  `;
+
+  const { rows } = await pool.query(
+    `${unionSql} ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+    [userId, +limit, +offset]
+  );
+
+  const { rows: countRows } = await pool.query(
+    `SELECT COUNT(*) AS total FROM (${unionSql}) reviews`,
+    [userId]
+  );
+
+  return { total: +countRows[0].total, page: +page, reviews: rows };
+};
+
+// ──────────────────────────────────────────────────────────────────────
 // 후기 수정 (코스/스팟 공통)
 // ──────────────────────────────────────────────────────────────────────
 exports.updateReview = async (userId, reviewType, reviewId, body) => {
