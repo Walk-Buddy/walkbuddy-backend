@@ -1076,6 +1076,7 @@ const swaggerDefinition = {
                           },
                           photo_url: { type: 'string', nullable: true },
                           status: { type: 'string' },
+                          admin_memo: { type: 'string', nullable: true },
                           created_at: { type: 'string', format: 'date-time' },
                           updated_at: { type: 'string', format: 'date-time' },
                         },
@@ -1130,6 +1131,7 @@ const swaggerDefinition = {
                     },
                     photo_url: { type: 'string', nullable: true },
                     status: { type: 'string' },
+                    admin_memo: { type: 'string', nullable: true },
                     created_at: { type: 'string', format: 'date-time' },
                     updated_at: { type: 'string', format: 'date-time' },
                   },
@@ -1165,6 +1167,10 @@ const swaggerDefinition = {
                     default: 'none',
                     description: '대상 제재 조치 (hide_target: 콘텐츠 숨김, suspend_user: 유저 정지)',
                   },
+                  admin_memo: {
+                    type: 'string',
+                    description: '관리자 처리 사유 / 메모 (선택)',
+                  },
                   notify: {
                     type: 'boolean',
                     default: true,
@@ -1185,6 +1191,7 @@ const swaggerDefinition = {
                   properties: {
                     report_id: { type: 'string', format: 'uuid' },
                     status: { type: 'string' },
+                    admin_memo: { type: 'string', nullable: true },
                     action_applied: { type: 'string' },
                     notification_created: { type: 'boolean' },
                     updated_at: { type: 'string', format: 'date-time' },

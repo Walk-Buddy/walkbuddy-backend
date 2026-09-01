@@ -23,6 +23,9 @@ const VALID_REASONS_BY_CATEGORY = {
   user: ['spam', 'abuse', 'inappropriate', 'false_info', 'portrait', 'etc']
 };
 
+// 3. 신고 누적 시 자동 잠정 숨김(auto_hidden) 임계치
+const AUTO_HIDE_THRESHOLD = 5;
+
 // UUID 정규식 검증 헬퍼
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -64,7 +67,7 @@ exports.createReport = async (userId, data) => {
     throw err;
   }
 
-  // 1-2. 위치 기반 신고(location) 처리
+  // 1-4. 위치 기반 신고(location) 처리
   if (target_type === 'location') {
     if (target_id) {
       const err = new Error('위치 기반 신고(location)에는 target_id를 함께 지정할 수 없습니다.');
@@ -100,7 +103,7 @@ exports.createReport = async (userId, data) => {
     return report;
   }
 
-  // 1-3. ID 기반 신고 (course, spot, course_review, spot_review, user)
+  // 1-5. ID 기반 신고 (course, spot, course_review, spot_review, user)
   if (!target_id || !isValidUUID(target_id)) {
     const err = new Error('유효한 UUID 형식의 target_id가 필요합니다.');
     err.status = 400;
@@ -113,7 +116,7 @@ exports.createReport = async (userId, data) => {
     throw err;
   }
 
-  // 1-4. 다형성 참조 대상 실존 여부 검증 (Polymorphic Target Validation)
+  // 다형성 참조 대상 실존 여부 검증
   let targetExists = false;
   switch (target_type) {
     case 'course': {
@@ -149,7 +152,7 @@ exports.createReport = async (userId, data) => {
     throw err;
   }
 
-  // 1-5. 중복 신고 검증 (동일 사용자가 동일 대상을 중복 신고 방지)
+  // 중복 신고 검증
   const { rows: existing } = await pool.query(
     'SELECT report_id FROM reports WHERE reporter_id = $1 AND target_id = $2 AND target_type = $3',
     [userId, target_id, target_type]
@@ -160,7 +163,7 @@ exports.createReport = async (userId, data) => {
     throw err;
   }
 
-  // 1-6. DB INSERT
+  // DB INSERT
   const { rows: [report] } = await pool.query(
     `INSERT INTO reports (
       reporter_id, target_type, target_id, report_category, reason, memo, photo_url, status
@@ -173,7 +176,49 @@ exports.createReport = async (userId, data) => {
     [userId, target_type, target_id, report_category, reason, memo || null, photo_url || null]
   );
 
-  return report;
+  // 1-6. 신고 누적 체크: 5건 이상 누적 시 시스템 자동 잠정 숨김(auto_hidden) 처리
+  let autoHidden = false;
+  if (target_id && target_type !== 'user') {
+    const { rows: [{ report_count }] } = await pool.query(
+      'SELECT COUNT(*) AS report_count FROM reports WHERE target_id = $1 AND target_type = $2',
+      [target_id, target_type]
+    );
+
+    if (parseInt(report_count, 10) >= AUTO_HIDE_THRESHOLD) {
+      switch (target_type) {
+        case 'course':
+          await pool.query(
+            "UPDATE courses SET status = 'auto_hidden', updated_at = NOW() WHERE course_id = $1 AND status = 'active'",
+            [target_id]
+          );
+          break;
+        case 'spot':
+          await pool.query(
+            "UPDATE spots SET status = 'auto_hidden', updated_at = NOW() WHERE spot_id = $1 AND status = 'active'",
+            [target_id]
+          );
+          break;
+        case 'course_review':
+          await pool.query(
+            "UPDATE course_reviews SET status = 'auto_hidden', updated_at = NOW() WHERE course_review_id = $1 AND status = 'active'",
+            [target_id]
+          );
+          break;
+        case 'spot_review':
+          await pool.query(
+            "UPDATE spot_reviews SET status = 'auto_hidden', updated_at = NOW() WHERE spot_review_id = $1 AND status = 'active'",
+            [target_id]
+          );
+          break;
+      }
+      autoHidden = true;
+    }
+  }
+
+  return {
+    ...report,
+    auto_hidden: autoHidden
+  };
 };
 
 // ──────────────────────────────────────────────────────────────────────
@@ -282,6 +327,7 @@ exports.getAdminReports = async (query) => {
       END AS location,
       r.photo_url,
       r.status,
+      r.admin_memo,
       r.created_at,
       r.updated_at
     FROM reports r
@@ -327,6 +373,7 @@ exports.getAdminReportById = async (reportId) => {
       END AS location,
       r.photo_url,
       r.status,
+      r.admin_memo,
       r.created_at,
       r.updated_at,
       json_build_object(
@@ -415,7 +462,7 @@ exports.updateReportStatus = async (adminId, reportId, data) => {
     throw err;
   }
 
-  const { status, action = 'none', notify = true } = data;
+  const { status, action = 'none', notify = true, admin_memo } = data;
 
   if (!status || !ALLOWED_STATUSES.includes(status)) {
     const err = new Error(`유효하지 않은 status입니다. 허용값: ${ALLOWED_STATUSES.join(', ')}`);
@@ -445,16 +492,18 @@ exports.updateReportStatus = async (adminId, reportId, data) => {
       throw err;
     }
 
-    // 5-2. 신고 상태 업데이트
+    // 5-2. 신고 상태 및 관리자 메모 업데이트
     const { rows: [updatedReport] } = await client.query(
       `UPDATE reports
-       SET status = $1, updated_at = NOW()
-       WHERE report_id = $2
-       RETURNING report_id, status, updated_at, reporter_id, target_type, target_id`,
-      [status, reportId]
+       SET status = $1,
+           admin_memo = COALESCE($2, admin_memo),
+           updated_at = NOW()
+       WHERE report_id = $3
+       RETURNING report_id, status, admin_memo, updated_at, reporter_id, target_type, target_id`,
+      [status, admin_memo || null, reportId]
     );
 
-    // 5-3. 대상 콘텐츠/유저 제재 조치 (action)
+    // 5-3. 대상 콘텐츠/유저 제재 조치 (action) 또는 반려 시 자동 복원
     let actionApplied = 'none';
     if (action === 'hide_target' && report.target_id) {
       switch (report.target_type) {
@@ -498,6 +547,23 @@ exports.updateReportStatus = async (adminId, reportId, data) => {
         await client.query("UPDATE users SET status = 'suspended', updated_at = NOW() WHERE user_id = $1", [targetUserId]);
         actionApplied = 'user_suspended';
       }
+    } else if (status === 'rejected' && report.target_id && report.target_type !== 'user') {
+      // 관리자가 이상 없음으로 반려(rejected)한 경우: auto_hidden 잠정 숨김 상태였던 대상을 active로 자동 복원
+      switch (report.target_type) {
+        case 'course':
+          await client.query("UPDATE courses SET status = 'active', updated_at = NOW() WHERE course_id = $1 AND status = 'auto_hidden'", [report.target_id]);
+          break;
+        case 'spot':
+          await client.query("UPDATE spots SET status = 'active', updated_at = NOW() WHERE spot_id = $1 AND status = 'auto_hidden'", [report.target_id]);
+          break;
+        case 'course_review':
+          await client.query("UPDATE course_reviews SET status = 'active', updated_at = NOW() WHERE course_review_id = $1 AND status = 'auto_hidden'", [report.target_id]);
+          break;
+        case 'spot_review':
+          await client.query("UPDATE spot_reviews SET status = 'active', updated_at = NOW() WHERE spot_review_id = $1 AND status = 'auto_hidden'", [report.target_id]);
+          break;
+      }
+      actionApplied = 'target_restored_active';
     }
 
     // 5-4. 신고자에게 알림 생성 (notifications 테이블)
@@ -527,6 +593,7 @@ exports.updateReportStatus = async (adminId, reportId, data) => {
     return {
       report_id: updatedReport.report_id,
       status: updatedReport.status,
+      admin_memo: updatedReport.admin_memo,
       action_applied: actionApplied,
       notification_created: notificationCreated,
       updated_at: updatedReport.updated_at
