@@ -38,8 +38,8 @@ const uploadRoutes       = require('./routes/upload');
 const reviewRoutes       = require('./routes/reviews');
 const reactionRoutes     = require('./routes/reactions');
 // const bookmarkRoutes     = require('./routes/bookmarks');
-// const reportRoutes       = require('./routes/reports');
-// const adminRoutes        = require('./routes/admin');
+const reportRoutes       = require('./routes/reports');
+const adminRoutes        = require('./routes/admin');
 // const notificationRoutes = require('./routes/notifications');
 
 app.use('/api/auth', authRoutes);
@@ -53,8 +53,8 @@ app.use('/api/upload',        uploadRoutes);
 app.use('/api/reviews',       reviewRoutes);
 app.use('/api/reactions',     reactionRoutes);
 // app.use('/api/bookmarks',     bookmarkRoutes);
-// app.use('/api/reports',       reportRoutes);
-// app.use('/api/admin',         adminRoutes);
+app.use('/api/reports',       reportRoutes);
+app.use('/api/admin',         adminRoutes);
 // app.use('/api/notifications', notificationRoutes);
 
 // ── 404 ──────────────────────────────────────────────────────────────

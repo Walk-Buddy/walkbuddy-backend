@@ -906,48 +906,301 @@ const swaggerDefinition = {
       post: {
         tags: ['신고'],
         summary: '신고 접수',
+        security: [{ BearerAuth: [] }],
         requestBody: {
           required: true,
-          content: { 'application/json': { schema: { type: 'object', required: ['target_id', 'target_type', 'report_category'], properties: { target_id: { type: 'string', format: 'uuid' }, target_type: { type: 'string', enum: ['course', 'spot', 'review', 'user'] }, report_category: { type: 'string', example: 'dangerous' }, description: { type: 'string' } } } } },
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['target_type', 'report_category', 'reason'],
+                properties: {
+                  target_type: {
+                    type: 'string',
+                    enum: ['course', 'spot', 'course_review', 'spot_review', 'user', 'location'],
+                    description: '신고 대상 구분 (location은 위치 기반 신고)',
+                  },
+                  target_id: {
+                    type: 'string',
+                    format: 'uuid',
+                    description: '신고 대상 ID (target_type이 location이 아닐 때 필수)',
+                  },
+                  latitude: {
+                    type: 'number',
+                    description: '위도 (target_type이 location일 때 필수)',
+                    example: 37.5665,
+                  },
+                  longitude: {
+                    type: 'number',
+                    description: '경도 (target_type이 location일 때 필수)',
+                    example: 126.9780,
+                  },
+                  report_category: {
+                    type: 'string',
+                    enum: ['environment', 'user'],
+                    description: '신고 분류 (environment: 환경/길 상태, user: 사용자/콘텐츠)',
+                  },
+                  reason: {
+                    type: 'string',
+                    enum: [
+                      'construction', 'blocked', 'dangerous', 'info_error',
+                      'spam', 'abuse', 'inappropriate', 'false_info', 'portrait', 'etc'
+                    ],
+                    description: '신고 사유 코드',
+                  },
+                  memo: {
+                    type: 'string',
+                    description: '신고 상세 설명 / 메모 (선택)',
+                  },
+                  photo_url: {
+                    type: 'string',
+                    description: '첨부 사진 URL (선택, 1장)',
+                  },
+                },
+              },
+            },
+          },
         },
         responses: {
           201: {
             description: '신고 접수 완료',
-            content: { 'application/json': { schema: { type: 'object', properties: { report_id: { type: 'string', format: 'uuid' }, status: { type: 'string', example: 'pending' }, created_at: { type: 'string', format: 'date-time' } } } } },
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    report_id: { type: 'string', format: 'uuid' },
+                    target_type: { type: 'string' },
+                    target_id: { type: 'string', format: 'uuid', nullable: true },
+                    report_category: { type: 'string' },
+                    reason: { type: 'string' },
+                    memo: { type: 'string', nullable: true },
+                    status: { type: 'string', example: 'received' },
+                    created_at: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          400: { description: '요청 데이터 검증 실패' },
+          401: { description: '인증 토큰 없음 또는 유효하지 않음' },
+          404: { description: '신고 대상이 존재하지 않음' },
+          409: { description: '이미 신고한 대상 (중복 신고)' },
+        },
+      },
+    },
+    '/api/reports/me': {
+      get: {
+        tags: ['신고'],
+        summary: '내 신고 목록 조회',
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['received', 'in_progress', 'completed', 'rejected'] } },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
+        ],
+        responses: {
+          200: {
+            description: '내 신고 목록 조회 성공',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    total: { type: 'integer' },
+                    page: { type: 'integer' },
+                    limit: { type: 'integer' },
+                    reports: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          report_id: { type: 'string', format: 'uuid' },
+                          target_type: { type: 'string' },
+                          target_id: { type: 'string', format: 'uuid', nullable: true },
+                          report_category: { type: 'string' },
+                          reason: { type: 'string' },
+                          memo: { type: 'string', nullable: true },
+                          photo_url: { type: 'string', nullable: true },
+                          status: { type: 'string' },
+                          created_at: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },
     },
     '/api/admin/reports': {
       get: {
-        tags: ['신고'],
+        tags: ['관리자 - 신고'],
         summary: '신고 목록 조회 (관리자)',
+        security: [{ BearerAuth: [] }],
         parameters: [
-          { name: 'status', in: 'query', schema: { type: 'string', enum: ['pending', 'processing', 'resolved', 'rejected'] } },
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['received', 'in_progress', 'completed', 'rejected'] } },
+          { name: 'report_category', in: 'query', schema: { type: 'string', enum: ['environment', 'user'] } },
+          { name: 'target_type', in: 'query', schema: { type: 'string', enum: ['course', 'spot', 'course_review', 'spot_review', 'user', 'location'] } },
           { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
         ],
         responses: {
           200: {
-            description: '신고 목록',
-            content: { 'application/json': { schema: { type: 'object', properties: { total: { type: 'integer' }, reports: { type: 'array', items: { type: 'object', properties: { report_id: { type: 'string', format: 'uuid' }, target_type: { type: 'string' }, report_category: { type: 'string' }, status: { type: 'string' }, created_at: { type: 'string', format: 'date-time' } } } } } } } },
+            description: '신고 목록 조회 성공',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    total: { type: 'integer' },
+                    page: { type: 'integer' },
+                    limit: { type: 'integer' },
+                    reports: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          report_id: { type: 'string', format: 'uuid' },
+                          reporter_id: { type: 'string', format: 'uuid', nullable: true },
+                          reporter_nickname: { type: 'string', nullable: true },
+                          target_type: { type: 'string' },
+                          target_id: { type: 'string', format: 'uuid', nullable: true },
+                          report_category: { type: 'string' },
+                          reason: { type: 'string' },
+                          memo: { type: 'string', nullable: true },
+                          location: {
+                            type: 'object',
+                            nullable: true,
+                            properties: {
+                              latitude: { type: 'number' },
+                              longitude: { type: 'number' },
+                            },
+                          },
+                          photo_url: { type: 'string', nullable: true },
+                          status: { type: 'string' },
+                          created_at: { type: 'string', format: 'date-time' },
+                          updated_at: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
+          403: { description: '관리자 권한 없음' },
         },
       },
     },
     '/api/admin/reports/{report_id}': {
+      get: {
+        tags: ['관리자 - 신고'],
+        summary: '신고 상세 조회 (관리자)',
+        security: [{ BearerAuth: [] }],
+        parameters: [{ name: 'report_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          200: {
+            description: '신고 상세 정보 조회 성공',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    report_id: { type: 'string', format: 'uuid' },
+                    reporter: {
+                      type: 'object',
+                      nullable: true,
+                      properties: {
+                        user_id: { type: 'string', format: 'uuid' },
+                        nickname: { type: 'string' },
+                        email: { type: 'string' },
+                      },
+                    },
+                    target_type: { type: 'string' },
+                    target_id: { type: 'string', format: 'uuid', nullable: true },
+                    target_details: { type: 'object', nullable: true, description: '신고 대상 콘텐츠/유저 요약 정보' },
+                    report_category: { type: 'string' },
+                    reason: { type: 'string' },
+                    memo: { type: 'string', nullable: true },
+                    location: {
+                      type: 'object',
+                      nullable: true,
+                      properties: {
+                        latitude: { type: 'number' },
+                        longitude: { type: 'number' },
+                      },
+                    },
+                    photo_url: { type: 'string', nullable: true },
+                    status: { type: 'string' },
+                    created_at: { type: 'string', format: 'date-time' },
+                    updated_at: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          403: { description: '관리자 권한 없음' },
+          404: { description: '신고 내역을 찾을 수 없음' },
+        },
+      },
       patch: {
-        tags: ['신고'],
+        tags: ['관리자 - 신고'],
         summary: '신고 처리 (관리자)',
+        security: [{ BearerAuth: [] }],
         parameters: [{ name: 'report_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         requestBody: {
           required: true,
-          content: { 'application/json': { schema: { type: 'object', required: ['status'], properties: { status: { type: 'string', enum: ['processing', 'resolved', 'rejected'] }, admin_note: { type: 'string' } } } } },
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['status'],
+                properties: {
+                  status: {
+                    type: 'string',
+                    enum: ['in_progress', 'completed', 'rejected'],
+                    description: '변경할 상태 (처리중, 완료, 반려)',
+                  },
+                  action: {
+                    type: 'string',
+                    enum: ['none', 'hide_target', 'suspend_user'],
+                    default: 'none',
+                    description: '대상 제재 조치 (hide_target: 콘텐츠 숨김, suspend_user: 유저 정지)',
+                  },
+                  notify: {
+                    type: 'boolean',
+                    default: true,
+                    description: '신고자에게 처리 결과 알림 발송 여부',
+                  },
+                },
+              },
+            },
+          },
         },
         responses: {
           200: {
             description: '신고 처리 완료',
-            content: { 'application/json': { schema: { type: 'object', properties: { report_id: { type: 'string', format: 'uuid' }, status: { type: 'string' }, updated_at: { type: 'string', format: 'date-time' } } } } },
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    report_id: { type: 'string', format: 'uuid' },
+                    status: { type: 'string' },
+                    action_applied: { type: 'string' },
+                    notification_created: { type: 'boolean' },
+                    updated_at: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
           },
+          400: { description: '유효하지 않은 상태값 또는 조치' },
+          403: { description: '관리자 권한 없음' },
+          404: { description: '신고 내역을 찾을 수 없음' },
         },
       },
     },
