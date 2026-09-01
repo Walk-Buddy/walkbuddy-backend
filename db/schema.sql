@@ -347,7 +347,7 @@ CREATE TABLE spots (
         PRIMARY KEY (spot_id),
 
     CONSTRAINT chk_spots_status
-        CHECK (status IN ('active', 'hidden')),
+        CHECK (status IN ('active', 'auto_hidden', 'hidden')),
 
     CONSTRAINT chk_spots_source
         CHECK (source IN ('admin', 'kakao')),
@@ -507,7 +507,7 @@ CREATE TABLE courses (
     -- 탈퇴 처리 전 코스 처리 방식 결정 필요 (앱단에서 처리)
 
     CONSTRAINT chk_courses_status
-        CHECK (status IN ('active', 'hidden', 'deleted')),
+        CHECK (status IN ('active', 'auto_hidden', 'hidden', 'deleted')),
 
     CONSTRAINT chk_courses_total_distance
         CHECK (total_distance > 0),
@@ -979,7 +979,7 @@ CREATE TABLE course_reviews (
     -- 평점 범위 검증 (미입력 시 NULL 허용)
 
     CONSTRAINT chk_course_reviews_status
-        CHECK (status IN ('active', 'hidden'))
+        CHECK (status IN ('active', 'auto_hidden', 'hidden'))
 );
 
 -- 코스별 후기 최신순 조회용
@@ -1071,7 +1071,7 @@ CREATE TABLE spot_reviews (
     -- 동일 walk_record_id + spot_id 조합 중복 INSERT 차단
 
     CONSTRAINT chk_spot_reviews_status
-        CHECK (status IN ('active', 'hidden')),
+        CHECK (status IN ('active', 'auto_hidden', 'hidden')),
 
     CONSTRAINT chk_spot_reviews_photos
         CHECK (array_length(photos, 1) <= 5)
@@ -1222,6 +1222,9 @@ CREATE TABLE reports (
     -- 처리 상태
     -- 'received': 접수 / 'in_progress': 처리중
     -- 'completed': 완료 / 'rejected': 반려
+
+    admin_memo      TEXT            NULL,
+    -- 관리자 처리 메모 / 반려 사유 (선택 입력)
 
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
