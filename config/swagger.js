@@ -8,15 +8,15 @@ const swaggerDefinition = {
     description: 'WalkBuddy 서비스 REST API 문서',
   },
   servers: [
-  {
-    url: 'http://43.200.171.53:3000',
-    description: '운영 서버',
-  },
-  {
-    url: 'http://localhost:3000',
-    description: '개발 서버',
-  },
-],
+    {
+      url: 'http://localhost:3000',
+      description: '로컬 개발 서버',
+    },
+    {
+      url: 'http://43.200.171.53:3000',
+      description: '원격 배포 서버',
+    },
+  ],
   components: {
     securitySchemes: {
       bearerAuth: {
@@ -906,7 +906,7 @@ const swaggerDefinition = {
       post: {
         tags: ['신고'],
         summary: '신고 접수',
-        security: [{ BearerAuth: [] }],
+        security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -988,7 +988,7 @@ const swaggerDefinition = {
       get: {
         tags: ['신고'],
         summary: '내 신고 목록 조회',
-        security: [{ BearerAuth: [] }],
+        security: [{ bearerAuth: [] }],
         parameters: [
           { name: 'status', in: 'query', schema: { type: 'string', enum: ['received', 'in_progress', 'completed', 'rejected'] } },
           { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
@@ -1034,7 +1034,7 @@ const swaggerDefinition = {
       get: {
         tags: ['관리자 - 신고'],
         summary: '신고 목록 조회 (관리자)',
-        security: [{ BearerAuth: [] }],
+        security: [{ bearerAuth: [] }],
         parameters: [
           { name: 'status', in: 'query', schema: { type: 'string', enum: ['received', 'in_progress', 'completed', 'rejected'] } },
           { name: 'report_category', in: 'query', schema: { type: 'string', enum: ['environment', 'user'] } },
@@ -1094,7 +1094,7 @@ const swaggerDefinition = {
       get: {
         tags: ['관리자 - 신고'],
         summary: '신고 상세 조회 (관리자)',
-        security: [{ BearerAuth: [] }],
+        security: [{ bearerAuth: [] }],
         parameters: [{ name: 'report_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         responses: {
           200: {
@@ -1144,7 +1144,7 @@ const swaggerDefinition = {
       patch: {
         tags: ['관리자 - 신고'],
         summary: '신고 처리 (관리자)',
-        security: [{ BearerAuth: [] }],
+        security: [{ bearerAuth: [] }],
         parameters: [{ name: 'report_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         requestBody: {
           required: true,
