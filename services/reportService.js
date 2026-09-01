@@ -1,16 +1,27 @@
 const pool = require('../config/db');
 
 // ──────────────────────────────────────────────────────────────────────
-// 상수 정의 (허용값 목록)
+// 상수 정의 (허용값 및 매핑 규칙)
 // ──────────────────────────────────────────────────────────────────────
-const ALLOWED_CATEGORIES = ['environment', 'user'];
 const ALLOWED_TARGET_TYPES = ['course', 'spot', 'course_review', 'spot_review', 'user', 'location'];
-const ALLOWED_REASONS = [
-  'construction', 'blocked', 'dangerous', 'info_error',
-  'spam', 'abuse', 'inappropriate', 'false_info', 'portrait', 'etc'
-];
 const ALLOWED_STATUSES = ['in_progress', 'completed', 'rejected'];
 const ALLOWED_ACTIONS = ['none', 'hide_target', 'suspend_user'];
+
+// 1. target_type에 따른 report_category 자동 매핑 (방식 2: 서버 자동 판별)
+const TARGET_CATEGORY_MAP = {
+  course: 'environment',
+  spot: 'environment',
+  location: 'environment',
+  course_review: 'user',
+  spot_review: 'user',
+  user: 'user'
+};
+
+// 2. 카테고리별 허용되는 세부 사유 (Data Integrity 이중 검증)
+const VALID_REASONS_BY_CATEGORY = {
+  environment: ['construction', 'blocked', 'dangerous', 'info_error', 'etc'],
+  user: ['spam', 'abuse', 'inappropriate', 'false_info', 'portrait', 'etc']
+};
 
 // UUID 정규식 검증 헬퍼
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -28,27 +39,27 @@ exports.createReport = async (userId, data) => {
     target_id,
     latitude,
     longitude,
-    report_category,
     reason,
     memo,
     photo_url
   } = data;
 
-  // 1-1. 기본 필수값 및 enum 검증
+  // 1-1. target_type 검증
   if (!target_type || !ALLOWED_TARGET_TYPES.includes(target_type)) {
     const err = new Error(`유효하지 않은 target_type입니다. 허용값: ${ALLOWED_TARGET_TYPES.join(', ')}`);
     err.status = 400;
     throw err;
   }
 
-  if (!report_category || !ALLOWED_CATEGORIES.includes(report_category)) {
-    const err = new Error(`유효하지 않은 report_category입니다. 허용값: ${ALLOWED_CATEGORIES.join(', ')}`);
-    err.status = 400;
-    throw err;
-  }
+  // 1-2. report_category 자동 판별 (서버 자동 결정)
+  const report_category = TARGET_CATEGORY_MAP[target_type];
 
-  if (!reason || !ALLOWED_REASONS.includes(reason)) {
-    const err = new Error(`유효하지 않은 reason입니다. 허용값: ${ALLOWED_REASONS.join(', ')}`);
+  // 1-3. 카테고리별 허용 사유(reason) 검증 (Data Integrity 방어)
+  const allowedReasons = VALID_REASONS_BY_CATEGORY[report_category];
+  if (!reason || !allowedReasons.includes(reason)) {
+    const err = new Error(
+      `'${target_type}'(${report_category}) 신고에 사용할 수 없는 reason입니다. 허용값: ${allowedReasons.join(', ')}`
+    );
     err.status = 400;
     throw err;
   }

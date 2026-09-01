@@ -913,7 +913,7 @@ const swaggerDefinition = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['target_type', 'report_category', 'reason'],
+                required: ['target_type', 'reason'],
                 properties: {
                   target_type: {
                     type: 'string',
@@ -935,18 +935,13 @@ const swaggerDefinition = {
                     description: '경도 (target_type이 location일 때 필수)',
                     example: 126.9780,
                   },
-                  report_category: {
-                    type: 'string',
-                    enum: ['environment', 'user'],
-                    description: '신고 분류 (environment: 환경/길 상태, user: 사용자/콘텐츠)',
-                  },
                   reason: {
                     type: 'string',
                     enum: [
                       'construction', 'blocked', 'dangerous', 'info_error',
                       'spam', 'abuse', 'inappropriate', 'false_info', 'portrait', 'etc'
                     ],
-                    description: '신고 사유 코드',
+                    description: '신고 사유 코드 (환경 대상: construction/blocked/dangerous/info_error/etc, 유저/리뷰 대상: spam/abuse/inappropriate/false_info/portrait/etc)',
                   },
                   memo: {
                     type: 'string',
