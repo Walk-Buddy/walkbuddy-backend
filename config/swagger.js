@@ -258,6 +258,120 @@ const swaggerDefinition = {
         },
       },
     },
+    '/api/users/blocks': {
+      post: {
+        tags: ['회원 - 차단'],
+        summary: '사용자 차단',
+        description: '특정 사용자를 차단 목록에 추가합니다.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['blocked_user_id'],
+                properties: {
+                  blocked_user_id: { type: 'string', format: 'uuid', description: '차단할 사용자 ID' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: '차단 성공',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    block_id: { type: 'string', format: 'uuid' },
+                    blocker_id: { type: 'string', format: 'uuid' },
+                    blocked_id: { type: 'string', format: 'uuid' },
+                    created_at: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          400: { description: '자기 자신 차단 불가 또는 잘못된 요청' },
+          404: { description: '차단 대상 사용자 없음' },
+          409: { description: '이미 차단한 사용자' },
+        },
+      },
+      get: {
+        tags: ['회원 - 차단'],
+        summary: '내 차단 목록 조회',
+        description: '내가 차단한 사용자 목록을 최신순으로 조회합니다.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
+        ],
+        responses: {
+          200: {
+            description: '차단 목록 조회 성공',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    total: { type: 'integer' },
+                    page: { type: 'integer' },
+                    limit: { type: 'integer' },
+                    blocks: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          block_id: { type: 'string', format: 'uuid' },
+                          created_at: { type: 'string', format: 'date-time' },
+                          blocked_user: {
+                            type: 'object',
+                            properties: {
+                              user_id: { type: 'string', format: 'uuid' },
+                              nickname: { type: 'string' },
+                              profile_image_url: { type: 'string', nullable: true },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/users/blocks/{blocked_user_id}': {
+      delete: {
+        tags: ['회원 - 차단'],
+        summary: '사용자 차단 해제',
+        description: '차단했던 사용자를 차단 해제합니다.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'blocked_user_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          200: {
+            description: '차단 해제 성공',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    message: { type: 'string', example: '차단이 성공적으로 해제되었습니다.' },
+                  },
+                },
+              },
+            },
+          },
+          404: { description: '차단 내역을 찾을 수 없음' },
+        },
+      },
+    },
 
     // ─────────────────────────────────────────
     // 태그

@@ -3,7 +3,7 @@ const multer = require('multer');
 const multerS3 = require('multer-s3');
 const router = express.Router();
 const spotController = require('../controllers/spotController');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, optionalAuthenticate } = require('../middleware/auth');
 const reviewController = require('../controllers/reviewController');
 const s3 = require('../config/s3');
 
@@ -27,6 +27,6 @@ router.get('/:spot_id', spotController.getSpotById);
 router.post('/kakao', authenticate, spotController.saveKakaoSpot);
 router.post('/', authenticate, spotController.createSpot);
 router.post('/:spot_id/reviews', authenticate, reviewPhotoUpload, reviewController.createSpotReview);
-router.get('/:spot_id/reviews', reviewController.getSpotReviews);
+router.get('/:spot_id/reviews', optionalAuthenticate, reviewController.getSpotReviews);
 
 module.exports = router;

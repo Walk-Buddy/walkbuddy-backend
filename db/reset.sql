@@ -6,6 +6,7 @@
 
 DROP TABLE IF EXISTS
     spot_ai_contents,
+    user_blocks,
     notifications,
     reports,
     reactions,

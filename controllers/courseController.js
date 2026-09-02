@@ -43,14 +43,14 @@ exports.createCourseFromWalk = async (req, res, next) => {
 
 exports.getCourses = async (req, res, next) => {
   try {
-    const result = await courseService.getCourses(req.query);
+    const result = await courseService.getCourses(req.query, req.user?.user_id);
     return res.status(200).json(result);
   } catch (err) { next(err); }
 };
 
 exports.searchCourses = async (req, res, next) => {
   try {
-    const result = await courseService.searchCourses(req.query);
+    const result = await courseService.searchCourses(req.query, req.user?.user_id);
     return res.status(200).json(result);
   } catch (err) { next(err); }
 };

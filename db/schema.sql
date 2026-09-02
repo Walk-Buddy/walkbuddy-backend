@@ -1437,3 +1437,52 @@ CREATE INDEX ix_spot_ai_contents_spot_id
 CREATE TRIGGER trg_spot_ai_contents_updated_at
     BEFORE UPDATE ON spot_ai_contents
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+
+-- ================================================
+-- TABLE: user_blocks
+-- 사용자 차단 테이블
+-- 불쾌한 사용자나 스팸 사용자를 차단하여 상호작용 및 콘텐츠 노출 제한
+-- ================================================
+CREATE TABLE user_blocks (
+    block_id            UUID            NOT NULL DEFAULT gen_random_uuid(),
+    -- PK: 차단 고유 식별자
+
+    blocker_id          UUID            NOT NULL,
+    -- 차단한 사용자: users.user_id 참조
+
+    blocked_id          UUID            NOT NULL,
+    -- 차단당한 사용자: users.user_id 참조
+
+    created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT pk_user_blocks
+        PRIMARY KEY (block_id),
+
+    CONSTRAINT fk_user_blocks_blocker
+        FOREIGN KEY (blocker_id) REFERENCES users (user_id)
+        ON DELETE CASCADE,
+    -- 차단한 사용자 탈퇴 시 차단 내역 삭제
+
+    CONSTRAINT fk_user_blocks_blocked
+        FOREIGN KEY (blocked_id) REFERENCES users (user_id)
+        ON DELETE CASCADE,
+    -- 차단당한 사용자 탈퇴 시 차단 내역 삭제
+
+    CONSTRAINT uq_user_blocks
+        UNIQUE (blocker_id, blocked_id),
+    -- 동일 사용자에 대한 중복 차단 방지
+
+    CONSTRAINT chk_user_blocks_self
+        CHECK (blocker_id <> blocked_id)
+    -- 자기 자신 차단 차단
+);
+
+-- 내가 차단한 사용자 목록 최신순 조회용
+CREATE INDEX ix_user_blocks_blocker_id
+    ON user_blocks (blocker_id, created_at DESC);
+
+-- 나를 차단한 사용자 조회/필터링용
+CREATE INDEX ix_user_blocks_blocked_id
+    ON user_blocks (blocked_id);
+

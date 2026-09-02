@@ -492,7 +492,7 @@ exports.createCourseFromWalk = async (userId, body) => {
 // ──────────────────────────────────────────────────────────────────────
 // 코스 목록 조회
 // ──────────────────────────────────────────────────────────────────────
-exports.getCourses = async (query) => {
+exports.getCourses = async (query, currentUserId) => {
   const {
     lat, lng, radius = 5000,
     page = 1, limit = 20,
@@ -506,6 +506,11 @@ exports.getCourses = async (query) => {
     const conditions = [`c.status = 'active'`, `c.is_public=TRUE`];
     const params = [];
     let idx = 1;
+
+    if (currentUserId) {
+      conditions.push(`(c.owner_id IS NULL OR c.owner_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = $${idx++}))`);
+      params.push(currentUserId);
+    }
 
     if (is_public !== undefined) {
       conditions.push(`c.is_public = $${idx++}`);
@@ -581,7 +586,7 @@ exports.getCourses = async (query) => {
 // 코스 검색
 // 기준 좌표 반경, 거리/시간, 후기 기반 난이도·평점, 코스 태그, 포함 스팟 태그로 필터링
 // ──────────────────────────────────────────────────────────────────────
-exports.searchCourses = async (query) => {
+exports.searchCourses = async (query, currentUserId) => {
   const keyword = readQueryValue(query.keyword, query.q);
   const normalizedKeyword = isMissing(keyword) ? null : String(keyword).trim();
   const lng = parseNumberParam(readQueryValue(query.x, query.lng), 'x');
@@ -615,6 +620,11 @@ exports.searchCourses = async (query) => {
 
   const params = [];
   const conditions = [`c.status = 'active'`, `c.is_public = TRUE`];
+
+  if (currentUserId) {
+    params.push(currentUserId);
+    conditions.push(`(c.owner_id IS NULL OR c.owner_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = $${params.length}))`);
+  }
 
   if (normalizedKeyword) {
     params.push(`%${normalizedKeyword}%`);

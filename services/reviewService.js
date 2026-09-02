@@ -65,6 +65,25 @@ exports.getCourseReviews = async (courseId, query, userId) => {
   const { page = 1, limit = 20 } = query;
   const offset = (page - 1) * limit;
 
+  const conditions = [
+    'cr.course_id = $1',
+    "cr.status = 'active'",
+    'cr.is_public = TRUE'
+  ];
+  const params = [courseId];
+
+  if (userId) {
+    params.push(userId);
+    conditions.push(`cr.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = $${params.length})`);
+  }
+
+  const whereClause = conditions.join(' AND ');
+  const myReactionParamIdx = userId ? params.indexOf(userId) + 1 : 'NULL';
+
+  const listParams = [...params, +limit, +offset];
+  const limitParamIdx = listParams.length - 1;
+  const offsetParamIdx = listParams.length;
+
   const { rows } = await pool.query(
     `SELECT
        cr.course_review_id, cr.description, cr.difficulty, cr.rating,
@@ -87,18 +106,18 @@ exports.getCourseReviews = async (courseId, query, userId) => {
      LEFT JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
      LEFT JOIN reactions r_like ON r_like.target_id = cr.course_review_id AND r_like.target_type = 'course_review' AND r_like.reaction = 'like'
      LEFT JOIN reactions r_dislike ON r_dislike.target_id = cr.course_review_id AND r_dislike.target_type = 'course_review' AND r_dislike.reaction = 'dislike'
-     LEFT JOIN reactions my_r ON my_r.target_id = cr.course_review_id AND my_r.target_type = 'course_review' AND my_r.user_id = $4
-     WHERE cr.course_id = $1 AND cr.status = 'active' AND cr.is_public = TRUE
+     LEFT JOIN reactions my_r ON my_r.target_id = cr.course_review_id AND my_r.target_type = 'course_review' AND my_r.user_id = ${myReactionParamIdx === 'NULL' ? 'NULL' : '$' + myReactionParamIdx}
+     WHERE ${whereClause}
      GROUP BY cr.course_review_id, u.user_id
      ORDER BY cr.created_at DESC
-     LIMIT $2 OFFSET $3`,
-    [courseId, +limit, +offset, userId || null]
+     LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}`,
+    listParams
   );
 
   const { rows: countRows } = await pool.query(
-    `SELECT COUNT(*) AS total FROM course_reviews
-     WHERE course_id = $1 AND status = 'active' AND is_public = TRUE`,
-    [courseId]
+    `SELECT COUNT(*) AS total FROM course_reviews cr
+     WHERE ${whereClause}`,
+    params
   );
 
   return { total: +countRows[0].total, reviews: rows };
@@ -191,6 +210,25 @@ exports.getSpotReviews = async (spotId, query, userId) => {
   const { page = 1, limit = 20 } = query;
   const offset = (page - 1) * limit;
 
+  const conditions = [
+    'sr.spot_id = $1',
+    "sr.status = 'active'",
+    'sr.is_public = TRUE'
+  ];
+  const params = [spotId];
+
+  if (userId) {
+    params.push(userId);
+    conditions.push(`sr.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = $${params.length})`);
+  }
+
+  const whereClause = conditions.join(' AND ');
+  const myReactionParamIdx = userId ? params.indexOf(userId) + 1 : 'NULL';
+
+  const listParams = [...params, +limit, +offset];
+  const limitParamIdx = listParams.length - 1;
+  const offsetParamIdx = listParams.length;
+
   const { rows } = await pool.query(
     `SELECT
        sr.spot_review_id, sr.description, sr.is_recommended,
@@ -213,18 +251,18 @@ exports.getSpotReviews = async (spotId, query, userId) => {
      LEFT JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
      LEFT JOIN reactions r_like ON r_like.target_id = sr.spot_review_id AND r_like.target_type = 'spot_review' AND r_like.reaction = 'like'
      LEFT JOIN reactions r_dislike ON r_dislike.target_id = sr.spot_review_id AND r_dislike.target_type = 'spot_review' AND r_dislike.reaction = 'dislike'
-     LEFT JOIN reactions my_r ON my_r.target_id = sr.spot_review_id AND my_r.target_type = 'spot_review' AND my_r.user_id = $4
-     WHERE sr.spot_id = $1 AND sr.status = 'active' AND sr.is_public = TRUE
+     LEFT JOIN reactions my_r ON my_r.target_id = sr.spot_review_id AND my_r.target_type = 'spot_review' AND my_r.user_id = ${myReactionParamIdx === 'NULL' ? 'NULL' : '$' + myReactionParamIdx}
+     WHERE ${whereClause}
      GROUP BY sr.spot_review_id, u.user_id
      ORDER BY sr.created_at DESC
-     LIMIT $2 OFFSET $3`,
-    [spotId, +limit, +offset, userId || null]
+     LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}`,
+    listParams
   );
 
   const { rows: countRows } = await pool.query(
-    `SELECT COUNT(*) AS total FROM spot_reviews
-     WHERE spot_id = $1 AND status = 'active' AND is_public = TRUE`,
-    [spotId]
+    `SELECT COUNT(*) AS total FROM spot_reviews sr
+     WHERE ${whereClause}`,
+    params
   );
 
   return { total: +countRows[0].total, reviews: rows };
