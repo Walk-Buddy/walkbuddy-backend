@@ -175,3 +175,20 @@ exports.getHistory = async (userId, query) => {
 
   return { total: +countRows[0].total, page: +page, history: rows };
 };
+
+// ──────────────────────────────────────────────────────────────────────
+// 활동 통계 조회 (총 산책 거리, 시간, 산책 수, 완주 코스 수)
+// ──────────────────────────────────────────────────────────────────────
+exports.getStats = async (userId) => {
+  const { rows } = await pool.query(
+    `SELECT
+       COALESCE(SUM(total_distance), 0)::int AS total_distance,
+       COALESCE(SUM(duration), 0)::int       AS total_duration,
+       COUNT(*)::int                        AS total_walks,
+       COUNT(*) FILTER (WHERE is_completed = TRUE AND course_id IS NOT NULL)::int AS completed_courses
+     FROM walk_records
+     WHERE user_id = $1 AND ended_at IS NOT NULL`,
+    [userId]
+  );
+  return rows[0] || { total_distance: 0, total_duration: 0, total_walks: 0, completed_courses: 0 };
+};
