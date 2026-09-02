@@ -819,6 +819,93 @@ const swaggerDefinition = {
     },
 
     // ─────────────────────────────────────────
+    // 업로드 (S3 파일 업로드)
+    // ─────────────────────────────────────────
+    '/api/upload': {
+      post: {
+        tags: ['업로드'],
+        summary: '단일 파일 S3 업로드',
+        description: '이미지 파일 1장을 AWS S3 버킷에 업로드하고 S3 key를 반환합니다. (최대 5MB)',
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                required: ['file'],
+                properties: {
+                  file: {
+                    type: 'string',
+                    format: 'binary',
+                    description: '업로드할 이미지 파일 (JPG, PNG 등, 최대 5MB)',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: '업로드 성공',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    message: { type: 'string', example: '업로드 성공' },
+                    key: { type: 'string', example: '1725284000000-profile.png', description: 'S3 객체 Key' },
+                  },
+                },
+              },
+            },
+          },
+          400: { description: '파일 누락 또는 용량 초과 (5MB 제한)' },
+          500: { description: 'S3 업로드 서버 오류' },
+        },
+      },
+    },
+    '/api/upload/{key}': {
+      get: {
+        tags: ['업로드'],
+        summary: '조회용 임시 URL 발급',
+        description: 'Private S3 버킷에 저장된 파일 조회를 위한 Pre-signed URL을 발급합니다. (1시간 유효)',
+        security: [],
+        parameters: [
+          {
+            name: 'key',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'S3 파일 Key (예: 1725284000000-profile.png 또는 reviews/1725...png)',
+          },
+        ],
+        responses: {
+          200: {
+            description: '임시 URL 발급 성공',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    url: {
+                      type: 'string',
+                      example: 'https://walkbuddy-uploads-2026.s3.ap-southeast-2.amazonaws.com/1725284000000-profile.png?...',
+                      description: '1시간 동안 유효한 S3 다운로드/조회 URL',
+                    },
+                  },
+                },
+              },
+            },
+          },
+          500: { description: 'URL 생성 실패 또는 존재하지 않는 파일' },
+        },
+      },
+    },
+
+    // ─────────────────────────────────────────
     // 후기
     // ─────────────────────────────────────────
     '/api/courses/{course_id}/reviews': {
