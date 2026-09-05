@@ -174,8 +174,25 @@ exports.createSpotReview = async (userId, spotId, body, files = []) => {
       [spotId]
     );
 
+    // 연결 코스 자동 태그: 이 후기가 작성된 산책이 특정 코스를 걷던 중이었다면
+    // 어떤 코스와 연결된 후기인지 자동으로 표시 (사용자가 직접 입력하지 않음)
+    const { rows: [linked] } = await client.query(
+      `SELECT c.course_id, c.name,
+              COALESCE(
+                json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
+                FILTER (WHERE t.tag_id IS NOT NULL), '[]'
+              ) AS tags
+       FROM walk_records wr
+       JOIN courses c ON c.course_id = wr.course_id
+       LEFT JOIN taggings tg ON tg.target_id = c.course_id AND tg.target_type = 'course'
+       LEFT JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+       WHERE wr.walk_record_id = $1
+       GROUP BY c.course_id`,
+      [walk_record_id]
+    );
+
     await client.query('COMMIT');
-    return review;
+    return { ...review, linked_course: linked || null };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -204,18 +221,23 @@ exports.getSpotReviews = async (spotId, query, userId) => {
          json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
          FILTER (WHERE t.tag_id IS NOT NULL), '[]'
        ) AS tags,
+       CASE WHEN lc.course_id IS NOT NULL
+         THEN jsonb_build_object('course_id', lc.course_id, 'name', lc.name)
+       END AS linked_course,
        COUNT(DISTINCT r_like.user_id) AS like_count,
        COUNT(DISTINCT r_dislike.user_id) AS dislike_count,
        MAX(my_r.reaction) AS my_reaction
      FROM spot_reviews sr
      JOIN users u ON u.user_id = sr.user_id
+     LEFT JOIN walk_records wr ON wr.walk_record_id = sr.walk_record_id
+     LEFT JOIN courses lc ON lc.course_id = wr.course_id
      LEFT JOIN taggings tg ON tg.target_id = sr.spot_id AND tg.target_type = 'spot' AND tg.user_id = sr.user_id
      LEFT JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
      LEFT JOIN reactions r_like ON r_like.target_id = sr.spot_review_id AND r_like.target_type = 'spot_review' AND r_like.reaction = 'like'
      LEFT JOIN reactions r_dislike ON r_dislike.target_id = sr.spot_review_id AND r_dislike.target_type = 'spot_review' AND r_dislike.reaction = 'dislike'
      LEFT JOIN reactions my_r ON my_r.target_id = sr.spot_review_id AND my_r.target_type = 'spot_review' AND my_r.user_id = $4
      WHERE sr.spot_id = $1 AND sr.status = 'active' AND sr.is_public = TRUE
-     GROUP BY sr.spot_review_id, u.user_id
+     GROUP BY sr.spot_review_id, u.user_id, lc.course_id, lc.name
      ORDER BY sr.created_at DESC
      LIMIT $2 OFFSET $3`,
     [spotId, +limit, +offset, userId || null]
