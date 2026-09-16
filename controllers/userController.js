@@ -55,3 +55,18 @@ exports.getStats = async (req, res, next) => {
     return res.status(200).json(result);
   } catch (err) { next(err); }
 };
+
+exports.deleteAccount=async(req,res,next) => {
+  try {
+    const userId=req.user.user_id;
+
+    const result=await userService.deleteAccount(userId);
+
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+    });
+  } catch(err){
+    next(err);
+  }
+}

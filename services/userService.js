@@ -192,3 +192,42 @@ exports.getStats = async (userId) => {
   );
   return rows[0] || { total_distance: 0, total_duration: 0, total_walks: 0, completed_courses: 0 };
 };
+
+// ──────────────────────────────────────────────────────────────────────
+// 회원 탈퇴 (소프트 딜리트)
+// * @param {string} userId - 탈퇴할 사용자의 UUID
+// ──────────────────────────────────────────────────────────────────────
+
+exports.deleteAccount=async(userId)=>{
+    // [1단계] 사용자가 실제로 존재하는지, 이미 탈퇴한 상태는 아닌지 확인
+  const { rows: userRows} = await pool.query(
+    `SELECT user_id, status FROM users WHERE user_id=$1`,
+    [userId]
+  );
+
+    // [2단계] 사용자가 없는 경우 에러 처리
+  if (!userRows.length){
+      const err=new Error(`사용자를 찾을 수 없습니다`);
+      err.status=404;
+      throw err;
+    }
+
+    // [3단계] 이미 탈퇴한 사용자인 경우 에러 처리
+    if(userRows[0].status==='deleted'){
+      const err = new Error(`이미 탈퇴 처리된 계정입니다.`);
+      err.status=400;
+      throw err;
+    }
+
+    // [4단계] DB의 status 상태값을 'deleted'로 수정 (소프트 딜리트)
+    await pool.query(
+      `UPDATE users
+      SET status='deleted',
+      updated_at=NOW()
+      WHERE user_id = $1`,
+      [userId]
+    )
+
+    // [5단계] 작업 완료 결과 반환
+    return {message:'회원 탈퇴가 완료되었습니다.'};
+};
