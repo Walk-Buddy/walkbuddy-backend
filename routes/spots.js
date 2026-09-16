@@ -1,83 +1,32 @@
 const express = require('express');
-const router = express.Router({ mergeParams: true });
-const NodeRepository = require('../repositories/nodeRepository');
+const multer = require('multer');
+const multerS3 = require('multer-s3');
+const router = express.Router();
+const spotController = require('../controllers/spotController');
+const { authenticate, optionalAuthenticate } = require('../middleware/auth');
+const reviewController = require('../controllers/reviewController');
+const s3 = require('../config/s3');
 
-// ─────────────────────────────────────────────────────────────────────
-//  Spot Routes  (node_type = 'spot')
-//  Base: /api/spots  또는  /api/courses/:courseId/spots
-// ─────────────────────────────────────────────────────────────────────
+// 스팟 후기 사진 업로드 (최대 5장, 장당 5MB)
+const reviewPhotoUpload = multer({
+  storage: multerS3({
+    s3,
+    bucket: process.env.S3_BUCKET_NAME,
+    contentType: multerS3.AUTO_CONTENT_TYPE,
+    key: (req, file, cb) => cb(null, `reviews/${Date.now()}-${file.originalname}`),
+  }),
+  limits: { fileSize: 5 * 1024 * 1024, files: 5 },
+}).array('photos', 5);
 
-// GET /api/spots  또는  GET /api/courses/:courseId/spots
-// ?lat=&lng=&radius= 이면 반경 내 스팟 감지
-router.get('/', async (req, res) => {
-  try {
-    const { lat, lng, radius } = req.query;
-    const { courseId } = req.params;
-
-    if (lat && lng && radius) {
-      const spots = await NodeRepository.findSpotsWithinRadius(
-        parseFloat(lat), parseFloat(lng), parseFloat(radius)
-      );
-      return res.json({ success: true, data: spots });
-    }
-
-    if (courseId) {
-      const spots = await NodeRepository.findByCourse(courseId, 'spot');
-      return res.json({ success: true, data: spots });
-    }
-
-    const spots = await NodeRepository.findAllSpots();
-    res.json({ success: true, data: spots });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// GET /api/spots/:nodeId
-router.get('/:nodeId', async (req, res) => {
-  try {
-    const spot = await NodeRepository.findSpotById(req.params.nodeId);
-    if (!spot) return res.status(404).json({ success: false, message: '스팟을 찾을 수 없습니다.' });
-    res.json({ success: true, data: spot });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// POST /api/spots
-router.post('/', async (req, res) => {
-  try {
-    const { name, description, latitude, longitude, contentTypes, userId } = req.body;
-    if (!name || latitude === undefined || longitude === undefined) {
-      return res.status(400).json({ success: false, message: 'name, latitude, longitude는 필수입니다.' });
-    }
-    const spot = await NodeRepository.createSpot({ name, description, latitude, longitude, contentTypes, userId });
-    res.status(201).json({ success: true, data: spot });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// PUT /api/spots/:nodeId
-router.put('/:nodeId', async (req, res) => {
-  try {
-    const spot = await NodeRepository.updateSpot(req.params.nodeId, req.body);
-    if (!spot) return res.status(404).json({ success: false, message: '스팟을 찾을 수 없습니다.' });
-    res.json({ success: true, data: spot });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// DELETE /api/spots/:nodeId
-router.delete('/:nodeId', async (req, res) => {
-  try {
-    const deleted = await NodeRepository.deleteSpot(req.params.nodeId);
-    if (!deleted) return res.status(404).json({ success: false, message: '스팟을 찾을 수 없습니다.' });
-    res.json({ success: true, message: '스팟이 삭제되었습니다.' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
+router.get('/health', (req, res) => res.json({ success: true, message: 'spot router connected' }));
+router.get('/search', spotController.searchSpots);
+router.get('/filter', spotController.filterSpots);
+router.get('/', spotController.getSpots);
+router.get('/:spot_id/ai-contents', spotController.getAiContents);
+router.get('/:spot_id', spotController.getSpotById);
+router.post('/kakao', authenticate, spotController.saveKakaoSpot);
+router.post('/', authenticate, spotController.createSpot);
+router.post('/:spot_id/reviews', authenticate, reviewPhotoUpload, reviewController.createSpotReview);
+router.get('/:spot_id/reviews', optionalAuthenticate, reviewController.getSpotReviews);
 
 module.exports = router;

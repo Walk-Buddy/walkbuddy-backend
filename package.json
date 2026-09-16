@@ -2,23 +2,47 @@
   "name": "trail-course-backend",
   "version": "1.0.0",
   "description": "Trail course backend API",
-  "main": "src/index.js",
+  "main": "app.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js",
-    "migrate": "node config/migrate.js"
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "db": "node db/run-sql.js db/reset.sql && node db/run-sql.js db/schema.sql",
+    "db:apply": "node db/run-sql.js db/reset.sql && node db/run-sql.js db/schema.sql",
+    "db:migrate": "node db/run-sql.js",
+    "seed": "node scripts/seed-demo-data.js",
+    "seed:full": "node scripts/seed-demo-data.js --with-durunubi",
+    "generate:durunubi-spot-mappings": "node scripts/generate-durunubi-spot-mappings.js",
+    "import:durunubi": "node scripts/import-durunubi-courses.js",
+    "seed:prewalk-course": "node scripts/create-prewalk-course-via-api.js",
+    "seed:prewalk-reviews": "node scripts/create-prewalk-course-via-api.js --reviews-only",
+    "db:seed": "node db/run-sql.js db/seed.sql"
   },
   "dependencies": {
+
+    "@google-cloud/text-to-speech": "^6.4.1",
+    "@google/generative-ai": "^0.24.1",
+    "@aws-sdk/client-s3": "^3.1102.0",
+    "@aws-sdk/s3-request-presigner": "^3.1102.0",
+
     "axios": "^1.6.0",
+    "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
+    "csv-parse": "^6.2.1",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.3",
+    "nodemailer": "^8.0.7",
+    "multer": "^2.2.0",
+    "multer-s3": "^3.0.1",
+
     "pg": "^8.11.3",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
   }
 }
+
+
