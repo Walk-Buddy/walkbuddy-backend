@@ -216,6 +216,38 @@ const swaggerDefinition = {
           },
         },
       },
+       delete: {
+        tags: ['회원'],
+        summary: '회원 탈퇴 (소프트 딜리트)',
+        description: '현재 로그인한 사용자의 계정을 탈퇴(소프트 딜리트) 처리합니다.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: '탈퇴 완료',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    message: { type: 'string', example: '회원 탈퇴가 완료되었습니다.' },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description: '이미 탈퇴 처리된 계정',
+          },
+          401: {
+            description: '인증 토큰 없음 또는 유효하지 않음',
+          },
+          404: {
+            description: '사용자를 찾을 수 없음',
+          },
+        },
+      },
+      
       patch: {
         tags: ['회원'],
         summary: '내 프로필 수정',
