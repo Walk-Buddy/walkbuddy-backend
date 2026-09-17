@@ -131,7 +131,7 @@ async function addTourGuideTagToSpot(spotId, userId) {
     );
 }
 
-async function searchKakaoSpotCandidates({ keyword, category, x, y, radius, size = 15 }) {
+async function searchKakaoSpotCandidates({ keyword, category, size = 15 }) {
     const kakaoRestApiKey = getKakaoRestApiKey();
     if (!kakaoRestApiKey) {
         const err = new Error('Kakao REST API key is not configured');

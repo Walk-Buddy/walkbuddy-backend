@@ -71,12 +71,6 @@ exports.createReport = async (userId, data) => {
     throw err;
   }
 
-  if (latitude !== undefined || longitude !== undefined) {
-    const err = new Error('ID 기반 신고에는 latitude/longitude 좌표를 지정할 수 없습니다.');
-    err.status = 400;
-    throw err;
-  }
-
   // 다형성 참조 대상 실존 여부 검증
   let targetExists = false;
   switch (target_type) {

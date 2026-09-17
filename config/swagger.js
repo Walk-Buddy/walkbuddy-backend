@@ -1323,14 +1323,6 @@ const swaggerDefinition = {
                           report_category: { type: 'string' },
                           reason: { type: 'string' },
                           memo: { type: 'string', nullable: true },
-                          location: {
-                            type: 'object',
-                            nullable: true,
-                            properties: {
-                              latitude: { type: 'number' },
-                              longitude: { type: 'number' },
-                            },
-                          },
                           photo_url: { type: 'string', nullable: true },
                           status: { type: 'string' },
                           admin_memo: { type: 'string', nullable: true },
@@ -1378,14 +1370,6 @@ const swaggerDefinition = {
                     report_category: { type: 'string' },
                     reason: { type: 'string' },
                     memo: { type: 'string', nullable: true },
-                    location: {
-                      type: 'object',
-                      nullable: true,
-                      properties: {
-                        latitude: { type: 'number' },
-                        longitude: { type: 'number' },
-                      },
-                    },
                     photo_url: { type: 'string', nullable: true },
                     status: { type: 'string' },
                     admin_memo: { type: 'string', nullable: true },

@@ -436,8 +436,7 @@ exports.createCourse = async (userId, body) => {
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 자동 코스 생성 (GPS 기록 기반)
-// walk_records.actual_route → courses INSERT
+// 산책 기록 기반 코스 생성 (waypoints 기반 — GPS 궤적 전송 없음)
 // ──────────────────────────────────────────────────────────────────────
 exports.createCourseFromWalk = async (userId, body) => {
   const { walk_record_id, name, description, is_public = true, tag_ids = [] } = body;
@@ -447,7 +446,7 @@ exports.createCourseFromWalk = async (userId, body) => {
     await client.query('BEGIN');
 
     const { rows } = await client.query(
-      `SELECT actual_route, total_distance, duration
+      `SELECT total_distance, duration
        FROM walk_records
        WHERE walk_record_id = $1 AND user_id = $2 AND ended_at IS NOT NULL`,
       [walk_record_id, userId]
@@ -457,25 +456,16 @@ exports.createCourseFromWalk = async (userId, body) => {
       err.status = 404; throw err;
     }
 
-    const { actual_route, total_distance, duration } = rows[0];
+    const { total_distance, duration } = rows[0];
 
-    let routeWaypoints = null;
-
-    if (body.waypoints && Array.isArray(body.waypoints) && body.waypoints.length >= 2) {
-      routeWaypoints = body.waypoints;
-    } else if (body.coordinates && Array.isArray(body.coordinates) && body.coordinates.length >= 2) {
-      routeWaypoints = body.coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
-    } else if (actual_route) {
-      // actual_route GeoJSON → waypoints 변환
-      const { rows: [geoRow] } = await client.query(
-        `SELECT ST_AsGeoJSON($1)::json AS geojson`, [actual_route]
-      );
-      const coordinates = geoRow.geojson.coordinates;
-      routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
-    } else {
-      const err = new Error('코스를 생성할 경로(waypoints 또는 coordinates) 데이터가 필요합니다.');
+    // 사용자가 지도에서 직접 선택한 경유지(waypoints)만 허용
+    // GPS 실제 이동 궤적(coordinates, actual_route)은 수신하지 않음
+    if (!body.waypoints || !Array.isArray(body.waypoints) || body.waypoints.length < 2) {
+      const err = new Error('코스를 생성하려면 waypoints(경유지 목록, 최소 2개)가 필요합니다.');
       err.status = 400; throw err;
     }
+
+    const routeWaypoints = body.waypoints;
 
     const wkt = await buildLineString(routeWaypoints, client);
     const stats = await calcStats(wkt, client);
@@ -592,9 +582,8 @@ exports.getCourses = async (query, currentUserId) => {
   } finally { client.release(); }
 };
 
-// ──────────────────────────────────────────────────────────────────────
 // 코스 검색
-// 기준 좌표 반경, 거리/시간, 후기 기반 난이도·평점, 코스 태그, 포함 스팟 태그로 필터링
+// 지역명·키워드, 거리/시간, 후기 기반 난이도·평점, 코스 태그, 포함 스팟 태그로 필터링
 // ──────────────────────────────────────────────────────────────────────
 exports.searchCourses = async (query, currentUserId) => {
   const keyword = readQueryValue(query.keyword, query.q);
