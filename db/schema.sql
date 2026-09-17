@@ -444,23 +444,11 @@ CREATE TABLE courses (
     --   ST_Length(route_geometry) → 미터 단위 거리 반환
     --   estimated_duration 계산 기준으로도 사용
     --
-    -- [용도 2] 가까운순 정렬
-    --   ST_Distance(route_geometry, ST_Point(:lng, :lat)::GEOGRAPHY)
-    --   경유지 포함 가장 가까운 지점 기준으로 정렬
-    --
-    -- [용도 3] 반경 내 코스 검색
-    --   ST_DWithin(route_geometry, ST_Point(:lng, :lat)::GEOGRAPHY, 5000)
-    --   경로가 사용자 위치 반경 5km 이내를 지나는 코스 검색
-    --
-    -- [용도 4] 경로 상 스팟 자동 감지
+    -- [용도 2] 경로 상 스팟 자동 감지
     --   ST_DWithin(spots.location, route_geometry, 50)
     --   경로 반경 50m 이내 스팟 자동 감지 및 추가 제안
     --
     -- [주의] 스팟 좌표(spots.location) 수정 시 route_geometry 도 함께 업데이트 필요
-    --        (앱단 또는 트리거로 처리)
-    -- [주의] 이용자의 실제 이동 경로 표시는 이 컬럼이 아닌
-    --        walk_records.actual_route 를 사용해야 함
-    --        (route_geometry = 코스 계획 경로 / actual_route = 실제 이동 경로)
 
     total_distance      INT             NOT NULL,
     -- 총 거리 (미터 단위)
@@ -534,11 +522,8 @@ CREATE UNIQUE INDEX uix_courses_data_source_source_id
 CREATE INDEX ix_courses_public_status
     ON courses (is_public, status);
 
--- 코스 전체 경로 공간 검색·가까운순 정렬용 GiST 인덱스
--- ST_Distance(route_geometry, ST_Point(:lng,:lat)::GEOGRAPHY) 로 가까운순 정렬
--- ST_DWithin() 으로 반경 내 코스 검색
--- 경유지 포함 가장 가까운 지점 기준으로 정렬 (방법 2)
--- 특정 위치 반경 내 경로가 지나가는 코스 검색 가능
+-- 코스 경로 공간 인덱스 (경로-스팟 간 거리 계산용 GiST 인덱스)
+-- ST_DWithin(spots.location, route_geometry, 반경) 으로 경로 근처 스팟 감지 시 사용
 CREATE INDEX ix_courses_route_geometry
     ON courses USING GIST (route_geometry);
 
@@ -841,16 +826,9 @@ CREATE TABLE walk_records (
     -- 자유 경로 기록 시 NULL
     -- 코스 삭제 시 NULL 로 변경 (산책 기록은 유지)
 
-    actual_route        GEOGRAPHY(LINESTRING, 4326)  NULL,
-    -- 실제 이동 경로 GPS 좌표 (LINESTRING)
-    -- 예: ST_GeomFromText('LINESTRING(126.97 37.56, 126.98 37.57)', 4326)
-    -- ST_Length() 로 실제 이동 거리 자동 계산
-    -- 미완주·중단 시에도 이동한 만큼 저장
-    -- 진행 중일 때는 NULL
-
     total_distance      INT             NULL,
     -- 실제 이동 거리 (미터 단위)
-    -- 산책 종료 시 ST_Length(actual_route) 로 자동 계산 후 저장
+    -- 앱에서 계산한 수치를 산책 종료 시 전달받아 저장
 
     duration            INT             NULL,
     -- 실제 소요 시간 (분 단위)
@@ -899,8 +877,7 @@ CREATE INDEX ix_walk_records_course_id
     WHERE course_id IS NOT NULL;
 
 -- [이용한 스팟 조회 방법]
--- 코스 기반 산책: courses.route JSONB 파싱으로 스팟 목록 추출
--- 자유 경로 산책: ST_DWithin(spots.location, actual_route, 반경) 으로 감지
+-- 코스 기반 산책: courses.route_geometry 의 경유지 스팟 목록 추출
 
 
 -- ================================================
@@ -1208,13 +1185,6 @@ CREATE TABLE reports (
     memo            TEXT            NULL,
     -- 간단 메모 (선택 입력)
 
-    location        GEOGRAPHY(POINT, 4326)  NULL,
-    -- 산책 중 위치 기반 신고 시 신고 지점 좌표 저장
-    -- 예: ST_Point(126.97, 37.56)::GEOGRAPHY
-    -- 특정 코스·스팟 ID 기반 신고 시 NULL
-    -- 지도에 신고 위치 핀 표시 시 사용
-    -- [주의] target_id 와 location 중 하나는 반드시 존재해야 함 (chk_reports_target 으로 보장)
-
     photo_url       TEXT            NULL,
     -- 첨부 사진 URL (선택 입력, 1장)
 
@@ -1242,22 +1212,14 @@ CREATE TABLE reports (
     -- 동일 사용자가 동일 대상 중복 신고 방지 (명세 요구사항)
 
     CONSTRAINT chk_reports_target
-        CHECK (
-            (target_id IS NOT NULL AND location IS NULL)   -- ID 기반 신고
-            OR
-            (target_id IS NULL AND location IS NOT NULL)   -- 위치 기반 신고
-        ),
-    -- target_id (ID 기반) 또는 location (위치 기반) 중 하나는 반드시 존재
-    -- 둘 다 NULL 이거나 둘 다 NOT NULL 인 경우 차단
+        CHECK (target_id IS NOT NULL),
+    -- 모든 신고는 대상 ID(target_id) 필수 (위치 기반 신고 미지원)
 
     CONSTRAINT chk_reports_target_type
         CHECK (
-            (target_type IN ('course', 'spot', 'course_review', 'spot_review', 'user') AND target_id IS NOT NULL)
-            OR
-            (target_type = 'location' AND location IS NOT NULL)
+            target_type IN ('course', 'spot', 'course_review', 'spot_review', 'user') AND target_id IS NOT NULL
         ),
-    -- target_type = 'location': 위치 기반 신고 (산책 중 특정 지점 신고)
-    -- 나머지 target_type: ID 기반 신고
+    -- 모든 신고는 target_type + target_id 쌍으로 처리
 
     CONSTRAINT chk_reports_category
         CHECK (report_category IN ('environment', 'user')),
@@ -1285,12 +1247,7 @@ CREATE INDEX ix_reports_target
     ON reports (target_type, target_id)
     WHERE target_id IS NOT NULL;
 
--- 위치 기반 신고 공간 검색용 GiST 인덱스
--- 특정 반경 내 신고 위치 조회 시 사용
--- 예: ST_DWithin(location, ST_Point(:lng, :lat)::GEOGRAPHY, 500)
-CREATE INDEX ix_reports_location
-    ON reports USING GIST (location)
-    WHERE location IS NOT NULL;
+
 
 -- updated_at 자동 갱신 트리거
 CREATE TRIGGER trg_reports_updated_at
