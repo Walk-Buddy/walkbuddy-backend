@@ -324,12 +324,17 @@ async function enrichKakaoSpotTourContent(spot, userId) {
 // 스팟 목록 조회
 // ──────────────────────────────────────────────────────────────────────
 exports.getSpots = async (query) => {
-    const { x, y, radius, category, tag_ids, min_recommend_pct, page = 1, limit = 20 } = query;
+    const { x, y, radius, category, tag_ids, min_recommend_pct, region, page = 1, limit = 20 } = query;
     const offset = (Number(page) - 1) * Number(limit);
     const whereConditions = ["s.status = 'active'"];
     const queryValues = [];
     let distanceSelectSql = 'NULL::DOUBLE PRECISION AS distance';
     let orderBySql = 's.created_at DESC';
+
+    if (region && String(region).trim()) {
+        queryValues.push(`%${String(region).trim()}%`);
+        whereConditions.push(`(s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
+    }
 
     if (category) {
         if (!SPOT_CATEGORIES.includes(category)) {
@@ -799,11 +804,16 @@ exports.searchSpots = async (query) => {
 // 스팟 필터 조회
 // ──────────────────────────────────────────────────────────────────────
 exports.filterSpots = async (query) => {
-    const { category, tag_ids, x, y, radius, min_recommend_pct } = query;
+    const { category, tag_ids, x, y, radius, min_recommend_pct, region } = query;
     const whereConditions = ["s.status = 'active'"];
     const queryValues = [];
     let distanceSelectSql = 'NULL::DOUBLE PRECISION AS distance';
     let orderBySql = 's.created_at DESC';
+
+    if (region && String(region).trim()) {
+        queryValues.push(`%${String(region).trim()}%`);
+        whereConditions.push(`(s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
+    }
 
     if (category) {
         if (!SPOT_CATEGORIES.includes(category)) {

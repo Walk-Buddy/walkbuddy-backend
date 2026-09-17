@@ -459,17 +459,24 @@ exports.createCourseFromWalk = async (userId, body) => {
 
     const { actual_route, total_distance, duration } = rows[0];
 
-    if (!actual_route) {
-      const err = new Error('GPS 경로 데이터가 없습니다.');
+    let routeWaypoints = null;
+
+    if (body.waypoints && Array.isArray(body.waypoints) && body.waypoints.length >= 2) {
+      routeWaypoints = body.waypoints;
+    } else if (body.coordinates && Array.isArray(body.coordinates) && body.coordinates.length >= 2) {
+      routeWaypoints = body.coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
+    } else if (actual_route) {
+      // actual_route GeoJSON → waypoints 변환
+      const { rows: [geoRow] } = await client.query(
+        `SELECT ST_AsGeoJSON($1)::json AS geojson`, [actual_route]
+      );
+      const coordinates = geoRow.geojson.coordinates;
+      routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
+    } else {
+      const err = new Error('코스를 생성할 경로(waypoints 또는 coordinates) 데이터가 필요합니다.');
       err.status = 400; throw err;
     }
 
-    // actual_route GeoJSON → waypoints 변환 후 Tmap 경로 생성
-    const { rows: [geoRow] } = await client.query(
-      `SELECT ST_AsGeoJSON($1)::json AS geojson`, [actual_route]
-    );
-    const coordinates = geoRow.geojson.coordinates;
-    const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
     const wkt = await buildLineString(routeWaypoints, client);
     const stats = await calcStats(wkt, client);
 
@@ -495,6 +502,7 @@ exports.createCourseFromWalk = async (userId, body) => {
 exports.getCourses = async (query, currentUserId) => {
   const {
     lat, lng, radius = 5000,
+    region,
     page = 1, limit = 20,
     sort = 'distance',        // distance | rating | latest
     is_public,
@@ -517,7 +525,14 @@ exports.getCourses = async (query, currentUserId) => {
       params.push(is_public === 'true');
     }
 
-    // 위치 기반 반경 필터
+    // 지역(region) 필터 (예: 춘천시, 마포구 등)
+    if (region && String(region).trim()) {
+      conditions.push(`(c.name ILIKE $${idx} OR c.description ILIKE $${idx})`);
+      params.push(`%${String(region).trim()}%`);
+      idx += 1;
+    }
+
+    // 위치 기반 반경 필터 (옵셔널)
     let distanceSelect = 'NULL::float AS distance';
     if (lat && lng) {
       distanceSelect = `ST_Distance(c.route_geometry, ST_Point($${idx},$${idx+1})::geography) AS distance`;
@@ -539,6 +554,8 @@ exports.getCourses = async (query, currentUserId) => {
         c.total_distance, c.estimated_duration,
         c.is_public, c.created_at,
         ${distanceSelect},
+        ST_Y(ST_StartPoint(c.route_geometry::geometry)) AS start_lat,
+        ST_X(ST_StartPoint(c.route_geometry::geometry)) AS start_lng,
         ROUND(AVG(cr.rating)::numeric, 1)          AS avg_rating,
         ROUND(AVG(CASE cr.difficulty
           WHEN 'easy'   THEN 1
@@ -574,10 +591,15 @@ exports.getCourses = async (query, currentUserId) => {
       client.query(countSql, params.slice(0, -2)), // limit/offset 제외
     ]);
 
+    const formattedCourses = rows.map((r) => ({
+      ...r,
+      start_location: r.start_lat && r.start_lng ? { lat: Number(r.start_lat), lng: Number(r.start_lng) } : null,
+    }));
+
     return {
       total: +countRows[0].total,
       page: +page,
-      courses: rows,
+      courses: formattedCourses,
     };
   } finally { client.release(); }
 };
@@ -589,6 +611,8 @@ exports.getCourses = async (query, currentUserId) => {
 exports.searchCourses = async (query, currentUserId) => {
   const keyword = readQueryValue(query.keyword, query.q);
   const normalizedKeyword = isMissing(keyword) ? null : String(keyword).trim();
+  const region = readQueryValue(query.region);
+  const normalizedRegion = isMissing(region) ? null : String(region).trim();
   const lng = parseNumberParam(readQueryValue(query.x, query.lng), 'x');
   const lat = parseNumberParam(readQueryValue(query.y, query.lat), 'y');
   const radius = parseNumberParam(query.radius, 'radius', { min: 1 });
@@ -624,6 +648,14 @@ exports.searchCourses = async (query, currentUserId) => {
   if (currentUserId) {
     params.push(currentUserId);
     conditions.push(`(c.owner_id IS NULL OR c.owner_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = $${params.length}))`);
+  }
+
+  if (normalizedRegion) {
+    params.push(`%${normalizedRegion}%`);
+    conditions.push(`(
+      c.name ILIKE $${params.length}
+      OR c.description ILIKE $${params.length}
+    )`);
   }
 
   if (normalizedKeyword) {
@@ -838,6 +870,8 @@ exports.searchCourses = async (query, currentUserId) => {
       c.is_public,
       c.created_at,
       ${distanceSelectSql},
+      ST_Y(ST_StartPoint(c.route_geometry::geometry)) AS start_lat,
+      ST_X(ST_StartPoint(c.route_geometry::geometry)) AS start_lng,
       rs.avg_rating,
       rs.avg_difficulty_score,
       rs.difficulty,
@@ -867,6 +901,7 @@ exports.searchCourses = async (query, currentUserId) => {
 
       return {
         ...course,
+        start_location: course.start_lat && course.start_lng ? { lat: Number(course.start_lat), lng: Number(course.start_lng) } : null,
         distance: course.distance === null ? null : Number(course.distance),
         avg_rating: course.avg_rating === null ? null : Number(course.avg_rating),
         avg_difficulty_score: course.avg_difficulty_score === null
