@@ -152,35 +152,12 @@ async function searchKakaoSpotCandidates({ keyword, category, x, y, radius, size
         throw err;
     }
 
-    const hasLocation = x !== undefined && x !== null && x !== '' && y !== undefined && y !== null && y !== '';
-    const lng = hasLocation ? Number(x) : null;
-    const lat = hasLocation ? Number(y) : null;
-
-    if (hasLocation && (!Number.isFinite(lng) || !Number.isFinite(lat))) {
-        const err = new Error('x and y must be valid numbers');
-        err.status = 400;
-        throw err;
-    }
-
-    const searchRadius = radius === undefined || radius === null || radius === '' ? null : Number(radius);
-    if (searchRadius !== null && (!Number.isFinite(searchRadius) || searchRadius <= 0)) {
-        const err = new Error('radius must be a valid number greater than 0');
-        err.status = 400;
-        throw err;
-    }
-
     const rules = keyword ? [{ query: keyword }] : SPOT_CATEGORY_SEARCH_RULES[category];
     const allDocuments = [];
 
     for (const rule of rules) {
         const params = { query: rule.query, size, page: 1 };
         if (rule.category_group_code) params.category_group_code = rule.category_group_code;
-        if (hasLocation) {
-            params.x = lng;
-            params.y = lat;
-            params.sort = 'distance';
-            if (searchRadius !== null) params.radius = searchRadius;
-        }
 
         const kakaoResponse = await axios.get('https://dapi.kakao.com/v2/local/search/keyword.json', {
             params,
@@ -324,11 +301,10 @@ async function enrichKakaoSpotTourContent(spot, userId) {
 // 스팟 목록 조회
 // ──────────────────────────────────────────────────────────────────────
 exports.getSpots = async (query) => {
-    const { x, y, radius, category, tag_ids, min_recommend_pct, region, page = 1, limit = 20 } = query;
+    const { category, tag_ids, min_recommend_pct, region, page = 1, limit = 20 } = query;
     const offset = (Number(page) - 1) * Number(limit);
     const whereConditions = ["s.status = 'active'"];
     const queryValues = [];
-    let distanceSelectSql = 'NULL::DOUBLE PRECISION AS distance';
     let orderBySql = 's.created_at DESC';
 
     if (region && String(region).trim()) {
@@ -378,22 +354,6 @@ exports.getSpots = async (query) => {
         whereConditions.push(`s.recommend_pct >= $${queryValues.length}`);
     }
 
-    if (x !== undefined && x !== null && x !== '' && y !== undefined && y !== null && y !== '') {
-        const lng = Number(x);
-        const lat = Number(y);
-        const searchRadius = (!radius) ? 3000 : Number(radius);
-        if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-            const err = new Error('x and y must be valid numbers');
-            err.status = 400; throw err;
-        }
-        queryValues.push(lng); const lngIdx = queryValues.length;
-        queryValues.push(lat); const latIdx = queryValues.length;
-        queryValues.push(searchRadius); const radIdx = queryValues.length;
-        distanceSelectSql = `ST_Distance(s.location, ST_Point($${lngIdx}, $${latIdx})::GEOGRAPHY) AS distance`;
-        whereConditions.push(`ST_DWithin(s.location, ST_Point($${lngIdx}, $${latIdx})::GEOGRAPHY, $${radIdx})`);
-        orderBySql = 'distance ASC';
-    }
-
     const countResult = await pool.query(
         `SELECT COUNT(DISTINCT s.spot_id) AS total FROM spots s WHERE ${whereConditions.join(' AND ')}`,
         queryValues
@@ -404,37 +364,44 @@ exports.getSpots = async (query) => {
 
     const spotsResult = await pool.query(
         `SELECT
-            s.spot_id, s.name, s.address, s.categories, s.kakao_category_name,
-            s.recommend_pct, s.source,
+            s.spot_id, s.name, s.address, s.categories, s.recommend_pct,
             ST_X(s.location::GEOMETRY) AS x,
             ST_Y(s.location::GEOMETRY) AS y,
-            ${distanceSelectSql},
+            s.content_place IS NOT NULL AS has_content_place,
+            s.content_history IS NOT NULL AS has_content_history,
+            s.content_tour IS NOT NULL AS has_content_tour,
+            s.created_at,
             COALESCE(
                 json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
                 FILTER (WHERE t.tag_id IS NOT NULL), '[]'
-            ) AS top_tags
-         FROM spots s
-         LEFT JOIN taggings tg ON tg.target_type = 'spot' AND tg.target_id = s.spot_id
-         LEFT JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'spot' AND t.is_active = TRUE
-         WHERE ${whereConditions.join(' AND ')}
-         GROUP BY s.spot_id
-         ORDER BY ${orderBySql}
-         LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+            ) AS tags
+        FROM spots s
+        LEFT JOIN taggings tg ON tg.target_id = s.spot_id AND tg.target_type = 'spot'
+        LEFT JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+        WHERE ${whereConditions.join(' AND ')}
+        GROUP BY s.spot_id
+        ORDER BY ${orderBySql}
+        LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
         queryValues
     );
 
+    const spots = spotsResult.rows.map(s => ({
+        ...s,
+        x: Number(s.x),
+        y: Number(s.y),
+        recommend_pct: s.recommend_pct == null ? null : Number(s.recommend_pct),
+        tags: s.tags || [],
+    }));
+
     return {
-        total: Number(countResult.rows[0].total),
+        total: Number(countResult.rows[0]?.total || 0),
         page: Number(page),
-        spots: spotsResult.rows.map(s => ({
-            ...s,
-            x: Number(s.x),
-            y: Number(s.y),
-            distance: s.distance == null ? null : Number(s.distance),
-            recommend_pct: s.recommend_pct == null ? null : Number(s.recommend_pct),
-        })),
+        limit: Number(limit),
+        spots,
     };
 };
+
+
 
 // ──────────────────────────────────────────────────────────────────────
 // 스팟 상세 조회
@@ -625,7 +592,7 @@ exports.searchKakaoSpotCandidates = searchKakaoSpotCandidates;
 // 스팟 검색 (카카오 + DB 통합)
 // ──────────────────────────────────────────────────────────────────────
 exports.searchSpots = async (query) => {
-    const { category, tag_ids, x, y, radius, min_recommend_pct } = query;
+    const { category, tag_ids, min_recommend_pct, region } = query;
     const rawKeyword = Array.isArray(query.keyword ?? query.q) ? (query.keyword ?? query.q)[0] : (query.keyword ?? query.q);
     const keyword = rawKeyword === undefined || rawKeyword === null ? null : String(rawKeyword).trim();
 
@@ -640,33 +607,6 @@ exports.searchSpots = async (query) => {
         err.status = 400;
         err.supported_categories = SPOT_CATEGORIES;
         throw err;
-    }
-
-    const hasX = x !== undefined && x !== null && x !== '';
-    const hasY = y !== undefined && y !== null && y !== '';
-    if (hasX !== hasY) {
-        const err = new Error('x and y must be provided together');
-        err.status = 400;
-        throw err;
-    }
-
-    const hasLocation = hasX && hasY;
-    let lng = null, lat = null, searchRadius = null;
-
-    if (hasLocation) {
-        lng = Number(x); lat = Number(y);
-        if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-            const err = new Error('x and y must be valid numbers');
-            err.status = 400; throw err;
-        }
-    }
-
-    if (radius !== undefined && radius !== null && radius !== '') {
-        searchRadius = Number(radius);
-        if (!Number.isFinite(searchRadius) || searchRadius <= 0) {
-            const err = new Error('radius must be a valid number greater than 0');
-            err.status = 400; throw err;
-        }
     }
 
     let tagIdList = [];
@@ -692,9 +632,6 @@ exports.searchSpots = async (query) => {
     const kakaoSpots = await searchKakaoSpotCandidates({
         keyword,
         category,
-        x: hasLocation ? lng : undefined,
-        y: hasLocation ? lat : undefined,
-        radius: searchRadius,
     });
     const kakaoPlaceIds = kakaoSpots.map(s => s.kakao_place_id);
 
@@ -709,8 +646,12 @@ exports.searchSpots = async (query) => {
 
     const whereConditions = ["s.status = 'active'"];
     const queryValues = [];
-    let distanceSelectSql = 'NULL::DOUBLE PRECISION AS distance';
     let orderBySql = 's.created_at DESC';
+
+    if (region && String(region).trim()) {
+        queryValues.push(`%${String(region).trim()}%`);
+        whereConditions.push(`(s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
+    }
 
     if (category) {
         queryValues.push(category);
@@ -746,22 +687,10 @@ exports.searchSpots = async (query) => {
         whereConditions.push(`s.recommend_pct >= $${queryValues.length}`);
     }
 
-    if (hasLocation) {
-        queryValues.push(lng); const lngIdx = queryValues.length;
-        queryValues.push(lat); const latIdx = queryValues.length;
-        distanceSelectSql = `ST_Distance(s.location, ST_Point($${lngIdx}, $${latIdx})::GEOGRAPHY) AS distance`;
-        orderBySql = 'distance ASC';
-        if (searchRadius !== null) {
-            queryValues.push(searchRadius); const radIdx = queryValues.length;
-            whereConditions.push(`ST_DWithin(s.location, ST_Point($${lngIdx}, $${latIdx})::GEOGRAPHY, $${radIdx})`);
-        }
-    }
-
     const savedSpotsResult = await pool.query(
         `SELECT s.spot_id, s.kakao_place_id, s.name, s.address, s.categories, s.kakao_category_name,
                 s.recommend_pct,
                 ST_X(s.location::GEOMETRY) AS x, ST_Y(s.location::GEOMETRY) AS y,
-                ${distanceSelectSql},
                 COALESCE(json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
                 FILTER (WHERE t.tag_id IS NOT NULL), '[]') AS tags
          FROM spots s
@@ -774,7 +703,6 @@ exports.searchSpots = async (query) => {
 
     const savedSpots = savedSpotsResult.rows.map(s => ({
         ...s, x: Number(s.x), y: Number(s.y),
-        distance: s.distance == null ? null : Number(s.distance),
         recommend_pct: s.recommend_pct == null ? null : Number(s.recommend_pct),
         is_saved: true, has_app_data: true, filter_match: 'matched', result_group: 'saved_spot',
     }));
@@ -783,13 +711,13 @@ exports.searchSpots = async (query) => {
         .filter(s => !savedKakaoPlaceIdSet.has(s.kakao_place_id))
         .map(s => ({
             ...s, is_saved: false, has_app_data: false, tags: [], recommend_pct: null,
-            filter_match: tagIdList.length > 0 || minRecommendPct !== null ? 'unknown' : 'category_location_only',
+            filter_match: tagIdList.length > 0 || minRecommendPct !== null ? 'unknown' : 'category_only',
             result_group: 'kakao_candidate',
         }));
 
     return {
         category,
-        filters: { keyword, category: category || null, tag_ids: tagIdList, x: hasLocation ? lng : null, y: hasLocation ? lat : null, radius: searchRadius, min_recommend_pct: minRecommendPct },
+        filters: { keyword, category: category || null, region: region || null, tag_ids: tagIdList, min_recommend_pct: minRecommendPct },
         raw_count: kakaoSpots.length,
         saved_count: savedSpots.length,
         kakao_candidate_count: kakaoCandidates.length,
@@ -804,10 +732,9 @@ exports.searchSpots = async (query) => {
 // 스팟 필터 조회
 // ──────────────────────────────────────────────────────────────────────
 exports.filterSpots = async (query) => {
-    const { category, tag_ids, x, y, radius, min_recommend_pct, region } = query;
+    const { category, tag_ids, min_recommend_pct, region } = query;
     const whereConditions = ["s.status = 'active'"];
     const queryValues = [];
-    let distanceSelectSql = 'NULL::DOUBLE PRECISION AS distance';
     let orderBySql = 's.created_at DESC';
 
     if (region && String(region).trim()) {
@@ -855,25 +782,9 @@ exports.filterSpots = async (query) => {
         whereConditions.push(`s.recommend_pct >= $${queryValues.length}`);
     }
 
-    if (x !== undefined && x !== '' && y !== undefined && y !== '') {
-        const lng = Number(x); const lat = Number(y);
-        const searchRadius = radius ? Number(radius) : 3000;
-        if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-            const err = new Error('x and y must be valid numbers');
-            err.status = 400; throw err;
-        }
-        queryValues.push(lng); const lngIdx = queryValues.length;
-        queryValues.push(lat); const latIdx = queryValues.length;
-        queryValues.push(searchRadius); const radIdx = queryValues.length;
-        distanceSelectSql = `ST_Distance(s.location, ST_Point($${lngIdx}, $${latIdx})::GEOGRAPHY) AS distance`;
-        whereConditions.push(`ST_DWithin(s.location, ST_Point($${lngIdx}, $${latIdx})::GEOGRAPHY, $${radIdx})`);
-        orderBySql = 'distance ASC';
-    }
-
     const result = await pool.query(
         `SELECT s.spot_id, s.kakao_place_id, s.name, s.address, s.categories, s.kakao_category_name,
                 s.recommend_pct, ST_X(s.location::GEOMETRY) AS x, ST_Y(s.location::GEOMETRY) AS y,
-                ${distanceSelectSql},
                 COALESCE(json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
                 FILTER (WHERE t.tag_id IS NOT NULL), '[]') AS tags
          FROM spots s
@@ -885,11 +796,14 @@ exports.filterSpots = async (query) => {
     );
 
     return {
+        filters: { category: category || null, region: region || null, tag_ids: tag_ids || null, min_recommend_pct: min_recommend_pct || null },
         total_count: result.rows.length,
         spots: result.rows.map(s => ({
-            ...s, x: Number(s.x), y: Number(s.y),
-            distance: s.distance == null ? null : Number(s.distance),
+            ...s,
+            x: Number(s.x),
+            y: Number(s.y),
             recommend_pct: s.recommend_pct == null ? null : Number(s.recommend_pct),
         })),
     };
 };
+

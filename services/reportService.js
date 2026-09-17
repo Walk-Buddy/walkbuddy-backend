@@ -3,7 +3,7 @@ const pool = require('../config/db');
 // ──────────────────────────────────────────────────────────────────────
 // 상수 정의 (허용값 및 매핑 규칙)
 // ──────────────────────────────────────────────────────────────────────
-const ALLOWED_TARGET_TYPES = ['course', 'spot', 'course_review', 'spot_review', 'user', 'location'];
+const ALLOWED_TARGET_TYPES = ['course', 'spot', 'course_review', 'spot_review', 'user'];
 const ALLOWED_STATUSES = ['in_progress', 'completed', 'rejected'];
 const ALLOWED_ACTIONS = ['none', 'hide_target', 'suspend_user'];
 
@@ -11,7 +11,6 @@ const ALLOWED_ACTIONS = ['none', 'hide_target', 'suspend_user'];
 const TARGET_CATEGORY_MAP = {
   course: 'environment',
   spot: 'environment',
-  location: 'environment',
   course_review: 'user',
   spot_review: 'user',
   user: 'user'
@@ -40,8 +39,6 @@ exports.createReport = async (userId, data) => {
   const {
     target_type,
     target_id,
-    latitude,
-    longitude,
     reason,
     memo,
     photo_url
@@ -65,42 +62,6 @@ exports.createReport = async (userId, data) => {
     );
     err.status = 400;
     throw err;
-  }
-
-  // 1-4. 위치 기반 신고(location) 처리
-  if (target_type === 'location') {
-    if (target_id) {
-      const err = new Error('위치 기반 신고(location)에는 target_id를 함께 지정할 수 없습니다.');
-      err.status = 400;
-      throw err;
-    }
-    if (latitude === undefined || longitude === undefined || latitude === null || longitude === null) {
-      const err = new Error('위치 기반 신고(location)에는 latitude와 longitude가 필수입니다.');
-      err.status = 400;
-      throw err;
-    }
-
-    const lat = Number(latitude);
-    const lng = Number(longitude);
-    if (isNaN(lat) || lat < -90 || lat > 90 || isNaN(lng) || lng < -180 || lng > 180) {
-      const err = new Error('유효하지 않은 위도/경도 좌표 범위입니다.');
-      err.status = 400;
-      throw err;
-    }
-
-    const { rows: [report] } = await pool.query(
-      `INSERT INTO reports (
-        reporter_id, target_type, report_category, reason, memo, photo_url, location, status
-      ) VALUES (
-        $1, $2, $3, $4, $5, $6, ST_SetSRID(ST_MakePoint($7, $8), 4326)::geography, 'received'
-      )
-      RETURNING
-        report_id, reporter_id, target_type, target_id, report_category, reason, memo, photo_url,
-        status, created_at`,
-      [userId, target_type, report_category, reason, memo || null, photo_url || null, lng, lat]
-    );
-
-    return report;
   }
 
   // 1-5. ID 기반 신고 (course, spot, course_review, spot_review, user)
@@ -253,13 +214,6 @@ exports.getMyReports = async (userId, query) => {
       reason,
       memo,
       photo_url,
-      CASE
-        WHEN location IS NOT NULL THEN json_build_object(
-          'latitude', ST_Y(location::geometry),
-          'longitude', ST_X(location::geometry)
-        )
-        ELSE NULL
-      END AS location,
       status,
       created_at
     FROM reports
@@ -318,13 +272,6 @@ exports.getAdminReports = async (query) => {
       r.report_category,
       r.reason,
       r.memo,
-      CASE
-        WHEN r.location IS NOT NULL THEN json_build_object(
-          'latitude', ST_Y(r.location::geometry),
-          'longitude', ST_X(r.location::geometry)
-        )
-        ELSE NULL
-      END AS location,
       r.photo_url,
       r.status,
       r.admin_memo,
@@ -364,13 +311,6 @@ exports.getAdminReportById = async (reportId) => {
       r.report_category,
       r.reason,
       r.memo,
-      CASE
-        WHEN r.location IS NOT NULL THEN json_build_object(
-          'latitude', ST_Y(r.location::geometry),
-          'longitude', ST_X(r.location::geometry)
-        )
-        ELSE NULL
-      END AS location,
       r.photo_url,
       r.status,
       r.admin_memo,

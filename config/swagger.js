@@ -431,14 +431,11 @@ const swaggerDefinition = {
       get: {
         tags: ['코스'],
         summary: '코스 검색',
-        description: '공개 코스를 키워드, 지역, 위치, 거리/시간, 후기 기반 난이도·평점, 코스 태그, 포함 스팟 태그로 검색합니다. 온디바이스 모드에서는 region(예: 춘천시, 마포구) 쿼리로 지역별 코스를 조회할 수 있습니다.',
+        description: '공개 코스를 키워드, 지역, 난이도·평점, 코스 태그, 포함 스팟 태그로 검색합니다. region(예: 춘천시, 마포구) 쿼리로 지역별 코스를 조회할 수 있습니다.',
         security: [],
         parameters: [
           { name: 'region', in: 'query', schema: { type: 'string' }, description: '지역명 필터 (예: 춘천시, 마포구, 노원구)' },
           { name: 'keyword', in: 'query', schema: { type: 'string' }, description: '코스명, 설명, 카테고리 키워드 검색. q도 같은 의미로 사용할 수 있습니다.' },
-          { name: 'x', in: 'query', schema: { type: 'number' }, description: '기준 경도(lng). y와 함께 전달하면 거리 계산에 사용됩니다.' },
-          { name: 'y', in: 'query', schema: { type: 'number' }, description: '기준 위도(lat). x와 함께 전달하면 거리 계산에 사용됩니다.' },
-          { name: 'radius', in: 'query', schema: { type: 'number' }, description: '검색 반경(m). x, y와 함께 전달한 경우에만 반경 제한을 적용합니다.' },
           { name: 'min_total_distance', in: 'query', schema: { type: 'number' }, description: '최소 총 길이(m)' },
           { name: 'max_total_distance', in: 'query', schema: { type: 'number' }, description: '최대 총 길이(m)' },
           { name: 'min_estimated_duration', in: 'query', schema: { type: 'number' }, description: '최소 예상 소요 시간(분)' },
@@ -447,14 +444,14 @@ const swaggerDefinition = {
           { name: 'min_avg_rating', in: 'query', schema: { type: 'number', minimum: 0, maximum: 5 }, description: '최소 평균 평점' },
           { name: 'course_tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표로 구분한 코스 태그 UUID 목록. tag_ids도 같은 의미로 사용할 수 있습니다.' },
           { name: 'spot_tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표로 구분한 장소 태그 UUID 목록. 코스에 포함된 스팟들의 태그 합집합 기준입니다.' },
-          { name: 'sort', in: 'query', schema: { type: 'string', enum: ['distance', 'rating', 'latest', 'length', 'duration'], default: 'distance' } },
+          { name: 'sort', in: 'query', schema: { type: 'string', enum: ['latest', 'rating', 'length', 'duration'], default: 'latest' } },
           { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
         ],
         responses: {
           200: {
             description: '코스 검색 결과',
-            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, filters: { type: 'object', properties: { x: { type: 'number', example: 127.073821318894 }, y: { type: 'number', example: 37.6248431089168 }, radius: { type: 'number', example: 5000 }, min_total_distance: { type: 'number', nullable: true }, max_total_distance: { type: 'number', nullable: true }, min_estimated_duration: { type: 'number', nullable: true }, max_estimated_duration: { type: 'number', nullable: true }, difficulty: { type: 'string', nullable: true, enum: ['easy', 'normal', 'hard'] }, min_avg_rating: { type: 'number', nullable: true }, course_tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } }, spot_tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } } } }, total_count: { type: 'integer' }, page: { type: 'integer' }, limit: { type: 'integer' }, courses: { type: 'array', items: { type: 'object', properties: { course_id: { type: 'string', format: 'uuid' }, name: { type: 'string' }, description: { type: 'string', nullable: true }, category: { type: 'string', nullable: true }, total_distance: { type: 'integer' }, estimated_duration: { type: 'integer' }, is_public: { type: 'boolean' }, created_at: { type: 'string', format: 'date-time' }, distance: { type: 'number' }, start_location: { type: 'object', properties: { lat: { type: 'number' }, lng: { type: 'number' } } }, avg_rating: { type: 'number', nullable: true }, avg_difficulty_score: { type: 'number', nullable: true }, difficulty: { type: 'string', nullable: true }, review_count: { type: 'integer' }, course_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } } }, spot_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } } }, tags: { type: 'array', items: { type: 'object' }, description: 'course_tags와 같은 값' } } } } } } } },
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, filters: { type: 'object', properties: { keyword: { type: 'string' }, region: { type: 'string' }, min_total_distance: { type: 'number', nullable: true }, max_total_distance: { type: 'number', nullable: true }, min_estimated_duration: { type: 'number', nullable: true }, max_estimated_duration: { type: 'number', nullable: true }, difficulty: { type: 'string', nullable: true, enum: ['easy', 'normal', 'hard'] }, min_avg_rating: { type: 'number', nullable: true }, course_tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } }, spot_tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } } } }, total_count: { type: 'integer' }, page: { type: 'integer' }, limit: { type: 'integer' }, courses: { type: 'array', items: { type: 'object', properties: { course_id: { type: 'string', format: 'uuid' }, name: { type: 'string' }, description: { type: 'string', nullable: true }, category: { type: 'string', nullable: true }, total_distance: { type: 'integer' }, estimated_duration: { type: 'integer' }, is_public: { type: 'boolean' }, created_at: { type: 'string', format: 'date-time' }, start_location: { type: 'object', properties: { lat: { type: 'number' }, lng: { type: 'number' } } }, avg_rating: { type: 'number', nullable: true }, avg_difficulty_score: { type: 'number', nullable: true }, difficulty: { type: 'string', nullable: true }, review_count: { type: 'integer' }, course_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } } }, spot_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } } }, tags: { type: 'array', items: { type: 'object' }, description: 'course_tags와 같은 값' } } } } } } } },
           },
           400: {
             description: '잘못된 검색 조건',
@@ -467,14 +464,12 @@ const swaggerDefinition = {
       get: {
         tags: ['코스'],
         summary: '코스 목록 조회',
-        description: '공개 코스 목록을 조회합니다. 온디바이스 모드에서는 region(예: 춘천시, 마포구) 쿼리로 지역별 코스를 조회할 수 있으며, start_location 위경도 객체를 반환합니다.',
+        description: '공개 코스 목록을 조회합니다. region(예: 춘천시, 마포구) 쿼리로 지역별 코스를 조회할 수 있습니다.',
         parameters: [
           { name: 'region', in: 'query', schema: { type: 'string' }, description: '지역명 필터 (예: 춘천시, 마포구, 노원구)' },
-          { name: 'lat', in: 'query', schema: { type: 'number' } },
-          { name: 'lng', in: 'query', schema: { type: 'number' } },
           { name: 'difficulty', in: 'query', schema: { type: 'string', enum: ['easy', 'medium', 'hard'] } },
           { name: 'tags', in: 'query', schema: { type: 'array', items: { type: 'string' } } },
-          { name: 'sort', in: 'query', schema: { type: 'string', example: 'rating' } },
+          { name: 'sort', in: 'query', schema: { type: 'string', enum: ['latest', 'rating'], default: 'latest' } },
           { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
         ],
@@ -675,21 +670,19 @@ const swaggerDefinition = {
       get: {
         tags: ['스팟'],
         summary: '스팟 통합 검색',
-        description: '키워드 또는 앱 스팟 카테고리 기준으로 카카오 API 후보와 DB 저장 스팟을 함께 검색합니다. keyword 또는 q로 장소명·주소·설명 등을 검색할 수 있고, x와 y를 함께 전달하면 거리 계산을 합니다. radius는 x,y와 함께 전달한 경우에만 반경 제한으로 적용됩니다.',
+        description: '키워드 또는 앱 스팟 카테고리, 지역(region) 기준으로 카카오 API 후보와 DB 저장 스팟을 함께 검색합니다. keyword 또는 q로 장소명·주소·설명 등을 검색할 수 있습니다. (온디바이스 모드: 사용자 좌표 대신 정적 스팟 좌표를 반환하여 기기에서 거리 계산)',
         security: [],
         parameters: [
           { name: 'keyword', in: 'query', schema: { type: 'string' }, description: '장소명, 주소, 설명 키워드 검색. q도 같은 의미로 사용할 수 있습니다.' },
           { name: 'category', in: 'query', schema: { type: 'string', enum: ['산', '숲·휴양림', '수목원·정원', '강·하천', '호수·저수지', '계곡·폭포', '해수욕장·해변', '생태·서식지', '공원·광장'] }, description: '앱 기준 스팟 카테고리. keyword가 없으면 category가 필요합니다.' },
+          { name: 'region', in: 'query', schema: { type: 'string' }, description: '지역명 필터 (예: 춘천시, 마포구, 노원구)' },
           { name: 'tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표로 구분한 스팟 태그 UUID 목록. 선택한 태그를 모두 가진 DB 저장 스팟만 saved_spots에 포함됩니다.' },
-          { name: 'x', in: 'query', schema: { type: 'number' }, description: '기준 경도(lng). y와 함께 전달하면 거리 계산에 사용됩니다.' },
-          { name: 'y', in: 'query', schema: { type: 'number' }, description: '기준 위도(lat). x와 함께 전달하면 거리 계산에 사용됩니다.' },
-          { name: 'radius', in: 'query', schema: { type: 'number' }, description: '검색 반경(m). x, y와 함께 전달한 경우에만 반경 제한을 적용합니다.' },
           { name: 'min_recommend_pct', in: 'query', schema: { type: 'number', minimum: 0, maximum: 100 }, description: 'DB 저장 스팟의 최소 추천도' },
         ],
         responses: {
           200: {
             description: '스팟 통합 검색 결과',
-            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, category: { type: 'string', example: '강·하천' }, filters: { type: 'object', properties: { tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } }, x: { type: 'number', nullable: true }, y: { type: 'number', nullable: true }, radius: { type: 'number', nullable: true }, min_recommend_pct: { type: 'number', nullable: true } } }, raw_count: { type: 'integer', description: '카카오 API에서 받은 원본 document 개수' }, saved_count: { type: 'integer' }, kakao_candidate_count: { type: 'integer' }, total_count: { type: 'integer' }, saved_spots: { type: 'array', items: { type: 'object', properties: { spot_id: { type: 'string', format: 'uuid' }, kakao_place_id: { type: 'string', nullable: true }, name: { type: 'string' }, address: { type: 'string', nullable: true }, categories: { type: 'array', items: { type: 'string' } }, kakao_category_name: { type: 'string', nullable: true }, recommend_pct: { type: 'number', nullable: true }, x: { type: 'number' }, y: { type: 'number' }, distance: { type: 'number', nullable: true }, tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } } }, is_saved: { type: 'boolean', example: true }, has_app_data: { type: 'boolean', example: true }, filter_match: { type: 'string', example: 'matched' }, result_group: { type: 'string', example: 'saved_spot' } } } }, kakao_candidates: { type: 'array', items: { type: 'object', properties: { kakao_place_id: { type: 'string' }, name: { type: 'string' }, kakao_category_name: { type: 'string', nullable: true }, categories: { type: 'array', items: { type: 'string' } }, address: { type: 'string', nullable: true }, x: { type: 'string' }, y: { type: 'string' }, distance: { type: 'number', nullable: true }, is_saved: { type: 'boolean', example: false }, has_app_data: { type: 'boolean', example: false }, tags: { type: 'array', items: { type: 'object' }, example: [] }, recommend_pct: { type: 'number', nullable: true }, filter_match: { type: 'string', enum: ['unknown', 'category_location_only'] }, result_group: { type: 'string', example: 'kakao_candidate' } } } }, spots: { type: 'array', items: { type: 'object' }, description: 'saved_spots와 kakao_candidates를 합친 배열' } } } } },
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, category: { type: 'string', example: '강·하천' }, filters: { type: 'object', properties: { tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } }, region: { type: 'string', nullable: true }, min_recommend_pct: { type: 'number', nullable: true } } }, raw_count: { type: 'integer', description: '카카오 API에서 받은 원본 document 개수' }, saved_count: { type: 'integer' }, kakao_candidate_count: { type: 'integer' }, total_count: { type: 'integer' }, saved_spots: { type: 'array', items: { type: 'object', properties: { spot_id: { type: 'string', format: 'uuid' }, kakao_place_id: { type: 'string', nullable: true }, name: { type: 'string' }, address: { type: 'string', nullable: true }, categories: { type: 'array', items: { type: 'string' } }, kakao_category_name: { type: 'string', nullable: true }, recommend_pct: { type: 'number', nullable: true }, x: { type: 'number' }, y: { type: 'number' }, tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } } }, is_saved: { type: 'boolean', example: true }, has_app_data: { type: 'boolean', example: true }, filter_match: { type: 'string', example: 'matched' }, result_group: { type: 'string', example: 'saved_spot' } } } }, kakao_candidates: { type: 'array', items: { type: 'object', properties: { kakao_place_id: { type: 'string' }, name: { type: 'string' }, kakao_category_name: { type: 'string', nullable: true }, categories: { type: 'array', items: { type: 'string' } }, address: { type: 'string', nullable: true }, x: { type: 'string' }, y: { type: 'string' }, is_saved: { type: 'boolean', example: false }, has_app_data: { type: 'boolean', example: false }, tags: { type: 'array', items: { type: 'object' }, example: [] }, recommend_pct: { type: 'number', nullable: true }, filter_match: { type: 'string', enum: ['unknown', 'category_location_only'] }, result_group: { type: 'string', example: 'kakao_candidate' } } } }, spots: { type: 'array', items: { type: 'object' }, description: 'saved_spots와 kakao_candidates를 합친 배열' } } } } },
           },
           400: {
             description: '잘못된 검색 조건',
@@ -738,9 +731,6 @@ const swaggerDefinition = {
         description: '스팟 목록을 조회합니다. 온디바이스 모드에서는 region(예: 춘천시, 마포구) 쿼리로 지역별 스팟을 조회할 수 있습니다.',
         parameters: [
           { name: 'region', in: 'query', schema: { type: 'string' }, description: '지역명 필터 (예: 춘천시, 마포구, 노원구)' },
-          { name: 'x', in: 'query', schema: { type: 'number' }, description: '기준 경도(lng)' },
-          { name: 'y', in: 'query', schema: { type: 'number' }, description: '기준 위도(lat)' },
-          { name: 'radius', in: 'query', schema: { type: 'number' }, description: '반경(m)' },
           { name: 'category', in: 'query', schema: { type: 'string' } },
           { name: 'tag_ids', in: 'query', schema: { type: 'string' } },
           { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
@@ -888,7 +878,7 @@ const swaggerDefinition = {
         responses: {
           200: {
             description: '산책 기록 상세',
-            content: { 'application/json': { schema: { type: 'object', properties: { walk_record_id: { type: 'string', format: 'uuid' }, course: { type: 'object' }, actual_route: { type: 'object' }, total_distance: { type: 'integer' }, duration: { type: 'integer' }, is_completed: { type: 'boolean' } } } } },
+            content: { 'application/json': { schema: { type: 'object', properties: { walk_record_id: { type: 'string', format: 'uuid' }, course: { type: 'object' }, total_distance: { type: 'integer' }, duration: { type: 'integer' }, is_completed: { type: 'boolean' } } } } },
           },
         },
       },
@@ -1190,27 +1180,17 @@ const swaggerDefinition = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['target_type', 'reason'],
+                required: ['target_type', 'target_id', 'reason'],
                 properties: {
                   target_type: {
                     type: 'string',
-                    enum: ['course', 'spot', 'course_review', 'spot_review', 'user', 'location'],
-                    description: '신고 대상 구분 (location은 위치 기반 신고)',
+                    enum: ['course', 'spot', 'course_review', 'spot_review', 'user'],
+                    description: '신고 대상 구분 (코스, 스팟, 리뷰, 유저)',
                   },
                   target_id: {
                     type: 'string',
                     format: 'uuid',
-                    description: '신고 대상 ID (target_type이 location이 아닐 때 필수)',
-                  },
-                  latitude: {
-                    type: 'number',
-                    description: '위도 (target_type이 location일 때 필수)',
-                    example: 37.5665,
-                  },
-                  longitude: {
-                    type: 'number',
-                    description: '경도 (target_type이 location일 때 필수)',
-                    example: 126.9780,
+                    description: '신고 대상 ID',
                   },
                   reason: {
                     type: 'string',
@@ -1315,7 +1295,7 @@ const swaggerDefinition = {
         parameters: [
           { name: 'status', in: 'query', schema: { type: 'string', enum: ['received', 'in_progress', 'completed', 'rejected'] } },
           { name: 'report_category', in: 'query', schema: { type: 'string', enum: ['environment', 'user'] } },
-          { name: 'target_type', in: 'query', schema: { type: 'string', enum: ['course', 'spot', 'course_review', 'spot_review', 'user', 'location'] } },
+          { name: 'target_type', in: 'query', schema: { type: 'string', enum: ['course', 'spot', 'course_review', 'spot_review', 'user'] } },
           { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
         ],

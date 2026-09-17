@@ -501,10 +501,9 @@ exports.createCourseFromWalk = async (userId, body) => {
 // ──────────────────────────────────────────────────────────────────────
 exports.getCourses = async (query, currentUserId) => {
   const {
-    lat, lng, radius = 5000,
     region,
     page = 1, limit = 20,
-    sort = 'distance',        // distance | rating | latest
+    sort = 'latest',        // latest | rating
     is_public,
   } = query;
 
@@ -532,19 +531,9 @@ exports.getCourses = async (query, currentUserId) => {
       idx += 1;
     }
 
-    // 위치 기반 반경 필터 (옵셔널)
-    let distanceSelect = 'NULL::float AS distance';
-    if (lat && lng) {
-      distanceSelect = `ST_Distance(c.route_geometry, ST_Point($${idx},$${idx+1})::geography) AS distance`;
-      conditions.push(`ST_DWithin(c.route_geometry, ST_Point($${idx},$${idx+1})::geography, $${idx+2})`);
-      params.push(+lng, +lat, +radius);
-      idx += 3;
-    }
-
     const orderMap = {
-      distance: lat && lng ? 'distance ASC' : 'c.created_at DESC',
-      rating:   'avg_rating DESC NULLS LAST',
-      latest:   'c.created_at DESC',
+      rating: 'avg_rating DESC NULLS LAST, c.created_at DESC',
+      latest: 'c.created_at DESC',
     };
     const orderBy = orderMap[sort] || 'c.created_at DESC';
 
@@ -553,7 +542,6 @@ exports.getCourses = async (query, currentUserId) => {
         c.course_id, c.name, c.description, c.category,
         c.total_distance, c.estimated_duration,
         c.is_public, c.created_at,
-        ${distanceSelect},
         ST_Y(ST_StartPoint(c.route_geometry::geometry)) AS start_lat,
         ST_X(ST_StartPoint(c.route_geometry::geometry)) AS start_lng,
         ROUND(AVG(cr.rating)::numeric, 1)          AS avg_rating,
@@ -613,9 +601,6 @@ exports.searchCourses = async (query, currentUserId) => {
   const normalizedKeyword = isMissing(keyword) ? null : String(keyword).trim();
   const region = readQueryValue(query.region);
   const normalizedRegion = isMissing(region) ? null : String(region).trim();
-  const lng = parseNumberParam(readQueryValue(query.x, query.lng), 'x');
-  const lat = parseNumberParam(readQueryValue(query.y, query.lat), 'y');
-  const radius = parseNumberParam(query.radius, 'radius', { min: 1 });
   const minTotalDistance = parseNumberParam(query.min_total_distance, 'min_total_distance', { min: 0 });
   const maxTotalDistance = parseNumberParam(query.max_total_distance, 'max_total_distance', { min: 0 });
   const minEstimatedDuration = parseNumberParam(query.min_estimated_duration, 'min_estimated_duration', { min: 0 });
@@ -627,12 +612,6 @@ exports.searchCourses = async (query, currentUserId) => {
   const page = parseIntegerParam(query.page, 'page', { defaultValue: 1, min: 1, max: 10000 });
   const limit = parseIntegerParam(query.limit, 'limit', { defaultValue: 20, min: 1, max: 100 });
   const offset = (page - 1) * limit;
-
-  if ((lng === null) !== (lat === null)) {
-    throw createBadRequest('x and y must be provided together');
-  }
-
-  const hasLocation = lng !== null && lat !== null;
 
   if (maxTotalDistance !== null && minTotalDistance !== null && maxTotalDistance < minTotalDistance) {
     throw createBadRequest('max_total_distance must be greater than or equal to min_total_distance');
@@ -687,7 +666,7 @@ exports.searchCourses = async (query, currentUserId) => {
     conditions.push(`c.estimated_duration <= $${params.length}`);
   }
 
-  if (difficulty !== null) {
+  if (difficulty) {
     params.push(difficulty);
     conditions.push(`rs.difficulty = $${params.length}`);
   }
@@ -745,46 +724,15 @@ exports.searchCourses = async (query, currentUserId) => {
     `);
   }
 
-  const listOnlyParams = [];
-  let distanceSelectSql = 'NULL::double precision AS distance';
-
-  if (hasLocation) {
-    let lngParamIndex;
-    let latParamIndex;
-
-    if (radius !== null) {
-      params.push(lng);
-      lngParamIndex = params.length;
-      params.push(lat);
-      latParamIndex = params.length;
-
-      const referencePointSql = `ST_Point($${lngParamIndex}, $${latParamIndex})::geography`;
-      distanceSelectSql = `ST_Distance(c.route_geometry, ${referencePointSql}) AS distance`;
-
-      params.push(radius);
-      const radiusParamIndex = params.length;
-      conditions.push(`ST_DWithin(c.route_geometry, ${referencePointSql}, $${radiusParamIndex})`);
-    } else {
-      listOnlyParams.push(lng);
-      lngParamIndex = params.length + listOnlyParams.length;
-      listOnlyParams.push(lat);
-      latParamIndex = params.length + listOnlyParams.length;
-
-      const referencePointSql = `ST_Point($${lngParamIndex}, $${latParamIndex})::geography`;
-      distanceSelectSql = `ST_Distance(c.route_geometry, ${referencePointSql}) AS distance`;
-    }
-  }
-
-  const sort = readQueryValue(query.sort) || (hasLocation ? 'distance' : 'latest');
+  const sort = readQueryValue(query.sort) || 'latest';
   const orderMap = {
-    distance: hasLocation ? 'distance ASC' : 'c.created_at DESC',
-    rating: hasLocation ? 'rs.avg_rating DESC NULLS LAST, distance ASC' : 'rs.avg_rating DESC NULLS LAST, c.created_at DESC',
+    rating: 'rs.avg_rating DESC NULLS LAST, c.created_at DESC',
     latest: 'c.created_at DESC',
-    length: hasLocation ? 'c.total_distance ASC, distance ASC' : 'c.total_distance ASC',
-    duration: hasLocation ? 'c.estimated_duration ASC, distance ASC' : 'c.estimated_duration ASC',
+    length: 'c.total_distance ASC',
+    duration: 'c.estimated_duration ASC',
   };
 
-  const orderBySql = orderMap[sort] || orderMap.distance;
+  const orderBySql = orderMap[sort] || orderMap.latest;
 
   const baseSql = `
     WITH review_source AS (
@@ -854,9 +802,9 @@ exports.searchCourses = async (query, currentUserId) => {
     WHERE ${conditions.join(' AND ')}
   `;
 
-  const listParams = [...params, ...listOnlyParams, limit, offset];
-  const limitParamIndex = params.length + listOnlyParams.length + 1;
-  const offsetParamIndex = params.length + listOnlyParams.length + 2;
+  const listParams = [...params, limit, offset];
+  const limitParamIndex = params.length + 1;
+  const offsetParamIndex = params.length + 2;
 
   const listSql = `
     ${baseSql}
@@ -869,7 +817,6 @@ exports.searchCourses = async (query, currentUserId) => {
       c.estimated_duration,
       c.is_public,
       c.created_at,
-      ${distanceSelectSql},
       ST_Y(ST_StartPoint(c.route_geometry::geometry)) AS start_lat,
       ST_X(ST_StartPoint(c.route_geometry::geometry)) AS start_lng,
       rs.avg_rating,
@@ -902,7 +849,6 @@ exports.searchCourses = async (query, currentUserId) => {
       return {
         ...course,
         start_location: course.start_lat && course.start_lng ? { lat: Number(course.start_lat), lng: Number(course.start_lng) } : null,
-        distance: course.distance === null ? null : Number(course.distance),
         avg_rating: course.avg_rating === null ? null : Number(course.avg_rating),
         avg_difficulty_score: course.avg_difficulty_score === null
           ? null
@@ -918,9 +864,7 @@ exports.searchCourses = async (query, currentUserId) => {
       success: true,
       filters: {
         keyword: normalizedKeyword || null,
-        x: lng,
-        y: lat,
-        radius,
+        region: normalizedRegion || null,
         min_total_distance: minTotalDistance,
         max_total_distance: maxTotalDistance,
         min_estimated_duration: minEstimatedDuration,
@@ -929,12 +873,14 @@ exports.searchCourses = async (query, currentUserId) => {
         min_avg_rating: minAvgRating,
         course_tag_ids: courseTagIds,
         spot_tag_ids: spotTagIds,
+        sort,
       },
-      total_count: Number(countRows[0].total),
+      total_count: Number(countRows[0]?.total || 0),
       page,
       limit,
       courses,
     };
+
   } finally { client.release(); }
 };
 

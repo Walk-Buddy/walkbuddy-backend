@@ -1,11 +1,5 @@
 const pool = require('../config/db');
 
-// gps_points: [{ lat, lng }, ...] → WKT LINESTRING
-const buildLineString = (gps_points) => {
-  const points = gps_points.map((p) => `${p.lng} ${p.lat}`);
-  return `SRID=4326;LINESTRING(${points.join(', ')})`;
-};
-
 // ──────────────────────────────────────────────────────────────────────
 // 산책 시작
 // ──────────────────────────────────────────────────────────────────────
@@ -116,7 +110,6 @@ exports.getWalkDetail = async (userId, walkRecordId) => {
        wr.is_completed,
        wr.started_at,
        wr.ended_at,
-       ST_AsGeoJSON(wr.actual_route)::json AS actual_route,
        json_build_object(
          'course_id',          c.course_id,
          'name',               c.name,
