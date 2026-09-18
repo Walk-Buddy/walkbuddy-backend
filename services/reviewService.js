@@ -90,8 +90,8 @@ exports.getCourseReviews = async (courseId, query, userId) => {
        cr.is_public, cr.created_at,
        json_build_object(
          'user_id',   u.user_id,
-         'nickname',  u.nickname,
-         'profile_image_url', u.profile_image_url
+         'nickname',  CASE WHEN u.status = 'deleted' THEN '(탈퇴한 사용자)' ELSE u.nickname END,
+         'profile_image_url', CASE WHEN u.status = 'deleted' THEN NULL ELSE u.profile_image_url END
        ) AS user,
        COALESCE(
          json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
@@ -252,8 +252,8 @@ exports.getSpotReviews = async (spotId, query, userId) => {
        sr.photos, sr.is_public, sr.created_at,
        json_build_object(
          'user_id',  u.user_id,
-         'nickname', u.nickname,
-         'profile_image_url', u.profile_image_url
+         'nickname', CASE WHEN u.status = 'deleted' THEN '(탈퇴한 사용자)' ELSE u.nickname END,
+         'profile_image_url', CASE WHEN u.status = 'deleted' THEN NULL ELSE u.profile_image_url END
        ) AS user,
        COALESCE(
          json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))

@@ -310,11 +310,14 @@ exports.getAdminReportById = async (reportId) => {
       r.admin_memo,
       r.created_at,
       r.updated_at,
-      json_build_object(
-        'user_id', u.user_id,
-        'nickname', u.nickname,
-        'email', u.email
-      ) AS reporter
+      CASE
+        WHEN u.user_id IS NOT NULL THEN json_build_object(
+          'user_id', u.user_id,
+          'nickname', u.nickname,
+          'email', u.email
+        )
+        ELSE NULL
+      END AS reporter
     FROM reports r
     LEFT JOIN users u ON u.user_id = r.reporter_id
     WHERE r.report_id = $1`,
