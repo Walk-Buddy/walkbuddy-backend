@@ -10,11 +10,15 @@ const swaggerDefinition = {
   servers: [
     {
       url: 'http://localhost:3000',
-      description: '로컬 개발 서버',
+      description: '로컬 개발 서버 (Local)',
     },
     {
-      url: 'http://3.24.8.135',
-      description: '원격 배포 서버',
+      url: 'http://3.24.8.135:4000',
+      description: '공모전 배포 서버 (Contest - 4000)',
+    },
+    {
+      url: 'http://3.24.8.135:3000',
+      description: '메인 배포 서버 (Main - 3000)',
     },
   ],
   components: {
