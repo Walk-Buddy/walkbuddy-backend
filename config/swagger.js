@@ -9,16 +9,16 @@ const swaggerDefinition = {
   },
   servers: [
     {
+      url: 'https://api.gilbom.quest',
+      description: '메인 배포 서버 (Main - 출시용)',
+    },
+    {
+      url: 'https://contest.gilbom.quest',
+      description: '공모전 배포 서버 (Contest)',
+    },
+    {
       url: 'http://localhost:3000',
       description: '로컬 개발 서버 (Local)',
-    },
-    {
-      url: 'http://3.24.8.135:4000',
-      description: '공모전 배포 서버 (Contest - 4000)',
-    },
-    {
-      url: 'http://3.24.8.135:3000',
-      description: '메인 배포 서버 (Main - 3000)',
     },
   ],
   components: {
