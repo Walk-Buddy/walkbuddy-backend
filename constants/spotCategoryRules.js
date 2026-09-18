@@ -232,7 +232,7 @@ const TARGET_REGIONS = {
     fullName: '강원특별자치도 춘천시',
     tourApi: { areaCode: '32', sigunguCode: '13' },
     durunubi: { sigun: '춘천시' },
-    aliases: ['춘천', '춘천시', 'chuncheon', 'gangwon_chuncheon'],
+    aliases: ['춘천', '춘천시', 'chuncheon', 'gangwon_chuncheon', '강원특별자치도 춘천', '강원특별자치도', '강원도', '강원', 'gangwon', '강원도 춘천', '강원 춘천'],
   },
 };
 
@@ -249,7 +249,7 @@ function resolveRegion(regionInput) {
 
   for (const regionKey of Object.keys(TARGET_REGIONS)) {
     const r = TARGET_REGIONS[regionKey];
-    if (r.aliases.some((alias) => alias.toLowerCase() === normalized)) {
+    if (r.aliases.some((alias) => alias.toLowerCase() === normalized || normalized.includes(alias.toLowerCase()))) {
       return r;
     }
   }
@@ -490,16 +490,45 @@ const CHUNCHEON_AREAS = [
 // ── 지원 지역 전체 구조 (클라이언트 전달용) ──────────────────────────
 const SUPPORTED_REGION_LIST = [
   {
-    code: 'seoul',
-    name: '서울',
-    fullName: '서울특별시',
-    sub_regions: SEOUL_DISTRICTS,
+    id: 'all',
+    code: 'all',
+    name: '전국',
+    fullName: '전국',
+    params: { region: null, sub_region: null },
+    sub_regions: [
+      { name: '전체', code: 'all', params: { region: null, sub_region: null } },
+    ],
   },
   {
-    code: 'chuncheon',
-    name: '춘천',
-    fullName: '강원특별자치도 춘천시',
-    sub_regions: CHUNCHEON_AREAS,
+    id: 'seoul',
+    code: 'seoul',
+    name: '서울특별시',
+    fullName: '서울특별시',
+    params: { region: '서울', sub_region: null },
+    sub_regions: [
+      { name: '전체', code: 'all', params: { region: '서울', sub_region: null } },
+      ...SEOUL_DISTRICTS.map((gu) => ({
+        name: gu,
+        code: gu,
+        params: { region: '서울', sub_region: gu },
+      })),
+    ],
+  },
+  {
+    id: 'gangwon',
+    code: 'gangwon',
+    name: '강원특별자치도',
+    fullName: '강원특별자치도',
+    params: { region: '춘천', sub_region: null },
+    sub_regions: [
+      { name: '전체', code: 'all', params: { region: '춘천', sub_region: null } },
+      { name: '춘천시', code: 'chuncheon', params: { region: '춘천', sub_region: null } },
+      ...CHUNCHEON_AREAS.map((area) => ({
+        name: area,
+        code: area,
+        params: { region: '춘천', sub_region: area },
+      })),
+    ],
   },
 ];
 

@@ -613,11 +613,15 @@ exports.getCourses = async (query, currentUserId) => {
   }
 
   // 지역 필터
-  if (normalizedRegion) {
-    if (normalizedRegion === '서울' || normalizedRegion.toLowerCase() === 'seoul' || normalizedRegion === '서울특별시') {
+  if (normalizedRegion && !['전국', '전체', 'all'].includes(normalizedRegion.toLowerCase())) {
+    const regLower = normalizedRegion.toLowerCase();
+    if (['서울', 'seoul', '서울특별시'].includes(regLower) || normalizedRegion === '서울' || normalizedRegion === '서울특별시') {
       params.push('서울');
       conditions.push(`c.region = $${params.length}`);
-    } else if (normalizedRegion === '춘천' || normalizedRegion.toLowerCase() === 'chuncheon' || normalizedRegion === '춘천시') {
+    } else if (
+      ['춘천', 'chuncheon', '춘천시', '강원', '강원도', '강원특별자치도', 'gangwon'].includes(regLower) ||
+      ['춘천', '춘천시', '강원', '강원도', '강원특별자치도'].includes(normalizedRegion)
+    ) {
       params.push('춘천');
       conditions.push(`c.region = $${params.length}`);
     } else {
@@ -632,7 +636,7 @@ exports.getCourses = async (query, currentUserId) => {
   }
 
   // 세부 권역 필터
-  if (normalizedSubRegion) {
+  if (normalizedSubRegion && !['전체', 'all'].includes(normalizedSubRegion.toLowerCase()) && normalizedSubRegion !== '전체') {
     params.push(`%${normalizedSubRegion}%`);
     conditions.push(`(
       c.sub_region ILIKE $${params.length}
