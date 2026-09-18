@@ -830,41 +830,6 @@ const swaggerDefinition = {
         },
       },
     },
-    '/api/courses/search': {
-      get: {
-        tags: ['코스'],
-        summary: '[하위 호환] 코스 검색 (GET /api/courses 사용 권장)',
-        description: '⚠️ **하위 호환(Deprecated)**: 이 엔드포인트는 `GET /api/courses`로 완전 통합되었습니다. 기존 클라이언트의 호환성을 위해 유지되며, 신규 개발 시에는 `GET /api/courses` 엔드포인트를 사용해 주세요.',
-        deprecated: true,
-        security: [],
-        parameters: [
-          { name: 'region', in: 'query', schema: { type: 'string' }, description: '시/도 지역명 필터 (예: 서울, 춘천, 강남구)' },
-          { name: 'sub_region', in: 'query', schema: { type: 'string' }, description: '세부 자치구 또는 권역 필터 (예: 마포구, 노원구, 의암호·공지천권)' },
-          { name: 'keyword', in: 'query', schema: { type: 'string' }, description: '코스명, 설명, 카테고리 키워드 검색. q도 같은 의미로 사용할 수 있습니다.' },
-          { name: 'min_total_distance', in: 'query', schema: { type: 'number' }, description: '최소 총 길이(m)' },
-          { name: 'max_total_distance', in: 'query', schema: { type: 'number' }, description: '최대 총 길이(m)' },
-          { name: 'min_estimated_duration', in: 'query', schema: { type: 'number' }, description: '최소 예상 소요 시간(분)' },
-          { name: 'max_estimated_duration', in: 'query', schema: { type: 'number' }, description: '최대 예상 소요 시간(분)' },
-          { name: 'difficulty', in: 'query', schema: { type: 'string', enum: ['easy', 'normal', 'medium', 'hard'] }, description: '후기 난이도 평균 기반 필터. medium은 normal로 처리됩니다.' },
-          { name: 'min_avg_rating', in: 'query', schema: { type: 'number', minimum: 0, maximum: 5 }, description: '최소 평균 평점' },
-          { name: 'course_tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표로 구분한 코스 태그 UUID 목록. tag_ids도 같은 의미로 사용할 수 있습니다.' },
-          { name: 'spot_tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표로 구분한 장소 태그 UUID 목록. 코스에 포함된 스팟들의 태그 합집합 기준입니다.' },
-          { name: 'sort', in: 'query', schema: { type: 'string', enum: ['latest', 'rating', 'length', 'duration'], default: 'latest' } },
-          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
-          { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
-        ],
-        responses: {
-          200: {
-            description: '코스 검색 결과',
-            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, filters: { type: 'object', properties: { keyword: { type: 'string' }, region: { type: 'string' }, min_total_distance: { type: 'number', nullable: true }, max_total_distance: { type: 'number', nullable: true }, min_estimated_duration: { type: 'number', nullable: true }, max_estimated_duration: { type: 'number', nullable: true }, difficulty: { type: 'string', nullable: true, enum: ['easy', 'normal', 'hard'] }, min_avg_rating: { type: 'number', nullable: true }, course_tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } }, spot_tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } } } }, total_count: { type: 'integer' }, page: { type: 'integer' }, limit: { type: 'integer' }, courses: { type: 'array', items: { type: 'object', properties: { course_id: { type: 'string', format: 'uuid' }, name: { type: 'string' }, description: { type: 'string', nullable: true }, category: { type: 'string', nullable: true }, region: { type: 'string', example: '서울' }, sub_region: { type: 'string', example: '노원구', nullable: true }, total_distance: { type: 'integer' }, estimated_duration: { type: 'integer' }, is_public: { type: 'boolean' }, created_at: { type: 'string', format: 'date-time' }, start_location: { type: 'object', properties: { lat: { type: 'number' }, lng: { type: 'number' } } }, avg_rating: { type: 'number', nullable: true }, avg_difficulty_score: { type: 'number', nullable: true }, difficulty: { type: 'string', nullable: true }, review_count: { type: 'integer' }, course_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } } }, spot_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } } }, tags: { type: 'array', items: { type: 'object' }, description: 'course_tags와 같은 값' } } } } } } } },
-          },
-          400: {
-            description: '잘못된 검색 조건',
-            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: false }, message: { type: 'string' } } } } },
-          },
-        },
-      },
-    },
     '/api/courses': {
       get: {
         tags: ['코스'],
@@ -1243,69 +1208,6 @@ const swaggerDefinition = {
             description: '카카오 API 키 누락 또는 서버 오류',
             content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: false }, message: { type: 'string' } } } } },
           },
-        },
-      },
-    },
-    '/api/spots/filter': {
-      get: {
-        tags: ['스팟'],
-        summary: '[하위 호환] 스팟 필터링 조회 (GET /api/spots 사용 권장)',
-        description: '⚠️ **하위 호환(Deprecated)**: 이 엔드포인트는 `GET /api/spots`로 완전 통합되었습니다. 기존 클라이언트의 호환성을 위해 유지되며, 신규 개발 시에는 `GET /api/spots` 엔드포인트를 사용해 주세요.',
-        deprecated: true,
-        security: [],
-        parameters: [
-          { name: 'category', in: 'query', schema: { type: 'string', enum: ['음식점', '카페', '편의점', '약국', '공중화장실', '주차장', '관광명소', '문화시설', '숙박', '쇼핑', '축제공연행사', '여행코스', '레포츠', '기타'] }, description: '스팟 카테고리' },
-          { name: 'tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표로 구분한 스팟 태그 UUID 목록' },
-          { name: 'min_recommend_pct', in: 'query', schema: { type: 'number', minimum: 0, maximum: 100 }, description: '최소 추천율 (%)' },
-          { name: 'region', in: 'query', schema: { type: 'string' }, description: '시/도 지역명 (예: 서울, 춘천)' },
-          { name: 'sub_region', in: 'query', schema: { type: 'string' }, description: '세부 자치구 또는 권역 (예: 강남구, 마포구, 의암호·공지천권)' },
-        ],
-        responses: {
-          200: {
-            description: '스팟 필터 결과',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    success: { type: 'boolean', example: true },
-                    filters: {
-                      type: 'object',
-                      properties: {
-                        category: { type: 'string', nullable: true },
-                        region: { type: 'string', nullable: true },
-                        sub_region: { type: 'string', nullable: true },
-                        tag_ids: { type: 'string', nullable: true },
-                        min_recommend_pct: { type: 'number', nullable: true },
-                      },
-                    },
-                    total_count: { type: 'integer', example: 15 },
-                    spots: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        properties: {
-                          spot_id: { type: 'string', format: 'uuid' },
-                          kakao_place_id: { type: 'string', nullable: true },
-                          name: { type: 'string', example: '불암산 생태학습관' },
-                          address: { type: 'string', nullable: true },
-                          region: { type: 'string', example: '서울' },
-                          sub_region: { type: 'string', example: '노원구', nullable: true },
-                          categories: { type: 'array', items: { type: 'string' } },
-                          kakao_category_name: { type: 'string', nullable: true },
-                          recommend_pct: { type: 'number', nullable: true },
-                          x: { type: 'number', example: 127.08123 },
-                          y: { type: 'number', example: 37.65432 },
-                          tags: { type: 'array', items: { type: 'object' } },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          400: { description: '지원하지 않는 카테고리 또는 잘못된 파라미터' },
         },
       },
     },

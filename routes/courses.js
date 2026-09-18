@@ -6,7 +6,6 @@ const reviewController = require('../controllers/reviewController');
 
 router.post('/preview', authenticate, courseController.previewCourse);
 router.post('/from-walk', authenticate, courseController.createCourseFromWalk);
-router.get('/search', optionalAuthenticate, courseController.searchCourses);
 router.post('/', authenticate, courseController.createCourse);
 router.get('/', optionalAuthenticate, courseController.getCourses);                         
 router.get('/:course_id', optionalAuthenticate, courseController.getCourseById);

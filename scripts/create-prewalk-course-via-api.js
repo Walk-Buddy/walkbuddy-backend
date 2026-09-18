@@ -324,7 +324,7 @@ async function saveSpotIfNeeded(api, spot) {
 }
 
 async function findExistingCourse(api) {
-  const { data } = await api.get('/api/courses/search', {
+  const { data } = await api.get('/api/courses', {
     params: { keyword: COURSE_NAME, sort: 'latest', limit: 10 },
   });
 

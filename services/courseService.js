@@ -941,11 +941,6 @@ exports.getCourses = async (query, currentUserId) => {
   }
 };
 
-// searchCourses는 하위 호환성을 위해 getCourses로 위임
-exports.searchCourses = async (query, currentUserId) => {
-  return exports.getCourses(query, currentUserId);
-};
-
 // ──────────────────────────────────────────────────────────────────────
 // 내가 등록한 코스 목록 (마이페이지)
 // ──────────────────────────────────────────────────────────────────────

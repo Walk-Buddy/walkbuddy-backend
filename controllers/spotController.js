@@ -50,13 +50,6 @@ exports.searchSpots = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-exports.filterSpots = async (req, res, next) => {
-    try {
-        const result = await spotService.filterSpots(req.query);
-        return res.json({ success: true, ...result });
-    } catch (err) { next(err); }
-};
-
 exports.getAiContents = async (req, res, next) => {
     try {
         const result = await aiContentService.getAiContents(req.params.spot_id);
