@@ -1,7 +1,7 @@
 const axios = require("axios");
 const { resolveRegion, TARGET_REGIONS } = require("../constants/spotCategoryRules");
 
-const BASE_URL = "http://apis.data.go.kr/B551011/KorService1";
+const BASE_URL = "https://apis.data.go.kr/B551011/KorService2";
 const WITH_TOUR_BASE_URL = "https://apis.data.go.kr/B551011/KorWithService2"; // 무장애 여행정보 API
 const PET_TOUR_BASE_URL = "https://apis.data.go.kr/B551011/KorPetTourService2"; // 반려동물 동반여행 API
 const PHOTO_BASE_URL = "https://apis.data.go.kr/B551011/PhotoGalleryService1"; // 관광사진 API
@@ -212,7 +212,7 @@ exports.getFestivals = async ({ region, eventStartDate, page = 1, limit = 10 } =
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const startDate = eventStartDate || today;
 
-  const data = await requestTourApi("searchFestival1", {
+  const data = await requestTourApi("searchFestival2", {
     areaCode: target.tourApi.areaCode,
     sigunguCode: target.tourApi.sigunguCode,
     eventStartDate: startDate,
@@ -255,17 +255,10 @@ exports.getSpotDetail = async (contentId) => {
   }
 
   const [commonData, imageData] = await Promise.all([
-    requestTourApi("detailCommon1", {
+    requestTourApi("detailCommon2", {
       contentId,
-      defaultYN: "Y",
-      firstImageYN: "Y",
-      areacodeYN: "Y",
-      catcodeYN: "Y",
-      addrinfoYN: "Y",
-      mapinfoYN: "Y",
-      overviewYN: "Y",
     }),
-    requestTourApi("detailImage1", {
+    requestTourApi("detailImage2", {
       contentId,
       imageYN: "Y",
       subImageYN: "Y",
@@ -497,7 +490,7 @@ exports.getTourSpots = async ({ region, contentTypeId, cat1, cat2, cat3, page = 
   if (cat2) params.cat2 = cat2;
   if (cat3) params.cat3 = cat3;
 
-  const data = await requestTourApi("areaBasedList1", params);
+  const data = await requestTourApi("areaBasedList2", params);
   const rawItems = getItems(data);
 
   const spots = rawItems.map((item) => ({
@@ -525,7 +518,7 @@ exports.getTourSpots = async ({ region, contentTypeId, cat1, cat2, cat3, page = 
 };
 
 /**
- * 5. 실시간 키워드 관광지 검색 (searchKeyword1)
+ * 5. 실시간 키워드 관광지 검색 (searchKeyword2)
  */
 exports.searchTourPlaces = async ({ region, keyword, page = 1, limit = 10 } = {}) => {
   if (!keyword || !keyword.trim()) {
@@ -547,7 +540,7 @@ exports.searchTourPlaces = async ({ region, keyword, page = 1, limit = 10 } = {}
     params.sigunguCode = target.tourApi.sigunguCode;
   }
 
-  const data = await requestTourApi("searchKeyword1", params);
+  const data = await requestTourApi("searchKeyword2", params);
   const rawItems = getItems(data);
 
   const spots = rawItems.map((item) => ({
@@ -627,7 +620,7 @@ exports.getPhotosByKeyword = async (keyword, limit = 10) => {
 exports.getSpotPhotos = async (contentId, spotName) => {
   if (contentId) {
     try {
-      const data = await requestTourApi("detailImage1", {
+      const data = await requestTourApi("detailImage2", {
         contentId,
         imageYN: "Y",
         subImageYN: "Y",
@@ -641,10 +634,10 @@ exports.getSpotPhotos = async (contentId, spotName) => {
       }));
 
       if (photos.length > 0) {
-        return { source: "detailImage1", photos };
+        return { source: "detailImage2", photos };
       }
     } catch (err) {
-      console.error("[detailImage1 실패, galleryList1으로 fallback]", err.message);
+      console.error("[detailImage2 실패, galleryList1으로 fallback]", err.message);
     }
   }
 

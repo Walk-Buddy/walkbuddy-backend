@@ -14,6 +14,7 @@
 
 const axios = require('axios');
 const { resolveRegion } = require('../constants/spotCategoryRules');
+const { getDurunubiCourseSpotMappings } = require('../constants/durunubiSpotMappings');
 
 const BASE_URL = 'http://apis.data.go.kr/B551011/Durunubi';
 const DEFAULT_MOBILE_OS = process.env.DURUNUBI_MOBILE_OS || 'ETC';
@@ -128,18 +129,31 @@ exports.getDurunubiCourses = async ({ region, brdDiv, page = 1, limit = 10 } = {
     throw err;
   }
 
-  // 두루누비 courseList는 sigun 파라미터로 지역 필터링
+  // 두루누비 courseList는 sigun 파라미터를 지원하지 않으므로 전체 조회 후 지역별로 필터링합니다.
   const params = {
-    pageNo: page,
-    numOfRows: limit,
-    sigun: target.durunubi.sigun,
+    pageNo: 1,
+    numOfRows: 200,
   };
   if (brdDiv) params.brdDiv = brdDiv;
 
   const data = await requestDurunubi('courseList', params);
   const rawItems = getItems(data);
 
-  const courses = rawItems.map((item) => ({
+  // 지역 필터링 (sigun 필드에 타겟 지역명이 포함되어 있는지 확인)
+  const filtered = rawItems.filter((item) => {
+    if (!item.sigun) return false;
+    return (
+      item.sigun.includes(target.name) ||
+      item.sigun.includes(target.durunubi.sigun) ||
+      (target.fullName && item.sigun.includes(target.fullName))
+    );
+  });
+
+  const total = filtered.length;
+  const startIndex = (page - 1) * limit;
+  const pagedItems = filtered.slice(startIndex, startIndex + limit);
+
+  const courses = pagedItems.map((item) => ({
     crs_idx: item.crsIdx || item.crsidx || null,
     crs_kod: item.crsKod || item.crskod || null,
     crs_name: item.crsKorNm || item.crskorNm || null,
@@ -152,7 +166,7 @@ exports.getDurunubiCourses = async ({ region, brdDiv, page = 1, limit = 10 } = {
   }));
 
   return {
-    total: getTotalCount(data),
+    total,
     page: Number(page),
     limit: Number(limit),
     region: target.name,
@@ -165,7 +179,7 @@ exports.getDurunubiCourses = async ({ region, brdDiv, page = 1, limit = 10 } = {
 /**
  * 2. 두루누비 코스 상세 조회 (courseDetail)
  *
- * @param {string} crsIdx - 두루누비 코스 고유 ID
+ * @param {string} crsIdx - 두루누비 코스 고유 ID 또는 코스명
  */
 exports.getDurunubiCourseDetail = async (crsIdx) => {
   if (!crsIdx) {
@@ -174,8 +188,10 @@ exports.getDurunubiCourseDetail = async (crsIdx) => {
     throw err;
   }
 
-  const data = await requestDurunubi('courseDetail', { crsIdx });
-  const [item] = getItems(data);
+  // 두루누비 API는 단독 courseDetail 엔드포인트 대신 courseList 전체 목록에서 코스를 조회합니다.
+  const data = await requestDurunubi('courseList', { pageNo: 1, numOfRows: 200 });
+  const rawItems = getItems(data);
+  const item = rawItems.find((i) => (i.crsIdx || i.crsidx) === crsIdx || i.crsKorNm === crsIdx);
 
   if (!item) {
     const err = new Error(`두루누비 코스 정보를 찾을 수 없습니다. (crsIdx: ${crsIdx})`);
@@ -188,8 +204,8 @@ exports.getDurunubiCourseDetail = async (crsIdx) => {
     crs_kod: item.crsKod || item.crskod || null,
     crs_name: item.crsKorNm || item.crskorNm || null,
     crs_level: item.crsLevel || null,
-    crs_distance: item.crsDist || null,
-    crs_time: item.crsTime || null,
+    crs_distance: item.crsDist || item.crsDstnc || null,
+    crs_time: item.crsTime || item.crsTotlRqrmHour || null,
     crs_cycle: item.crsCycle || null,
     sigun: item.sigun || null,
     summary: item.crsSummary || null,
@@ -202,9 +218,9 @@ exports.getDurunubiCourseDetail = async (crsIdx) => {
 };
 
 /**
- * 3. 두루누비 코스 내 스팟(경유지) 목록 조회 (courseSpotList)
+ * 3. 두루누비 코스 내 스팟(경유지) 목록 조회
  *
- * @param {string} crsIdx - 두루누비 코스 고유 ID
+ * @param {string} crsIdx - 두루누비 코스 고유 ID 또는 코스명
  */
 exports.getDurunubiCourseSpots = async (crsIdx) => {
   if (!crsIdx) {
@@ -213,22 +229,23 @@ exports.getDurunubiCourseSpots = async (crsIdx) => {
     throw err;
   }
 
-  const data = await requestDurunubi('courseSpotList', { crsIdx });
-  const rawItems = getItems(data);
+  const detail = await exports.getDurunubiCourseDetail(crsIdx);
+  const mappings = getDurunubiCourseSpotMappings(detail.crs_name);
 
-  const spots = rawItems.map((item) => ({
-    spot_idx: item.spotIdx || item.spotidx || null,
-    spot_name: item.spotName || item.spotname || null,
-    spot_address: item.addr || null,
-    x: item.mapX ? Number(item.mapX) : null,
-    y: item.mapY ? Number(item.mapY) : null,
-    image_url: item.imgUrl || null,
-    spot_type: item.spotType || null,
-    order_no: item.orderNo ? Number(item.orderNo) : null,
+  const spots = mappings.map((m, idx) => ({
+    order: m.order || idx + 1,
+    spot_name: m.mapping?.canonicalName || m.sourceName,
+    address: m.mapping?.address || null,
+    kakao_place_id: m.mapping?.kakaoPlaceId || null,
+    tour_api_content_id: m.mapping?.tourApiContentId || null,
+    x: m.mapping?.x ? Number(m.mapping.x) : null,
+    y: m.mapping?.y ? Number(m.mapping.y) : null,
+    category: m.mapping?.kakaoCategoryName || null,
   }));
 
   return {
-    crs_idx: crsIdx,
+    crs_idx: detail.crs_idx,
+    crs_name: detail.crs_name,
     total: spots.length,
     spots,
   };
