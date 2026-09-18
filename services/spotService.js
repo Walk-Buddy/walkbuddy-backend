@@ -9,6 +9,7 @@ const {
 } = require('../constants/spotCategoryRules');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const tourApiService = require('./tourApiService');
 
 const TOUR_API_BASE_URL = 'https://apis.data.go.kr/B551011/KorService2';
 const TOUR_API_MATCH_RADIUS = Number(process.env.TOUR_API_MATCH_RADIUS || 300);
@@ -114,23 +115,99 @@ async function fetchTourOverview(contentId) {
     return cleanTourOverview(detail?.overview || '');
 }
 
-async function addTourGuideTagToSpot(spotId, userId) {
-    if (!spotId || !userId) return;
+// 관광공사 응답에서 세부 태그 자동 도출
+function extractTourTags({ overview, barrierFreeInfo, petTourInfo }) {
+    const tags = new Set();
 
-    await pool.query(
-        `WITH tag AS (
-            INSERT INTO tags (name, type, is_active)
-            VALUES ('관광해설', 'spot', TRUE)
-            ON CONFLICT (name, type)
-            DO UPDATE SET is_active = TRUE
-            RETURNING tag_id
-         )
-         INSERT INTO taggings (tag_id, target_id, target_type, user_id)
-         SELECT tag_id, $1, 'spot', $2
-         FROM tag
-         ON CONFLICT DO NOTHING`,
-        [spotId, userId]
-    );
+    // 1. 일반 관광 개요 → 음성해설 태그
+    if (overview) {
+        tags.add('음성해설');
+    }
+
+    // 2. 무장애 편의시설 (KorWithService2) 세부 태그
+    if (barrierFreeInfo?.has_barrier_free_info && barrierFreeInfo.details) {
+        tags.add('열린관광');
+        const d = barrierFreeInfo.details;
+        if (d.physical?.wheelchair) tags.add('휠체어접근');
+        if (d.physical?.route) tags.add('무단차통로');
+        if (d.physical?.restroom) tags.add('장애인화장실');
+        if (d.physical?.parking) tags.add('장애인주차');
+        if (d.physical?.elevator) tags.add('엘리베이터');
+        if (d.infant?.stroller) tags.add('유모차대여');
+        if (d.infant?.lactation_room) tags.add('수유실');
+        if (d.visual?.braile_block || d.visual?.braile_promotion) tags.add('점자안내');
+        if (d.visual?.help_dog) tags.add('도우미견가능');
+        if (d.visual?.audio_guide) tags.add('음성해설');
+        if (d.hearing?.sign_language || d.hearing?.video_guide) tags.add('수어안내');
+    }
+
+    // 3. 반려동물 동반 (KorPetTourService2) 세부 태그
+    if (petTourInfo?.has_pet_info) {
+        tags.add('반려견동반');
+        const petDetails = petTourInfo.details || {};
+        const sizeStr = String(petDetails.allowed_pet_size || '');
+        if (sizeStr.includes('대형견') || sizeStr.includes('모두') || sizeStr.includes('제한없음')) {
+            tags.add('대형견가능');
+        } else if (sizeStr.includes('소형견') || sizeStr.includes('중형견')) {
+            tags.add('소형견동반');
+        }
+
+        const facilityStr = String(petDetails.facilities || '');
+        if (facilityStr.includes('배변') || facilityStr.includes('봉투') || facilityStr.includes('수거함')) {
+            tags.add('반려견배변시설');
+        }
+        if (facilityStr.includes('놀이터') || facilityStr.includes('운동장') || facilityStr.includes('펜스')) {
+            tags.add('반려견놀이터');
+        }
+        if (facilityStr.includes('주차')) tags.add('주차가능');
+        if (facilityStr.includes('화장실')) tags.add('화장실');
+        if (facilityStr.includes('쉼터') || facilityStr.includes('벤치')) tags.add('벤치·쉼터');
+    }
+
+    return Array.from(tags);
+}
+
+// 스팟에 세부 태그 일괄 자동 부착
+async function attachTagsToSpot(spotId, tagNames, userId) {
+    if (!spotId || !Array.isArray(tagNames) || tagNames.length === 0) return;
+    const cleanNames = tagNames.map(t => String(t).trim().replace(/^#/, '')).filter(Boolean);
+    if (cleanNames.length === 0) return;
+
+    try {
+        // 1. 기존 태그 확인
+        const { rows: existingTags } = await pool.query(
+            `SELECT tag_id, name FROM tags WHERE name = ANY($1::TEXT[]) AND type = 'spot'`,
+            [cleanNames]
+        );
+
+        const existingNames = new Set(existingTags.map(r => r.name));
+        const tagsToAttach = [...existingTags];
+
+        // 2. 누락된 태그는 tags 테이블에 안전하게 자동 등록
+        const missingNames = cleanNames.filter(n => !existingNames.has(n));
+        for (const name of missingNames) {
+            const { rows } = await pool.query(
+                `INSERT INTO tags (name, type, group_name, is_active)
+                 VALUES ($1, 'spot', '기타', TRUE)
+                 ON CONFLICT (name, type) DO UPDATE SET is_active = TRUE
+                 RETURNING tag_id, name`,
+                [name]
+            );
+            if (rows[0]) tagsToAttach.push(rows[0]);
+        }
+
+        // 3. taggings 테이블에 일괄 등록
+        for (const tag of tagsToAttach) {
+            await pool.query(
+                `INSERT INTO taggings (tag_id, target_id, target_type, user_id)
+                 VALUES ($1, $2, 'spot', $3)
+                 ON CONFLICT DO NOTHING`,
+                [tag.tag_id, spotId, userId || null]
+            );
+        }
+    } catch (err) {
+        console.error('attachTagsToSpot error:', err.message);
+    }
 }
 
 async function searchKakaoSpotCandidates({ keyword, category, size = 15 }) {
@@ -193,16 +270,13 @@ async function enrichKakaoSpotTourContent(spot, userId) {
         tour_content_enriched: false,
         tour_content_status: 'skipped',
         tour_content_match: null,
+        barrier_free_enriched: false,
+        pet_tour_enriched: false,
+        attached_tags: [],
     };
 
     if (!getTourApiServiceKey()) {
         result.tour_content_status = 'skipped_missing_tour_api_key';
-        return { spot, ...result };
-    }
-
-    if (spot.content_tour) {
-        await addTourGuideTagToSpot(spot.spot_id, userId);
-        result.tour_content_status = 'skipped_existing_content_tour';
         return { spot, ...result };
     }
 
@@ -219,9 +293,9 @@ async function enrichKakaoSpotTourContent(spot, userId) {
 
         if (!matched) {
             candidates = await fetchTourLocationCandidates({
-            lng,
-            lat,
-            radius: TOUR_API_MATCH_RADIUS,
+                lng,
+                lat,
+                radius: TOUR_API_MATCH_RADIUS,
             });
 
             matched = candidates
@@ -245,43 +319,71 @@ async function enrichKakaoSpotTourContent(spot, userId) {
             return { spot, ...result };
         }
 
-        const overview = await fetchTourOverview(matched.contentid);
-        if (!overview) {
-            result.tour_content_status = 'matched_without_overview';
-            result.tour_content_match = {
-                content_id: String(matched.contentid),
-                title: matched.title,
-                distance: matched.dist == null ? null : Number(matched.dist),
-            };
-            return { spot, ...result };
-        }
-
-        const updatedResult = await pool.query(
-            `UPDATE spots
-             SET content_tour = $2
-             WHERE spot_id = $1 AND content_tour IS NULL
-             RETURNING spot_id, kakao_place_id, name, address, categories, kakao_category_name,
-                       recommend_pct, content_tour,
-                       ST_X(location::GEOMETRY) AS x,
-                       ST_Y(location::GEOMETRY) AS y`,
-            [spot.spot_id, overview]
-        );
-
-        const updatedSpot = updatedResult.rows[0];
-        if (!updatedSpot) {
-            result.tour_content_status = 'skipped_existing_content_tour';
-            return { spot, ...result };
-        }
-
-        await addTourGuideTagToSpot(updatedSpot.spot_id, userId);
-
-        result.tour_content_enriched = true;
-        result.tour_content_status = 'enriched';
+        const contentId = String(matched.contentid);
         result.tour_content_match = {
-            content_id: String(matched.contentid),
+            content_id: contentId,
             title: matched.title,
             distance: matched.dist == null ? null : Number(matched.dist),
         };
+
+        // 1. 한국관광공사 전방위 API(개요, 무장애, 반려동물) 병렬 조회
+        const [overviewResult, barrierFreeResult, petTourResult] = await Promise.allSettled([
+            fetchTourOverview(contentId),
+            tourApiService.getBarrierFreeInfo(contentId),
+            tourApiService.getPetTourDetail(contentId),
+        ]);
+
+        const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
+        const barrierFreeInfo = barrierFreeResult.status === 'fulfilled' ? barrierFreeResult.value : null;
+        const petTourInfo = petTourResult.status === 'fulfilled' ? petTourResult.value : null;
+
+        // 2. DB 업데이트 구성 (content_tour, barrier_free_info)
+        const updateClauses = [];
+        const updateParams = [spot.spot_id];
+
+        if (overview && !spot.content_tour) {
+            updateParams.push(overview);
+            updateClauses.push(`content_tour = $${updateParams.length}`);
+            result.tour_content_enriched = true;
+        }
+
+        if (barrierFreeInfo?.has_barrier_free_info) {
+            updateParams.push(JSON.stringify(barrierFreeInfo.details));
+            updateClauses.push(`barrier_free_info = $${updateParams.length}`);
+            result.barrier_free_enriched = true;
+        }
+
+        if (petTourInfo?.has_pet_info) {
+            result.pet_tour_enriched = true;
+        }
+
+        let updatedSpot = spot;
+        if (updateClauses.length > 0) {
+            const updatedResult = await pool.query(
+                `UPDATE spots
+                 SET ${updateClauses.join(', ')}
+                 WHERE spot_id = $1
+                 RETURNING spot_id, kakao_place_id, name, address, categories, kakao_category_name,
+                           recommend_pct, content_tour, barrier_free_info,
+                           ST_X(location::GEOMETRY) AS x,
+                           ST_Y(location::GEOMETRY) AS y`,
+                updateParams
+            );
+            if (updatedResult.rows[0]) {
+                updatedSpot = updatedResult.rows[0];
+            }
+        }
+
+        // 3. 세부 기능별 태그 자동 도출 및 일괄 부착
+        const autoTags = extractTourTags({ overview, barrierFreeInfo, petTourInfo });
+        if (autoTags.length > 0) {
+            await attachTagsToSpot(updatedSpot.spot_id, autoTags, userId);
+            result.attached_tags = autoTags;
+        }
+
+        result.tour_content_status = (result.tour_content_enriched || result.barrier_free_enriched || result.pet_tour_enriched)
+            ? 'enriched'
+            : 'matched_without_new_content';
 
         return {
             spot: {
@@ -293,7 +395,7 @@ async function enrichKakaoSpotTourContent(spot, userId) {
             ...result,
         };
     } catch (err) {
-        console.error('[TourAPI enrich failed]', err.message);
+        console.error('[TourAPI multi-enrich failed]', err.message);
         result.tour_content_status = 'tour_api_error';
         return { spot, ...result };
     }
