@@ -575,6 +575,60 @@ const swaggerDefinition = {
     },
 
     // ─────────────────────────────────────────
+    // 지역 (탐색 지원)
+    // ─────────────────────────────────────────
+    '/api/regions': {
+      get: {
+        tags: ['지역'],
+        summary: '지원 지역 목록 조회 (서울 25개 구 / 춘천 권역)',
+        description: '사용자의 GPS 수집 없이 지역 기반으로 안전하게 탐색할 수 있도록 지원하는 시/도 및 하위 자치구/권역 목록을 반환합니다.',
+        security: [],
+        responses: {
+          200: {
+            description: '지원 지역 목록',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    total_cities: { type: 'integer', example: 2 },
+                    regions: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          code: { type: 'string', example: 'seoul' },
+                          name: { type: 'string', example: '서울' },
+                          fullName: { type: 'string', example: '서울특별시' },
+                          sub_regions: {
+                            type: 'array',
+                            items: { type: 'string' },
+                            example: ['강남구', '강동구', '마포구', '노원구'],
+                          },
+                        },
+                      },
+                    },
+                    seoul_districts: {
+                      type: 'array',
+                      items: { type: 'string' },
+                      example: ['강남구', '강동구', '강북구', '...25개 구'],
+                    },
+                    chuncheon_areas: {
+                      type: 'array',
+                      items: { type: 'string' },
+                      example: ['의암호·공지천권', '소양강·신북권', '도심·명동권', '동면·구봉산권', '강촌·남산권'],
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    // ─────────────────────────────────────────
     // 코스
     // ─────────────────────────────────────────
     '/api/courses/preview': {
@@ -720,10 +774,11 @@ const swaggerDefinition = {
       get: {
         tags: ['코스'],
         summary: '코스 검색',
-        description: '공개 코스를 키워드, 지역, 난이도·평점, 코스 태그, 포함 스팟 태그로 검색합니다. region(예: 춘천시, 마포구) 쿼리로 지역별 코스를 조회할 수 있습니다.',
+        description: '공개 코스를 키워드, 지역, 세부권역, 난이도·평점, 코스 태그, 포함 스팟 태그로 검색합니다. region(예: 서울, 춘천) 및 sub_region(예: 마포구, 의암호·공지천권) 쿼리로 지역별 코스를 조회할 수 있습니다.',
         security: [],
         parameters: [
-          { name: 'region', in: 'query', schema: { type: 'string' }, description: '지역명 필터 (예: 춘천시, 마포구, 노원구)' },
+          { name: 'region', in: 'query', schema: { type: 'string' }, description: '시/도 지역명 필터 (예: 서울, 춘천, 강남구)' },
+          { name: 'sub_region', in: 'query', schema: { type: 'string' }, description: '세부 자치구 또는 권역 필터 (예: 마포구, 노원구, 의암호·공지천권)' },
           { name: 'keyword', in: 'query', schema: { type: 'string' }, description: '코스명, 설명, 카테고리 키워드 검색. q도 같은 의미로 사용할 수 있습니다.' },
           { name: 'min_total_distance', in: 'query', schema: { type: 'number' }, description: '최소 총 길이(m)' },
           { name: 'max_total_distance', in: 'query', schema: { type: 'number' }, description: '최대 총 길이(m)' },
@@ -740,7 +795,7 @@ const swaggerDefinition = {
         responses: {
           200: {
             description: '코스 검색 결과',
-            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, filters: { type: 'object', properties: { keyword: { type: 'string' }, region: { type: 'string' }, min_total_distance: { type: 'number', nullable: true }, max_total_distance: { type: 'number', nullable: true }, min_estimated_duration: { type: 'number', nullable: true }, max_estimated_duration: { type: 'number', nullable: true }, difficulty: { type: 'string', nullable: true, enum: ['easy', 'normal', 'hard'] }, min_avg_rating: { type: 'number', nullable: true }, course_tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } }, spot_tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } } } }, total_count: { type: 'integer' }, page: { type: 'integer' }, limit: { type: 'integer' }, courses: { type: 'array', items: { type: 'object', properties: { course_id: { type: 'string', format: 'uuid' }, name: { type: 'string' }, description: { type: 'string', nullable: true }, category: { type: 'string', nullable: true }, total_distance: { type: 'integer' }, estimated_duration: { type: 'integer' }, is_public: { type: 'boolean' }, created_at: { type: 'string', format: 'date-time' }, start_location: { type: 'object', properties: { lat: { type: 'number' }, lng: { type: 'number' } } }, avg_rating: { type: 'number', nullable: true }, avg_difficulty_score: { type: 'number', nullable: true }, difficulty: { type: 'string', nullable: true }, review_count: { type: 'integer' }, course_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } } }, spot_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } } }, tags: { type: 'array', items: { type: 'object' }, description: 'course_tags와 같은 값' } } } } } } } },
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, filters: { type: 'object', properties: { keyword: { type: 'string' }, region: { type: 'string' }, min_total_distance: { type: 'number', nullable: true }, max_total_distance: { type: 'number', nullable: true }, min_estimated_duration: { type: 'number', nullable: true }, max_estimated_duration: { type: 'number', nullable: true }, difficulty: { type: 'string', nullable: true, enum: ['easy', 'normal', 'hard'] }, min_avg_rating: { type: 'number', nullable: true }, course_tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } }, spot_tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } } } }, total_count: { type: 'integer' }, page: { type: 'integer' }, limit: { type: 'integer' }, courses: { type: 'array', items: { type: 'object', properties: { course_id: { type: 'string', format: 'uuid' }, name: { type: 'string' }, description: { type: 'string', nullable: true }, category: { type: 'string', nullable: true }, region: { type: 'string', example: '서울' }, sub_region: { type: 'string', example: '노원구', nullable: true }, total_distance: { type: 'integer' }, estimated_duration: { type: 'integer' }, is_public: { type: 'boolean' }, created_at: { type: 'string', format: 'date-time' }, start_location: { type: 'object', properties: { lat: { type: 'number' }, lng: { type: 'number' } } }, avg_rating: { type: 'number', nullable: true }, avg_difficulty_score: { type: 'number', nullable: true }, difficulty: { type: 'string', nullable: true }, review_count: { type: 'integer' }, course_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } } }, spot_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } } }, tags: { type: 'array', items: { type: 'object' }, description: 'course_tags와 같은 값' } } } } } } } },
           },
           400: {
             description: '잘못된 검색 조건',
@@ -753,9 +808,10 @@ const swaggerDefinition = {
       get: {
         tags: ['코스'],
         summary: '코스 목록 조회',
-        description: '공개 코스 목록을 조회합니다. region(예: nowon, chuncheon / 노원구, 춘천시), category, is_cycle(순환형), difficulty_level(1~3), tag_name으로 필터링할 수 있습니다.',
+        description: '공개 코스 목록을 조회합니다. region(예: 서울, 춘천), sub_region(예: 노원구, 의암호·공지천권), category, is_cycle(순환형), difficulty_level(1~3), tag_name으로 필터링할 수 있습니다.',
         parameters: [
-          { name: 'region', in: 'query', schema: { type: 'string' }, description: '지역 필터 (예: nowon, chuncheon, 노원구, 춘천시)' },
+          { name: 'region', in: 'query', schema: { type: 'string' }, description: '시/도 지역 필터 (예: 서울, 춘천)' },
+          { name: 'sub_region', in: 'query', schema: { type: 'string' }, description: '세부 자치구/권역 필터 (예: 노원구, 마포구, 의암호·공지천권)' },
           { name: 'category', in: 'query', schema: { type: 'string', enum: ['둘레길·트레킹', '도심·골목산책', '수변·공원길'] }, description: '코스 표준 카테고리' },
           { name: 'is_cycle', in: 'query', schema: { type: 'boolean' }, description: '순환형(원점회귀) 여부 (true: 순환형, false: 편도형)' },
           { name: 'difficulty_level', in: 'query', schema: { type: 'integer', enum: [1, 2, 3] }, description: '난이도 (1: 쉬움, 2: 보통, 3: 어려움)' },
@@ -783,6 +839,8 @@ const swaggerDefinition = {
                           name: { type: 'string' },
                           description: { type: 'string' },
                           category: { type: 'string', example: '둘레길·트레킹' },
+                          region: { type: 'string', example: '서울' },
+                          sub_region: { type: 'string', example: '노원구', nullable: true },
                           total_distance: { type: 'integer' },
                           estimated_duration: { type: 'integer' },
                           is_cycle: { type: 'boolean', description: '순환형 여부' },
@@ -1065,13 +1123,14 @@ const swaggerDefinition = {
       get: {
         tags: ['스팟'],
         summary: '스팟 필터링 조회',
-        description: '카테고리, 태그, 추천율, 지역 조건을 조합하여 DB에 저장된 활성 스팟을 최대 50건 조회합니다.',
+        description: '카테고리, 태그, 추천율, 지역, 세부 권역 조건을 조합하여 DB에 저장된 활성 스팟을 최대 50건 조회합니다.',
         security: [],
         parameters: [
           { name: 'category', in: 'query', schema: { type: 'string', enum: ['음식점', '카페', '편의점', '약국', '공중화장실', '주차장', '관광명소', '문화시설', '숙박', '쇼핑', '축제공연행사', '여행코스', '레포츠', '기타'] }, description: '스팟 카테고리' },
           { name: 'tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표로 구분한 스팟 태그 UUID 목록' },
           { name: 'min_recommend_pct', in: 'query', schema: { type: 'number', minimum: 0, maximum: 100 }, description: '최소 추천율 (%)' },
-          { name: 'region', in: 'query', schema: { type: 'string' }, description: '지역/장소명/주소 검색어 (예: 서울, 강남구)' },
+          { name: 'region', in: 'query', schema: { type: 'string' }, description: '시/도 지역명 (예: 서울, 춘천)' },
+          { name: 'sub_region', in: 'query', schema: { type: 'string' }, description: '세부 자치구 또는 권역 (예: 강남구, 마포구, 의암호·공지천권)' },
         ],
         responses: {
           200: {
@@ -1087,6 +1146,7 @@ const swaggerDefinition = {
                       properties: {
                         category: { type: 'string', nullable: true },
                         region: { type: 'string', nullable: true },
+                        sub_region: { type: 'string', nullable: true },
                         tag_ids: { type: 'string', nullable: true },
                         min_recommend_pct: { type: 'number', nullable: true },
                       },
@@ -1101,6 +1161,8 @@ const swaggerDefinition = {
                           kakao_place_id: { type: 'string', nullable: true },
                           name: { type: 'string', example: '불암산 생태학습관' },
                           address: { type: 'string', nullable: true },
+                          region: { type: 'string', example: '서울' },
+                          sub_region: { type: 'string', example: '노원구', nullable: true },
                           categories: { type: 'array', items: { type: 'string' } },
                           kakao_category_name: { type: 'string', nullable: true },
                           recommend_pct: { type: 'number', nullable: true },
@@ -1131,11 +1193,11 @@ const swaggerDefinition = {
         responses: {
           200: {
             description: '이미 저장된 스팟 반환',
-            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, is_created: { type: 'boolean', example: false }, tour_content_enriched: { type: 'boolean', example: true }, tour_content_status: { type: 'string', example: 'enriched' }, tour_content_match: { type: 'object', nullable: true, properties: { content_id: { type: 'string' }, title: { type: 'string' }, distance: { type: 'number', nullable: true } } }, spot: { type: 'object', properties: { spot_id: { type: 'string', format: 'uuid' }, kakao_place_id: { type: 'string' }, name: { type: 'string' }, address: { type: 'string', nullable: true }, categories: { type: 'array', items: { type: 'string' } }, kakao_category_name: { type: 'string', nullable: true }, recommend_pct: { type: 'number', nullable: true }, content_tour: { type: 'string', nullable: true }, x: { type: 'number' }, y: { type: 'number' } } } } } } },
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, is_created: { type: 'boolean', example: false }, tour_content_enriched: { type: 'boolean', example: true }, tour_content_status: { type: 'string', example: 'enriched' }, tour_content_match: { type: 'object', nullable: true, properties: { content_id: { type: 'string' }, title: { type: 'string' }, distance: { type: 'number', nullable: true } } }, spot: { type: 'object', properties: { spot_id: { type: 'string', format: 'uuid' }, kakao_place_id: { type: 'string' }, name: { type: 'string' }, address: { type: 'string', nullable: true }, region: { type: 'string', example: '서울' }, sub_region: { type: 'string', example: '노원구', nullable: true }, categories: { type: 'array', items: { type: 'string' } }, kakao_category_name: { type: 'string', nullable: true }, recommend_pct: { type: 'number', nullable: true }, content_tour: { type: 'string', nullable: true }, x: { type: 'number' }, y: { type: 'number' } } } } } } },
           },
           201: {
             description: '새 스팟 저장 완료',
-            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, is_created: { type: 'boolean', example: true }, tour_content_enriched: { type: 'boolean', example: true }, tour_content_status: { type: 'string', example: 'enriched' }, tour_content_match: { type: 'object', nullable: true, properties: { content_id: { type: 'string' }, title: { type: 'string' }, distance: { type: 'number', nullable: true } } }, spot: { type: 'object', properties: { spot_id: { type: 'string', format: 'uuid' }, kakao_place_id: { type: 'string' }, name: { type: 'string' }, address: { type: 'string', nullable: true }, categories: { type: 'array', items: { type: 'string' } }, kakao_category_name: { type: 'string', nullable: true }, recommend_pct: { type: 'number', nullable: true }, content_tour: { type: 'string', nullable: true }, x: { type: 'number' }, y: { type: 'number' } } } } } } },
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, is_created: { type: 'boolean', example: true }, tour_content_enriched: { type: 'boolean', example: true }, tour_content_status: { type: 'string', example: 'enriched' }, tour_content_match: { type: 'object', nullable: true, properties: { content_id: { type: 'string' }, title: { type: 'string' }, distance: { type: 'number', nullable: true } } }, spot: { type: 'object', properties: { spot_id: { type: 'string', format: 'uuid' }, kakao_place_id: { type: 'string' }, name: { type: 'string' }, address: { type: 'string', nullable: true }, region: { type: 'string', example: '서울' }, sub_region: { type: 'string', example: '노원구', nullable: true }, categories: { type: 'array', items: { type: 'string' } }, kakao_category_name: { type: 'string', nullable: true }, recommend_pct: { type: 'number', nullable: true }, content_tour: { type: 'string', nullable: true }, x: { type: 'number' }, y: { type: 'number' } } } } } } },
           },
           400: {
             description: '필수값 누락 또는 잘못된 카테고리/좌표',
@@ -1152,9 +1214,10 @@ const swaggerDefinition = {
       get: {
         tags: ['스팟'],
         summary: '스팟 목록 조회',
-        description: '스팟 목록을 조회합니다. region(예: nowon, chuncheon / 노원구, 춘천시), category(10대 표준 카테고리), tag_name(음성해설, 열린관광, 야간명소 등) 쿼리로 필터링할 수 있습니다.',
+        description: '스팟 목록을 조회합니다. region(예: 서울, 춘천), sub_region(예: 노원구, 마포구, 의암호·공지천권), category(10대 표준 카테고리), tag_name(음성해설, 열린관광, 야간명소 등) 쿼리로 필터링할 수 있습니다.',
         parameters: [
-          { name: 'region', in: 'query', schema: { type: 'string' }, description: '지역 필터 (예: nowon, chuncheon, 노원구, 춘천시)' },
+          { name: 'region', in: 'query', schema: { type: 'string' }, description: '시/도 지역 필터 (예: 서울, 춘천)' },
+          { name: 'sub_region', in: 'query', schema: { type: 'string' }, description: '세부 자치구/권역 필터 (예: 노원구, 마포구, 의암호·공지천권)' },
           { name: 'category', in: 'query', schema: { type: 'string', enum: ['산·등산로', '숲·휴양림', '수목원·정원', '강·하천', '호수·저수지', '공원·광장', '역사·유적', '전시·문화공간', '카페·맛집', '전통시장·로컬마켓'] }, description: '스팟 10대 표준 카테고리' },
           { name: 'tag_name', in: 'query', schema: { type: 'string' }, description: '스팟 태그명 (예: 음성해설, 열린관광, 야간명소, 포토존, 전통·한옥, 낮그늘, 실시간축제, 반려견동반, 화장실, 주차가능, 벤치·쉼터)' },
           { name: 'tag_ids', in: 'query', schema: { type: 'string' }, description: '콤마로 구분된 태그 UUID 목록' },
@@ -1183,6 +1246,8 @@ const swaggerDefinition = {
                           x: { type: 'number' },
                           y: { type: 'number' },
                           address: { type: 'string' },
+                          region: { type: 'string', example: '서울' },
+                          sub_region: { type: 'string', example: '노원구', nullable: true },
                           categories: { type: 'array', items: { type: 'string' } },
                           recommend_pct: { type: 'number' },
                           barrier_free_info: { type: 'object', nullable: true },

@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { extractRegionFromAddress } = require('../constants/spotCategoryRules');
 
 const WALK_SPEED_MPS = 1.1; // 도보 평균 4km/h
 const COURSE_NEARBY_SPOT_RADIUS = Number(process.env.COURSE_NEARBY_SPOT_RADIUS || 500);
@@ -395,11 +396,20 @@ exports.createCourse = async (userId, body) => {
       : stats.estimatedDuration;
   }
 
+    // region, sub_region 결정 (입력값 우선, 없으면 name/description에서 추론)
+    let determinedRegion = body.region || null;
+    let determinedSubRegion = body.sub_region || null;
+    if (!determinedRegion) {
+      const inferred = extractRegionFromAddress(`${name} ${description || ''}`);
+      determinedRegion = inferred.region;
+      determinedSubRegion = determinedSubRegion || inferred.sub_region;
+    }
+
     const { rows: [course] } = await client.query(
-      `INSERT INTO courses (owner_id, name, description, category, route_geometry, total_distance, estimated_duration, is_public)
-       VALUES ($1,$2,$3,$4,$5::geography,$6,$7,$8)
-       RETURNING course_id, name, total_distance, estimated_duration, is_public, created_at`,
-      [userId, name, description || null, category || null, wkt, totalDistance, estimatedDuration, is_public]
+      `INSERT INTO courses (owner_id, name, description, category, route_geometry, total_distance, estimated_duration, is_public, region, sub_region)
+       VALUES ($1,$2,$3,$4,$5::geography,$6,$7,$8,$9,$10)
+       RETURNING course_id, name, region, sub_region, total_distance, estimated_duration, is_public, created_at`,
+      [userId, name, description || null, category || null, wkt, totalDistance, estimatedDuration, is_public, determinedRegion || '서울', determinedSubRegion || null]
     );
 
     // waypoints: 장소 목록 독립적으로 저장
@@ -470,11 +480,19 @@ exports.createCourseFromWalk = async (userId, body) => {
     const wkt = await buildLineString(routeWaypoints, client);
     const stats = await calcStats(wkt, client);
 
+    let determinedRegion = body.region || null;
+    let determinedSubRegion = body.sub_region || null;
+    if (!determinedRegion) {
+      const inferred = extractRegionFromAddress(`${name} ${description || ''}`);
+      determinedRegion = inferred.region;
+      determinedSubRegion = determinedSubRegion || inferred.sub_region;
+    }
+
     const { rows: [course] } = await client.query(
-      `INSERT INTO courses (owner_id, name, description, route_geometry, total_distance, estimated_duration, is_public)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
-       RETURNING course_id, name, total_distance, estimated_duration, is_public, created_at`,
-      [userId, name, description || null, wkt, stats.totalDistance, duration, is_public]
+      `INSERT INTO courses (owner_id, name, description, route_geometry, total_distance, estimated_duration, is_public, region, sub_region)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       RETURNING course_id, name, region, sub_region, total_distance, estimated_duration, is_public, created_at`,
+      [userId, name, description || null, wkt, stats.totalDistance, duration, is_public, determinedRegion || '서울', determinedSubRegion || null]
     );
 
     await insertTags(tag_ids, course.course_id, userId, client);
@@ -492,6 +510,7 @@ exports.createCourseFromWalk = async (userId, body) => {
 exports.getCourses = async (query, currentUserId) => {
   const {
     region,
+    sub_region,
     category,
     is_cycle,
     difficulty_level,
@@ -519,18 +538,29 @@ exports.getCourses = async (query, currentUserId) => {
       params.push(is_public === 'true');
     }
 
-    // 지역(region) 필터 (노원구 / 춘천시 등)
+    // 지역(region) 필터 (서울 / 춘천 / 특정 구·권역명 유연 매칭)
     if (region && String(region).trim()) {
-      const normalizedRegion = String(region).trim().toLowerCase();
-      let searchKeyword = String(region).trim();
-      if (normalizedRegion === 'nowon' || normalizedRegion === '노원' || normalizedRegion === '노원구' || normalizedRegion === 'seoul' || normalizedRegion === '서울') {
-        searchKeyword = '노원';
-      } else if (normalizedRegion === 'chuncheon' || normalizedRegion === '춘천' || normalizedRegion === '춘천시') {
-        searchKeyword = '춘천';
+      const reg = String(region).trim();
+      const normalizedReg = reg.toLowerCase();
+      if (normalizedReg === 'seoul' || reg === '서울' || reg === '서울특별시') {
+        conditions.push(`c.region = $${idx++}`);
+        params.push('서울');
+      } else if (normalizedReg === 'chuncheon' || reg === '춘천' || reg === '춘천시') {
+        conditions.push(`c.region = $${idx++}`);
+        params.push('춘천');
+      } else {
+        // '노원구'나 '의암호' 등 자치구/권역명이 region 파라미터로 들어온 경우
+        conditions.push(`(c.sub_region ILIKE $${idx} OR c.region ILIKE $${idx} OR c.name ILIKE $${idx + 1} OR c.description ILIKE $${idx + 1})`);
+        params.push(`%${reg}%`, `%${reg}%`);
+        idx += 2;
       }
-      conditions.push(`(c.name ILIKE $${idx} OR c.description ILIKE $${idx})`);
-      params.push(`%${searchKeyword}%`);
-      idx += 1;
+    }
+
+    // 세부 권역(sub_region) 필터
+    if (sub_region && String(sub_region).trim()) {
+      conditions.push(`(c.sub_region ILIKE $${idx} OR c.name ILIKE $${idx + 1} OR c.description ILIKE $${idx + 1})`);
+      params.push(`%${String(sub_region).trim()}%`, `%${String(sub_region).trim()}%`);
+      idx += 2;
     }
 
     // 코스 카테고리 필터
@@ -592,6 +622,7 @@ exports.getCourses = async (query, currentUserId) => {
     const sql = `
       SELECT
         c.course_id, c.name, c.description, c.category,
+        c.region, c.sub_region,
         c.total_distance, c.estimated_duration,
         c.is_cycle, c.difficulty_level,
         c.is_public, c.created_at,
@@ -655,6 +686,8 @@ exports.searchCourses = async (query, currentUserId) => {
   const normalizedKeyword = isMissing(keyword) ? null : String(keyword).trim();
   const region = readQueryValue(query.region);
   const normalizedRegion = isMissing(region) ? null : String(region).trim();
+  const subRegion = readQueryValue(query.sub_region);
+  const normalizedSubRegion = isMissing(subRegion) ? null : String(subRegion).trim();
   const minTotalDistance = parseNumberParam(query.min_total_distance, 'min_total_distance', { min: 0 });
   const maxTotalDistance = parseNumberParam(query.max_total_distance, 'max_total_distance', { min: 0 });
   const minEstimatedDuration = parseNumberParam(query.min_estimated_duration, 'min_estimated_duration', { min: 0 });
@@ -684,9 +717,28 @@ exports.searchCourses = async (query, currentUserId) => {
   }
 
   if (normalizedRegion) {
-    params.push(`%${normalizedRegion}%`);
+    if (normalizedRegion === '서울' || normalizedRegion.toLowerCase() === 'seoul') {
+      params.push('서울');
+      conditions.push(`c.region = $${params.length}`);
+    } else if (normalizedRegion === '춘천' || normalizedRegion.toLowerCase() === 'chuncheon') {
+      params.push('춘천');
+      conditions.push(`c.region = $${params.length}`);
+    } else {
+      params.push(`%${normalizedRegion}%`);
+      conditions.push(`(
+        c.sub_region ILIKE $${params.length}
+        OR c.region ILIKE $${params.length}
+        OR c.name ILIKE $${params.length}
+        OR c.description ILIKE $${params.length}
+      )`);
+    }
+  }
+
+  if (normalizedSubRegion) {
+    params.push(`%${normalizedSubRegion}%`);
     conditions.push(`(
-      c.name ILIKE $${params.length}
+      c.sub_region ILIKE $${params.length}
+      OR c.name ILIKE $${params.length}
       OR c.description ILIKE $${params.length}
     )`);
   }
@@ -778,15 +830,14 @@ exports.searchCourses = async (query, currentUserId) => {
     `);
   }
 
-  const sort = readQueryValue(query.sort) || 'latest';
   const orderMap = {
     rating: 'rs.avg_rating DESC NULLS LAST, c.created_at DESC',
+    length: 'c.total_distance ASC, c.created_at DESC',
+    duration: 'c.estimated_duration ASC, c.created_at DESC',
     latest: 'c.created_at DESC',
-    length: 'c.total_distance ASC',
-    duration: 'c.estimated_duration ASC',
   };
-
-  const orderBySql = orderMap[sort] || orderMap.latest;
+  const sort = readQueryValue(query.sort);
+  const orderBySql = orderMap[sort] || 'c.created_at DESC';
 
   const baseSql = `
     WITH review_source AS (
@@ -867,6 +918,8 @@ exports.searchCourses = async (query, currentUserId) => {
       c.name,
       c.description,
       c.category,
+      c.region,
+      c.sub_region,
       c.total_distance,
       c.estimated_duration,
       c.is_public,
@@ -957,7 +1010,7 @@ exports.getMyCourses = async (userId, query) => {
   const client = await pool.connect();
   try {
     const { rows } = await client.query(
-      `SELECT course_id, name, description, category, total_distance, estimated_duration,
+      `SELECT course_id, name, description, category, region, sub_region, total_distance, estimated_duration,
               is_public, status, created_at, updated_at
        FROM courses
        WHERE ${where}
@@ -983,6 +1036,7 @@ exports.getCourseById = async (courseId, userId) => {
     const { rows: [course] } = await client.query(
       `SELECT
          c.course_id, c.name, c.description, c.category,
+         c.region, c.sub_region,
          c.total_distance, c.estimated_duration,
          c.is_public, c.owner_id, c.data_source, c.created_at, c.updated_at,
          ST_AsGeoJSON(c.route_geometry)::json AS route,
@@ -1118,7 +1172,7 @@ function calcSegmentDuration(from, to) {
 // 코스 수정
 // ──────────────────────────────────────────────────────────────────────
 exports.updateCourse = async (userId, courseId, body) => {
-  const { name, description, category, is_public, tag_ids, waypoints } = body;
+  const { name, description, category, region, sub_region, is_public, tag_ids, waypoints } = body;
 
   const client = await pool.connect();
   try {
@@ -1126,7 +1180,7 @@ exports.updateCourse = async (userId, courseId, body) => {
 
     // 소유자 확인
     const { rows: [course] } = await client.query(
-      `SELECT owner_id FROM courses WHERE course_id=$1 AND status != 'deleted'`,
+      `SELECT owner_id, region, sub_region FROM courses WHERE course_id=$1 AND status != 'deleted'`,
       [courseId]
     );
     if (!course) {
@@ -1139,7 +1193,10 @@ exports.updateCourse = async (userId, courseId, body) => {
     // 경유지 변경 시 route_geometry 재계산
     let extraSets = '';
     let extraParams = [];
-    let paramIdx = 5; // $1=name $2=description $3=category $4=is_public 이후
+    let paramIdx = 7; // $1=name $2=description $3=category $4=region $5=sub_region $6=is_public 이후
+
+    const nextRegion = region !== undefined ? region : course.region;
+    const nextSubRegion = sub_region !== undefined ? sub_region : course.sub_region;
 
     if (waypoints) {
       const wkt = await buildLineString(waypoints, client);
@@ -1166,10 +1223,10 @@ exports.updateCourse = async (userId, courseId, body) => {
 
     const { rows: [updated] } = await client.query(
       `UPDATE courses
-       SET name=$1, description=$2, category=$3, is_public=$4${extraSets}, updated_at=NOW()
+       SET name=$1, description=$2, category=$3, region=$4, sub_region=$5, is_public=$6${extraSets}, updated_at=NOW()
        WHERE course_id=$${paramIdx}
-       RETURNING course_id, name, total_distance, estimated_duration, updated_at`,
-      [name, description ?? null, category ?? null, is_public ?? true, ...extraParams, courseId]
+       RETURNING course_id, name, region, sub_region, total_distance, estimated_duration, updated_at`,
+      [name, description ?? null, category ?? null, nextRegion, nextSubRegion, is_public ?? true, ...extraParams, courseId]
     );
 
     // 태그 교체

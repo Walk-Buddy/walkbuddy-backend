@@ -469,13 +469,93 @@ function inferSpotCategoriesWithFallback(place = {}) {
   return fallbackCategory ? [fallbackCategory] : ['공원·광장'];
 }
 
+// ── 서울 25개 자치구 목록 ──────────────────────────────────────────
+const SEOUL_DISTRICTS = [
+  '강남구', '강동구', '강북구', '강서구', '관악구',
+  '광진구', '구로구', '금천구', '노원구', '도봉구',
+  '동대문구', '동작구', '마포구', '서대문구', '서초구',
+  '성동구', '성북구', '송파구', '양천구', '영등포구',
+  '용산구', '은평구', '종로구', '중구', '중랑구',
+];
+
+// ── 춘천 주요 권역 목록 ────────────────────────────────────────────
+const CHUNCHEON_AREAS = [
+  '의암호·공지천권',
+  '소양강·신북권',
+  '도심·명동권',
+  '동면·구봉산권',
+  '강촌·남산권',
+];
+
+// ── 지원 지역 전체 구조 (클라이언트 전달용) ──────────────────────────
+const SUPPORTED_REGION_LIST = [
+  {
+    code: 'seoul',
+    name: '서울',
+    fullName: '서울특별시',
+    sub_regions: SEOUL_DISTRICTS,
+  },
+  {
+    code: 'chuncheon',
+    name: '춘천',
+    fullName: '강원특별자치도 춘천시',
+    sub_regions: CHUNCHEON_AREAS,
+  },
+];
+
+/**
+ * 주소(address) 또는 장소명 문자열에서 region('서울' | '춘천')과 sub_region을 자동 추출합니다.
+ */
+function extractRegionFromAddress(addressOrText = '') {
+  if (!addressOrText || typeof addressOrText !== 'string') {
+    return { region: '서울', sub_region: null };
+  }
+
+  const text = addressOrText.trim();
+
+  // 1. 춘천 확인
+  if (text.includes('춘천') || text.includes('강원특별자치도 춘천') || text.includes('강원도 춘천')) {
+    let matchedSub = null;
+    if (text.includes('의암') || text.includes('공지천') || text.includes('삼천동') || text.includes('근화동') || text.includes('칠전동')) {
+      matchedSub = '의암호·공지천권';
+    } else if (text.includes('소양') || text.includes('신북') || text.includes('사북') || text.includes('우두동') || text.includes('신사우동')) {
+      matchedSub = '소양강·신북권';
+    } else if (text.includes('명동') || text.includes('중앙로') || text.includes('효자') || text.includes('퇴계') || text.includes('석사') || text.includes('온의') || text.includes('약사')) {
+      matchedSub = '도심·명동권';
+    } else if (text.includes('구봉산') || text.includes('동면') || text.includes('만천') || text.includes('장학')) {
+      matchedSub = '동면·구봉산권';
+    } else if (text.includes('강촌') || text.includes('남산') || text.includes('남면') || text.includes('김유정') || text.includes('신동면')) {
+      matchedSub = '강촌·남산권';
+    }
+    return { region: '춘천', sub_region: matchedSub };
+  }
+
+  // 2. 서울 확인
+  for (const district of SEOUL_DISTRICTS) {
+    if (text.includes(district) || text.includes(district.replace('구', ''))) {
+      return { region: '서울', sub_region: district };
+    }
+  }
+
+  if (text.includes('서울')) {
+    return { region: '서울', sub_region: null };
+  }
+
+  return { region: '서울', sub_region: null };
+}
+
 module.exports = {
   SPOT_CATEGORIES,
   TARGET_REGIONS,
+  SEOUL_DISTRICTS,
+  CHUNCHEON_AREAS,
+  SUPPORTED_REGION_LIST,
   resolveRegion,
+  extractRegionFromAddress,
   SPOT_CATEGORY_SEARCH_RULES,
   getLastCategory,
   getFallbackCategory,
   inferSpotCategories,
   inferSpotCategoriesWithFallback,
 };
+

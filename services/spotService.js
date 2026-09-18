@@ -4,6 +4,8 @@ const {
     SPOT_CATEGORIES,
     SPOT_CATEGORY_SEARCH_RULES,
     inferSpotCategoriesWithFallback,
+    extractRegionFromAddress,
+    resolveRegion,
 } = require('../constants/spotCategoryRules');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -301,17 +303,30 @@ async function enrichKakaoSpotTourContent(spot, userId) {
 // 스팟 목록 조회
 // ──────────────────────────────────────────────────────────────────────
 exports.getSpots = async (query) => {
-    const { category, tag_ids, tag_name, tag_names, min_recommend_pct, region, page = 1, limit = 20 } = query;
+    const { category, tag_ids, tag_name, tag_names, min_recommend_pct, region, sub_region, page = 1, limit = 20 } = query;
     const offset = (Number(page) - 1) * Number(limit);
     const whereConditions = ["s.status = 'active'"];
     const queryValues = [];
     let orderBySql = 's.created_at DESC';
 
     if (region && String(region).trim()) {
-        const target = resolveRegion(region);
-        const searchKeyword = target ? target.name : String(region).trim();
-        queryValues.push(`%${searchKeyword}%`);
-        whereConditions.push(`(s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
+        const reg = String(region).trim();
+        const normalizedReg = reg.toLowerCase();
+        if (normalizedReg === 'seoul' || reg === '서울' || reg === '서울특별시') {
+            queryValues.push('서울');
+            whereConditions.push(`s.region = $${queryValues.length}`);
+        } else if (normalizedReg === 'chuncheon' || reg === '춘천' || reg === '춘천시') {
+            queryValues.push('춘천');
+            whereConditions.push(`s.region = $${queryValues.length}`);
+        } else {
+            queryValues.push(`%${reg}%`);
+            whereConditions.push(`(s.sub_region ILIKE $${queryValues.length} OR s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
+        }
+    }
+
+    if (sub_region && String(sub_region).trim()) {
+        queryValues.push(`%${String(sub_region).trim()}%`);
+        whereConditions.push(`(s.sub_region ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
     }
 
     if (category) {
@@ -356,24 +371,27 @@ exports.getSpots = async (query) => {
             .filter(Boolean);
 
         if (tagNameList.length > 0) {
-            queryValues.push(tagNameList); const tagNamesIdx = queryValues.length;
-            queryValues.push(tagNameList.length); const tagCntIdx = queryValues.length;
+            queryValues.push(tagNameList);
+            const tagIdx = queryValues.length;
+            queryValues.push(tagNameList.length);
+            const cntIdx = queryValues.length;
             whereConditions.push(`
                 s.spot_id IN (
                     SELECT tg.target_id
                     FROM taggings tg
                     JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'spot' AND t.is_active = TRUE
-                    WHERE tg.target_type = 'spot' AND t.name = ANY($${tagNamesIdx}::TEXT[])
-                    GROUP BY tg.target_id HAVING COUNT(DISTINCT t.name) >= $${tagCntIdx}
+                    WHERE tg.target_type = 'spot' AND t.name = ANY($${tagIdx}::TEXT[])
+                    GROUP BY tg.target_id
+                    HAVING COUNT(DISTINCT t.name) >= $${cntIdx}
                 )
             `);
         }
     }
 
-    if (min_recommend_pct !== undefined && min_recommend_pct !== null && min_recommend_pct !== '') {
+    if (min_recommend_pct) {
         const pct = Number(min_recommend_pct);
         if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
-            const err = new Error('min_recommend_pct must be between 0 and 100');
+            const err = new Error('min_recommend_pct must be a number between 0 and 100');
             err.status = 400; throw err;
         }
         queryValues.push(pct);
@@ -390,7 +408,7 @@ exports.getSpots = async (query) => {
 
     const spotsResult = await pool.query(
         `SELECT
-            s.spot_id, s.name, s.address, s.categories, s.recommend_pct,
+            s.spot_id, s.name, s.address, s.categories, s.region, s.sub_region, s.recommend_pct,
             s.barrier_free_info, s.is_night_tour,
             ST_X(s.location::GEOMETRY) AS x,
             ST_Y(s.location::GEOMETRY) AS y,
@@ -437,6 +455,7 @@ exports.getSpotById = async (spotId) => {
     const spotResult = await pool.query(
         `SELECT
             s.spot_id, s.name, s.address, s.categories, s.kakao_category_name,
+            s.region, s.sub_region,
             s.recommend_pct, s.source, s.content_place, s.content_history, s.content_tour,
             s.barrier_free_info, s.is_night_tour,
             ST_X(s.location::GEOMETRY) AS x,
@@ -481,7 +500,7 @@ exports.getSpotById = async (spotId) => {
 // 스팟 직접 등록
 // ──────────────────────────────────────────────────────────────────────
 exports.createSpot = async (body) => {
-    const { name, x, y, address, categories, kakao_category_name, content_place, content_history, content_tour } = body;
+    const { name, x, y, address, categories, kakao_category_name, content_place, content_history, content_tour, region, sub_region } = body;
     const normalizedCategories = normalizeSpotCategoriesInput(categories);
 
     if (normalizedCategories.length === 0) {
@@ -496,22 +515,29 @@ exports.createSpot = async (body) => {
         err.status = 400; throw err;
     }
 
+    const regionInfo = extractRegionFromAddress(`${address || ''} ${name || ''}`);
+    const determinedRegion = region || regionInfo.region || '서울';
+    const determinedSubRegion = sub_region || regionInfo.sub_region || null;
+
     const result = await pool.query(
         `INSERT INTO spots (
             name, location, address, categories,
             kakao_category_name, source,
-            content_place, content_history, content_tour
+            content_place, content_history, content_tour,
+            region, sub_region
         ) VALUES (
-            $1, ST_Point($2, $3)::GEOGRAPHY, $4, $5::TEXT[], $6, 'admin', $7, $8, $9
+            $1, ST_Point($2, $3)::GEOGRAPHY, $4, $5::TEXT[], $6, 'admin', $7, $8, $9, $10, $11
         )
         RETURNING
             spot_id, name, address, categories, kakao_category_name, source,
+            region, sub_region,
             content_place, content_history, content_tour,
             recommend_pct, status, created_at,
             ST_X(location::GEOMETRY) AS x,
             ST_Y(location::GEOMETRY) AS y`,
         [name, lng, lat, address || null, normalizedCategories, kakao_category_name || null,
-         content_place || null, content_history || null, content_tour || null]
+         content_place || null, content_history || null, content_tour || null,
+         determinedRegion, determinedSubRegion]
     );
 
     const spot = result.rows[0];
@@ -532,6 +558,8 @@ exports.saveKakaoSpot = async (body, userId) => {
         address_name,
         x,
         y,
+        region,
+        sub_region,
         tour_api_content_id,
     } = body;
     const normalizedCategories = normalizeSpotCategoriesInput(categories);
@@ -550,15 +578,20 @@ exports.saveKakaoSpot = async (body, userId) => {
         err.status = 400; throw err;
     }
 
+    const regionInfo = extractRegionFromAddress(`${selectedAddress || ''} ${name || ''}`);
+    const determinedRegion = region || regionInfo.region || '서울';
+    const determinedSubRegion = sub_region || regionInfo.sub_region || null;
+
     const createdResult = await pool.query(
-        `INSERT INTO spots (kakao_place_id, name, location, address, categories, kakao_category_name, source, last_synced_at)
-         VALUES ($1, $2, ST_Point($3, $4)::GEOGRAPHY, $5, $6::TEXT[], $7, 'kakao', NOW())
+        `INSERT INTO spots (kakao_place_id, name, location, address, categories, kakao_category_name, source, region, sub_region, last_synced_at)
+         VALUES ($1, $2, ST_Point($3, $4)::GEOGRAPHY, $5, $6::TEXT[], $7, 'kakao', $8, $9, NOW())
          ON CONFLICT (kakao_place_id) DO NOTHING
          RETURNING spot_id, kakao_place_id, name, address, categories, kakao_category_name,
+                   region, sub_region,
                    recommend_pct, content_tour,
                    ST_X(location::GEOMETRY) AS x,
                    ST_Y(location::GEOMETRY) AS y`,
-        [kakao_place_id, name, lng, lat, selectedAddress, normalizedCategories, kakao_category_name || null]
+        [kakao_place_id, name, lng, lat, selectedAddress, normalizedCategories, kakao_category_name || null, determinedRegion, determinedSubRegion]
     );
 
     if (createdResult.rows.length > 0) {
@@ -576,6 +609,7 @@ exports.saveKakaoSpot = async (body, userId) => {
 
     const existingResult = await pool.query(
         `SELECT spot_id, kakao_place_id, name, address, categories, kakao_category_name,
+                region, sub_region,
                 recommend_pct, content_tour, status,
                 ST_X(location::GEOMETRY) AS x,
                 ST_Y(location::GEOMETRY) AS y
@@ -592,12 +626,13 @@ exports.saveKakaoSpot = async (body, userId) => {
     let currentSpot = existingSpot;
     if (selectedAddress && existingSpot.address !== selectedAddress) {
         const updatedResult = await pool.query(
-            `UPDATE spots SET address = $2, last_synced_at = NOW() WHERE spot_id = $1
+            `UPDATE spots SET address = $2, region = $3, sub_region = $4, last_synced_at = NOW() WHERE spot_id = $1
              RETURNING spot_id, kakao_place_id, name, address, categories, kakao_category_name,
+                       region, sub_region,
                        recommend_pct, content_tour,
                        ST_X(location::GEOMETRY) AS x,
                        ST_Y(location::GEOMETRY) AS y`,
-            [existingSpot.spot_id, selectedAddress]
+            [existingSpot.spot_id, selectedAddress, determinedRegion, determinedSubRegion]
         );
         currentSpot = updatedResult.rows[0];
     }
@@ -717,6 +752,7 @@ exports.searchSpots = async (query) => {
 
     const savedSpotsResult = await pool.query(
         `SELECT s.spot_id, s.kakao_place_id, s.name, s.address, s.categories, s.kakao_category_name,
+                s.region, s.sub_region,
                 s.recommend_pct,
                 ST_X(s.location::GEOMETRY) AS x, ST_Y(s.location::GEOMETRY) AS y,
                 COALESCE(json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
@@ -760,14 +796,29 @@ exports.searchSpots = async (query) => {
 // 스팟 필터 조회
 // ──────────────────────────────────────────────────────────────────────
 exports.filterSpots = async (query) => {
-    const { category, tag_ids, min_recommend_pct, region } = query;
+    const { category, tag_ids, min_recommend_pct, region, sub_region } = query;
     const whereConditions = ["s.status = 'active'"];
     const queryValues = [];
     let orderBySql = 's.created_at DESC';
 
     if (region && String(region).trim()) {
-        queryValues.push(`%${String(region).trim()}%`);
-        whereConditions.push(`(s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
+        const reg = String(region).trim();
+        const normalizedReg = reg.toLowerCase();
+        if (normalizedReg === 'seoul' || reg === '서울' || reg === '서울특별시') {
+            queryValues.push('서울');
+            whereConditions.push(`s.region = $${queryValues.length}`);
+        } else if (normalizedReg === 'chuncheon' || reg === '춘천' || reg === '춘천시') {
+            queryValues.push('춘천');
+            whereConditions.push(`s.region = $${queryValues.length}`);
+        } else {
+            queryValues.push(`%${reg}%`);
+            whereConditions.push(`(s.sub_region ILIKE $${queryValues.length} OR s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
+        }
+    }
+
+    if (sub_region && String(sub_region).trim()) {
+        queryValues.push(`%${String(sub_region).trim()}%`);
+        whereConditions.push(`(s.sub_region ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
     }
 
     if (category) {
@@ -812,6 +863,7 @@ exports.filterSpots = async (query) => {
 
     const result = await pool.query(
         `SELECT s.spot_id, s.kakao_place_id, s.name, s.address, s.categories, s.kakao_category_name,
+                s.region, s.sub_region,
                 s.recommend_pct, ST_X(s.location::GEOMETRY) AS x, ST_Y(s.location::GEOMETRY) AS y,
                 COALESCE(json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
                 FILTER (WHERE t.tag_id IS NOT NULL), '[]') AS tags

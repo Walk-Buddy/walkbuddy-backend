@@ -338,6 +338,12 @@ CREATE TABLE spots (
     is_night_tour       BOOLEAN         NOT NULL DEFAULT FALSE,
     -- 야간명소 여부
 
+    region              VARCHAR(20)     NOT NULL DEFAULT '서울',
+    -- 지역 구분 ('서울', '춘천')
+
+    sub_region          VARCHAR(50)     NULL,
+    -- 세부 자치구 또는 권역 (예: '노원구', '마포구', '의암호·공지천권')
+
     status              VARCHAR(20)     NOT NULL DEFAULT 'active',
     -- 'active': 정상 / 'hidden': 신고로 숨김
 
@@ -372,6 +378,10 @@ CREATE TABLE spots (
 -- ST_DWithin(), ST_Distance() 등 PostGIS 함수와 함께 사용
 CREATE INDEX ix_spots_location
     ON spots USING GIST (location);
+
+-- 지역 및 권역 필터 조회용 인덱스
+CREATE INDEX ix_spots_region
+    ON spots (region, sub_region);
 
 -- 상태 필터 조회용
 CREATE INDEX ix_spots_status
@@ -470,6 +480,12 @@ CREATE TABLE courses (
     difficulty_level    SMALLINT        NOT NULL DEFAULT 1,
     -- 코스 기본 난이도 (1: 쉬움, 2: 보통, 3: 어려움)
 
+    region              VARCHAR(20)     NOT NULL DEFAULT '서울',
+    -- 지역 구분 ('서울', '춘천')
+
+    sub_region          VARCHAR(50)     NULL,
+    -- 세부 자치구 또는 권역 (예: '노원구', '마포구', '의암호·공지천권')
+
     is_public           BOOLEAN         NOT NULL DEFAULT TRUE,
     -- 공개/비공개 설정
     -- 비공개 코스는 본인만 열람 가능
@@ -521,6 +537,10 @@ CREATE TABLE courses (
 -- 마이페이지 '내가 등록한 코스' 조회 시 사용
 CREATE INDEX ix_courses_owner_id
     ON courses (owner_id);
+
+-- 지역 및 권역 필터 조회용 인덱스
+CREATE INDEX ix_courses_region
+    ON courses (region, sub_region);
 
 -- 공공 데이터 중복 등록 방지용 Partial Index
 -- 같은 출처(data_source) 안에서 같은 원본 ID(source_id)만 중복으로 판단

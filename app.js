@@ -42,11 +42,13 @@ const reportRoutes       = require('./routes/reports');
 const adminRoutes        = require('./routes/admin');
 const tourRoutes          = require('./routes/tourRoutes');
 const durunubiRoutes      = require('./routes/durunubi');
+const regionRoutes        = require('./routes/regions');
 // const notificationRoutes = require('./routes/notifications');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users',         userRoutes);
 app.use('/api/tags',          tagRoutes);
+app.use('/api/regions',       regionRoutes);
 app.use('/api/courses',       courseRoutes);
 app.use('/api/spots',         spotRoutes);
 app.use('/api/walks',         walkRoutes);
