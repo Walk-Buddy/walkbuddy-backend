@@ -974,11 +974,6 @@ CREATE TABLE course_reviews (
     -- walk_record_id NOT NULL 이므로 산책 기록 삭제 차단
     -- 후기 삭제 후 walk_records 삭제 필요 (앱단에서 처리)
 
-    CONSTRAINT uq_course_reviews_walk_record
-        UNIQUE (walk_record_id),
-    -- 이용 기록 1건 당 코스 후기 1번만 작성 가능
-    -- 동일 walk_record_id 로 중복 후기 INSERT 차단
-
     CONSTRAINT chk_course_reviews_difficulty
         CHECK (difficulty IS NULL OR difficulty IN ('easy', 'normal', 'hard')),
     -- NULL: 미입력 허용
@@ -990,6 +985,11 @@ CREATE TABLE course_reviews (
     CONSTRAINT chk_course_reviews_status
         CHECK (status IN ('active', 'auto_hidden', 'hidden'))
 );
+
+-- 이용 기록 1건 당 활성 코스 후기 1번만 작성 가능 (삭제된 후기는 제외하여 재작성 허용)
+CREATE UNIQUE INDEX uq_course_reviews_walk_record_active
+    ON course_reviews (walk_record_id)
+    WHERE status = 'active';
 
 -- 코스별 후기 최신순 조회용
 CREATE INDEX ix_course_reviews_course_id
@@ -1074,11 +1074,6 @@ CREATE TABLE spot_reviews (
     -- walk_record_id NOT NULL 이므로 산책 기록 삭제 차단
     -- 후기 삭제 후 walk_records 삭제 필요 (앱단에서 처리)
 
-    CONSTRAINT uq_spot_reviews_walk_spot
-        UNIQUE (walk_record_id, spot_id),
-    -- 이용 기록 1건 당 스팟별 후기 1번만 작성 가능
-    -- 동일 walk_record_id + spot_id 조합 중복 INSERT 차단
-
     CONSTRAINT chk_spot_reviews_status
         CHECK (status IN ('active', 'auto_hidden', 'hidden')),
 
@@ -1086,6 +1081,11 @@ CREATE TABLE spot_reviews (
         CHECK (array_length(photos, 1) <= 5)
     -- 사진 최대 5장 제한 DB단 보완
 );
+
+-- 이용 기록 1건 당 활성 스팟별 후기 1번만 작성 가능 (삭제된 후기는 제외하여 재작성 허용)
+CREATE UNIQUE INDEX uq_spot_reviews_walk_spot_active
+    ON spot_reviews (walk_record_id, spot_id)
+    WHERE status = 'active';
 
 -- 스팟별 후기 최신순 조회용
 CREATE INDEX ix_spot_reviews_spot_id

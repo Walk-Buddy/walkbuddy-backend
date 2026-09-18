@@ -1537,6 +1537,10 @@ const swaggerDefinition = {
         description: '후기 등록 완료',
         content: { 'application/json': { schema: { type: 'object', properties: { course_review_id: { type: 'string', format: 'uuid' }, course_id: { type: 'string', format: 'uuid' }, rating: { type: 'number' }, created_at: { type: 'string', format: 'date-time' } } } } },
       },
+      409: {
+        description: '이미 후기가 등록된 산책 기록',
+        content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: false }, message: { type: 'string', example: '이미 후기가 등록된 산책 기록입니다.' } } } } },
+      },
     },
   },
   get: {
@@ -1575,6 +1579,10 @@ const swaggerDefinition = {
       201: {
         description: '스팟 후기 등록 완료',
         content: { 'application/json': { schema: { type: 'object', properties: { spot_review_id: { type: 'string', format: 'uuid' }, spot_id: { type: 'string', format: 'uuid' }, is_recommended: { type: 'boolean' }, created_at: { type: 'string', format: 'date-time' } } } } },
+      },
+      409: {
+        description: '이미 후기가 등록된 산책 기록',
+        content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: false }, message: { type: 'string', example: '이미 해당 스팟에 후기가 등록된 산책 기록입니다.' } } } } },
       },
     },
   },

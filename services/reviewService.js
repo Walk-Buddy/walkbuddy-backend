@@ -52,6 +52,11 @@ exports.createCourseReview = async (userId, courseId, body) => {
     return review;
   } catch (err) {
     await client.query('ROLLBACK');
+    if (err.code === '23505') {
+      const conflictErr = new Error('이미 후기가 등록된 산책 기록입니다.');
+      conflictErr.status = 409;
+      throw conflictErr;
+    }
     throw err;
   } finally {
     client.release();
@@ -214,6 +219,11 @@ exports.createSpotReview = async (userId, spotId, body, files = []) => {
     return { ...review, linked_course: linked || null };
   } catch (err) {
     await client.query('ROLLBACK');
+    if (err.code === '23505') {
+      const conflictErr = new Error('이미 해당 스팟에 후기가 등록된 산책 기록입니다.');
+      conflictErr.status = 409;
+      throw conflictErr;
+    }
     throw err;
   } finally {
     client.release();
