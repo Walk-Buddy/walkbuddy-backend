@@ -769,6 +769,7 @@ const swaggerDefinition = {
                   walk_record_id: { type: 'string', format: 'uuid', description: '산책 기록 ID' },
                   name: { type: 'string', example: '내가 걸었던 불암산 힐링코스' },
                   description: { type: 'string', nullable: true, example: '산책 후 등록한 코스' },
+                  category: { type: 'string', nullable: true, example: '산책로' },
                   waypoints: {
                     type: 'array',
                     minItems: 2,
@@ -812,9 +813,12 @@ const swaggerDefinition = {
                   properties: {
                     course_id: { type: 'string', format: 'uuid' },
                     name: { type: 'string' },
+                    region: { type: 'string' },
+                    sub_region: { type: 'string', nullable: true },
                     total_distance: { type: 'integer' },
                     estimated_duration: { type: 'integer' },
                     is_public: { type: 'boolean' },
+                    waypoints_count: { type: 'integer' },
                     created_at: { type: 'string', format: 'date-time' },
                   },
                 },
@@ -1024,7 +1028,56 @@ const swaggerDefinition = {
         responses: {
           200: {
             description: '코스 상세 정보',
-            content: { 'application/json': { schema: { type: 'object', properties: { course_id: { type: 'string', format: 'uuid' }, name: { type: 'string' }, description: { type: 'string' }, route: { type: 'object' }, total_distance: { type: 'integer' }, estimated_duration: { type: 'integer' }, difficulty: { type: 'string' }, avg_rating: { type: 'number' }, tags: { type: 'array', items: { type: 'object' } }, spots: { type: 'array', items: { type: 'object' } }, is_public: { type: 'boolean' } } } } },
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    course_id: { type: 'string', format: 'uuid' },
+                    name: { type: 'string' },
+                    description: { type: 'string' },
+                    category: { type: 'string', nullable: true },
+                    region: { type: 'string' },
+                    sub_region: { type: 'string', nullable: true },
+                    route: { type: 'object' },
+                    total_distance: { type: 'integer' },
+                    estimated_duration: { type: 'integer' },
+                    difficulty: { type: 'string' },
+                    avg_rating: { type: 'number' },
+                    avg_difficulty: { type: 'number', nullable: true },
+                    review_count: { type: 'integer' },
+                    waypoints: {
+                      type: 'array',
+                      description: '경유지(스팟/핀) 목록 (권장 필드)',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          seq: { type: 'integer' },
+                          type: { type: 'string', enum: ['spot', 'pin'] },
+                          spot_id: { type: 'string', format: 'uuid', nullable: true },
+                          lat: { type: 'number', nullable: true },
+                          lng: { type: 'number', nullable: true },
+                          spot_name: { type: 'string', nullable: true },
+                          spot_lat: { type: 'number', nullable: true },
+                          spot_lng: { type: 'number', nullable: true },
+                          spot_categories: { type: 'array', nullable: true },
+                          segment_duration: { type: 'integer', nullable: true },
+                        },
+                      },
+                    },
+                    spots: {
+                      type: 'array',
+                      description: '경유지 목록 (하위 호환용 alias, waypoints와 동일)',
+                      items: { type: 'object' },
+                    },
+                    nearby_spots: { type: 'array', items: { type: 'object' } },
+                    tags: { type: 'array', items: { type: 'object' } },
+                    is_bookmarked: { type: 'boolean' },
+                    is_public: { type: 'boolean' },
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -1459,7 +1512,7 @@ const swaggerDefinition = {
         responses: {
           200: {
             description: '산책 기록 목록',
-            content: { 'application/json': { schema: { type: 'object', properties: { total: { type: 'integer' }, walks: { type: 'array', items: { type: 'object', properties: { walk_record_id: { type: 'string', format: 'uuid' }, course_name: { type: 'string' }, total_distance: { type: 'integer' }, is_completed: { type: 'boolean' }, started_at: { type: 'string', format: 'date-time' } } } } } } } },
+            content: { 'application/json': { schema: { type: 'object', properties: { total: { type: 'integer' }, walks: { type: 'array', items: { type: 'object', properties: { walk_record_id: { type: 'string', format: 'uuid' }, course_name: { type: 'string' }, total_distance: { type: 'integer' }, is_completed: { type: 'boolean' }, map_image_url: { type: 'string', nullable: true }, started_at: { type: 'string', format: 'date-time' } } } } } } } },
           },
         },
       },
@@ -1468,7 +1521,7 @@ const swaggerDefinition = {
       patch: {
         tags: ['산책 진행'],
         summary: '산책 종료',
-        description: '산책을 종료하고 통계를 저장합니다. 온디바이스(비신고) 모드에서는 GPS 궤적 전송 없이 total_distance, duration, is_completed 통계 요약값만 전송합니다.',
+        description: '산책을 종료하고 통계를 저장합니다. 온디바이스(비신고) 모드에서는 GPS 궤적 전송 없이 total_distance, duration, is_completed 통계 요약값 및 지도 캡처 이미지 URL(map_image_url)을 전송합니다.',
         parameters: [{ name: 'walk_record_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         requestBody: {
           content: {
@@ -1479,6 +1532,7 @@ const swaggerDefinition = {
                   total_distance: { type: 'integer', description: '총 이동 거리(m)', example: 2800 },
                   duration: { type: 'integer', description: '총 소요 시간(분)', example: 42 },
                   is_completed: { type: 'boolean', description: '완주 여부', example: true },
+                  map_image_url: { type: 'string', description: '산책 경로 지도 캡처 이미지 URL', example: 'https://walkbuddy-uploads-2026.s3.ap-northeast-2.amazonaws.com/walk-map-123.png' },
                 },
               },
             },
@@ -1487,7 +1541,7 @@ const swaggerDefinition = {
         responses: {
           200: {
             description: '산책 종료',
-            content: { 'application/json': { schema: { type: 'object', properties: { walk_record_id: { type: 'string', format: 'uuid' }, total_distance: { type: 'integer' }, duration: { type: 'integer' }, is_completed: { type: 'boolean' }, ended_at: { type: 'string', format: 'date-time' } } } } },
+            content: { 'application/json': { schema: { type: 'object', properties: { walk_record_id: { type: 'string', format: 'uuid' }, total_distance: { type: 'integer' }, duration: { type: 'integer' }, is_completed: { type: 'boolean' }, map_image_url: { type: 'string', nullable: true }, ended_at: { type: 'string', format: 'date-time' } } } } },
           },
         },
       },
@@ -1500,7 +1554,7 @@ const swaggerDefinition = {
         responses: {
           200: {
             description: '산책 기록 상세',
-            content: { 'application/json': { schema: { type: 'object', properties: { walk_record_id: { type: 'string', format: 'uuid' }, course: { type: 'object' }, total_distance: { type: 'integer' }, duration: { type: 'integer' }, is_completed: { type: 'boolean' } } } } },
+            content: { 'application/json': { schema: { type: 'object', properties: { walk_record_id: { type: 'string', format: 'uuid' }, course: { type: 'object' }, total_distance: { type: 'integer' }, duration: { type: 'integer' }, is_completed: { type: 'boolean' }, map_image_url: { type: 'string', nullable: true } } } } },
           },
         },
       },

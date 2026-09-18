@@ -28,20 +28,22 @@ exports.endWalk = async (userId, walkRecordId, stats = {}) => {
     throw err;
   }
 
-  const { total_distance, duration, is_completed } = stats;
+  const { total_distance, duration, is_completed, map_image_url } = stats;
 
   const { rows: [updated] } = await pool.query(
     `UPDATE walk_records
      SET ended_at       = NOW(),
          total_distance = COALESCE($1, total_distance, 0),
          duration       = COALESCE($2, ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60)::int, 0),
-         is_completed   = COALESCE($3, true)
-     WHERE walk_record_id = $4
-     RETURNING walk_record_id, course_id, total_distance, duration, is_completed, started_at, ended_at`,
+         is_completed   = COALESCE($3, true),
+         map_image_url  = COALESCE($4, map_image_url)
+     WHERE walk_record_id = $5
+     RETURNING walk_record_id, course_id, total_distance, duration, is_completed, map_image_url, started_at, ended_at`,
     [
       total_distance !== undefined ? Math.round(Number(total_distance)) : null,
       duration !== undefined ? Math.round(Number(duration)) : null,
       is_completed !== undefined ? Boolean(is_completed) : null,
+      map_image_url !== undefined ? map_image_url : null,
       walkRecordId
     ]
   );
@@ -60,6 +62,7 @@ exports.getWalkList = async (userId) => {
        wr.total_distance,
        wr.duration,
        wr.is_completed,
+       wr.map_image_url,
        wr.started_at,
        wr.ended_at,
        cr.course_review_id,
@@ -83,6 +86,7 @@ exports.getWalkList = async (userId) => {
     total_distance: r.total_distance,
     duration: r.duration,
     is_completed: r.is_completed,
+    map_image_url: r.map_image_url,
     started_at: r.started_at,
     ended_at: r.ended_at,
     needs_review: r.needs_review,
@@ -108,6 +112,7 @@ exports.getWalkDetail = async (userId, walkRecordId) => {
        wr.total_distance,
        wr.duration,
        wr.is_completed,
+       wr.map_image_url,
        wr.started_at,
        wr.ended_at,
        json_build_object(

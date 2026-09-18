@@ -883,6 +883,10 @@ CREATE TABLE walk_records (
     -- 산책 종료 시각
     -- 진행 중일 때는 NULL
 
+    map_image_url       VARCHAR(500)    NULL,
+    -- 산책 경로 지도 캡처 이미지 URL
+    -- 앱 로컬에서 캡처한 이미지를 업로드 후 저장
+
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
 
     CONSTRAINT pk_walk_records

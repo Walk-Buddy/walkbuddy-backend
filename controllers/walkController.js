@@ -11,13 +11,14 @@ exports.startWalk = async (req, res, next) => {
 // PATCH /api/walks/:walkRecordId/end
 exports.endWalk = async (req, res, next) => {
   try {
-    const { total_distance, duration, is_completed } = req.body;
+    const { total_distance, duration, is_completed, map_image_url } = req.body;
     
-    // 1번 방식(비신고): 위치 궤적 없이 통계 요약 데이터만 전달
+    // 1번 방식(비신고): 위치 궤적 없이 통계 요약 데이터 및 지도 캡처 이미지 URL 전달
     const result = await walkService.endWalk(req.user.user_id, req.params.walkRecordId, {
       total_distance,
       duration,
-      is_completed
+      is_completed,
+      map_image_url
     });
     return res.status(200).json(result);
   } catch (err) { next(err); }
