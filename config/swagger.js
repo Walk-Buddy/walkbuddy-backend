@@ -464,11 +464,13 @@ const swaggerDefinition = {
       get: {
         tags: ['코스'],
         summary: '코스 목록 조회',
-        description: '공개 코스 목록을 조회합니다. region(예: 춘천시, 마포구) 쿼리로 지역별 코스를 조회할 수 있습니다.',
+        description: '공개 코스 목록을 조회합니다. region(예: nowon, chuncheon / 노원구, 춘천시), category, is_cycle(순환형), difficulty_level(1~3), tag_name으로 필터링할 수 있습니다.',
         parameters: [
-          { name: 'region', in: 'query', schema: { type: 'string' }, description: '지역명 필터 (예: 춘천시, 마포구, 노원구)' },
-          { name: 'difficulty', in: 'query', schema: { type: 'string', enum: ['easy', 'medium', 'hard'] } },
-          { name: 'tags', in: 'query', schema: { type: 'array', items: { type: 'string' } } },
+          { name: 'region', in: 'query', schema: { type: 'string' }, description: '지역 필터 (예: nowon, chuncheon, 노원구, 춘천시)' },
+          { name: 'category', in: 'query', schema: { type: 'string', enum: ['둘레길·트레킹', '도심·골목산책', '수변·공원길'] }, description: '코스 표준 카테고리' },
+          { name: 'is_cycle', in: 'query', schema: { type: 'boolean' }, description: '순환형(원점회귀) 여부 (true: 순환형, false: 편도형)' },
+          { name: 'difficulty_level', in: 'query', schema: { type: 'integer', enum: [1, 2, 3] }, description: '난이도 (1: 쉬움, 2: 보통, 3: 어려움)' },
+          { name: 'tag_name', in: 'query', schema: { type: 'string' }, description: '코스 태그명 (예: 추천코스, 힐링, 반려동물, 무장애길, 아이와함께)' },
           { name: 'sort', in: 'query', schema: { type: 'string', enum: ['latest', 'rating'], default: 'latest' } },
           { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
@@ -476,7 +478,38 @@ const swaggerDefinition = {
         responses: {
           200: {
             description: '코스 목록',
-            content: { 'application/json': { schema: { type: 'object', properties: { total: { type: 'integer' }, page: { type: 'integer' }, courses: { type: 'array', items: { type: 'object', properties: { course_id: { type: 'string', format: 'uuid' }, name: { type: 'string' }, total_distance: { type: 'integer' }, estimated_duration: { type: 'integer' }, start_location: { type: 'object', properties: { lat: { type: 'number' }, lng: { type: 'number' } } }, difficulty: { type: 'string' }, avg_rating: { type: 'number' }, tags: { type: 'array', items: { type: 'object' } }, is_public: { type: 'boolean' } } } } } } } },
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    total: { type: 'integer' },
+                    page: { type: 'integer' },
+                    courses: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          course_id: { type: 'string', format: 'uuid' },
+                          name: { type: 'string' },
+                          description: { type: 'string' },
+                          category: { type: 'string', example: '둘레길·트레킹' },
+                          total_distance: { type: 'integer' },
+                          estimated_duration: { type: 'integer' },
+                          is_cycle: { type: 'boolean', description: '순환형 여부' },
+                          difficulty_level: { type: 'integer', description: '난이도 (1~3)' },
+                          start_location: { type: 'object', properties: { lat: { type: 'number' }, lng: { type: 'number' } } },
+                          avg_rating: { type: 'number' },
+                          review_count: { type: 'integer' },
+                          tags: { type: 'array', items: { type: 'object' } },
+                          is_public: { type: 'boolean' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -728,11 +761,13 @@ const swaggerDefinition = {
       get: {
         tags: ['스팟'],
         summary: '스팟 목록 조회',
-        description: '스팟 목록을 조회합니다. 온디바이스 모드에서는 region(예: 춘천시, 마포구) 쿼리로 지역별 스팟을 조회할 수 있습니다.',
+        description: '스팟 목록을 조회합니다. region(예: nowon, chuncheon / 노원구, 춘천시), category(10대 표준 카테고리), tag_name(음성해설, 열린관광, 야간명소 등) 쿼리로 필터링할 수 있습니다.',
         parameters: [
-          { name: 'region', in: 'query', schema: { type: 'string' }, description: '지역명 필터 (예: 춘천시, 마포구, 노원구)' },
-          { name: 'category', in: 'query', schema: { type: 'string' } },
-          { name: 'tag_ids', in: 'query', schema: { type: 'string' } },
+          { name: 'region', in: 'query', schema: { type: 'string' }, description: '지역 필터 (예: nowon, chuncheon, 노원구, 춘천시)' },
+          { name: 'category', in: 'query', schema: { type: 'string', enum: ['산·등산로', '숲·휴양림', '수목원·정원', '강·하천', '호수·저수지', '공원·광장', '역사·유적', '전시·문화공간', '카페·맛집', '전통시장·로컬마켓'] }, description: '스팟 10대 표준 카테고리' },
+          { name: 'tag_name', in: 'query', schema: { type: 'string' }, description: '스팟 태그명 (예: 음성해설, 열린관광, 야간명소, 포토존, 전통·한옥, 낮그늘, 실시간축제, 반려견동반, 화장실, 주차가능, 벤치·쉼터)' },
+          { name: 'tag_ids', in: 'query', schema: { type: 'string' }, description: '콤마로 구분된 태그 UUID 목록' },
+          { name: 'min_recommend_pct', in: 'query', schema: { type: 'number', minimum: 0, maximum: 100 }, description: '최소 추천율 (0~100)' },
           { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
         ],
@@ -745,6 +780,8 @@ const swaggerDefinition = {
                   type: 'object',
                   properties: {
                     total: { type: 'integer' },
+                    page: { type: 'integer' },
+                    limit: { type: 'integer' },
                     spots: {
                       type: 'array',
                       items: {
@@ -757,6 +794,12 @@ const swaggerDefinition = {
                           address: { type: 'string' },
                           categories: { type: 'array', items: { type: 'string' } },
                           recommend_pct: { type: 'number' },
+                          barrier_free_info: { type: 'object', nullable: true },
+                          is_night_tour: { type: 'boolean' },
+                          has_content_place: { type: 'boolean' },
+                          has_content_history: { type: 'boolean' },
+                          has_content_tour: { type: 'boolean' },
+                          tags: { type: 'array', items: { type: 'object' } },
                         },
                       },
                     },
@@ -1476,6 +1519,186 @@ const swaggerDefinition = {
           200: {
             description: '읽음 처리 완료',
             content: { 'application/json': { schema: { type: 'object', properties: { notification_id: { type: 'string', format: 'uuid' }, is_read: { type: 'boolean', example: true } } } } },
+          },
+        },
+      },
+    },
+
+    // ─────────────────────────────────────────
+    // 한국관광공사 TourAPI 4.0 실시간 연동 (공모전 트래픽 검증용)
+    // ─────────────────────────────────────────
+    '/api/tour/festivals': {
+      get: {
+        tags: ['관광공사 TourAPI (실시간)'],
+        summary: '서울(노원구) / 춘천 실시간 축제·행사 조회',
+        description: '한국관광공사 TourAPI searchFestival1 오퍼레이션을 실시간 호출하여 현재 진행 중인 축제/행사를 조회합니다.',
+        parameters: [
+          { name: 'region', in: 'query', schema: { type: 'string', default: 'nowon' }, description: '지역명 (nowon, chuncheon, 노원구, 춘천시)' },
+          { name: 'eventStartDate', in: 'query', schema: { type: 'string', example: '20260901' }, description: '조회 시작일 (YYYYMMDD 형식, 기본값: 오늘)' },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 10 } },
+        ],
+        responses: {
+          200: {
+            description: '실시간 축제 목록',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    total: { type: 'integer' },
+                    page: { type: 'integer' },
+                    limit: { type: 'integer' },
+                    region: { type: 'string', example: '노원구' },
+                    festivals: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          content_id: { type: 'string' },
+                          title: { type: 'string' },
+                          address: { type: 'string' },
+                          event_start_date: { type: 'string' },
+                          event_end_date: { type: 'string' },
+                          image_url: { type: 'string', nullable: true },
+                          tel: { type: 'string', nullable: true },
+                          x: { type: 'number' },
+                          y: { type: 'number' },
+                          region: { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    '/api/tour/spots': {
+      get: {
+        tags: ['관광공사 TourAPI (실시간)'],
+        summary: '실시간 지역/테마별 관광지 목록 조회',
+        description: '한국관광공사 TourAPI areaBasedList1 오퍼레이션을 실시간 호출하여 인기순 관광지 목록을 조회합니다.',
+        parameters: [
+          { name: 'region', in: 'query', schema: { type: 'string', default: 'nowon' }, description: '지역명 (nowon, chuncheon)' },
+          { name: 'contentTypeId', in: 'query', schema: { type: 'string', enum: ['12', '14', '15', '25', '28', '32', '38', '39'] }, description: '관광타입 (12:관광지, 14:문화시설, 15:축제, 28:레포츠, 38:쇼핑, 39:음식점)' },
+          { name: 'cat1', in: 'query', schema: { type: 'string' }, description: '대분류 (A01:자연, A02:인문, A03:레포츠, A04:쇼핑, A05:음식)' },
+          { name: 'cat2', in: 'query', schema: { type: 'string' }, description: '중분류 (A0101, A0201, A0206 등)' },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 10 } },
+        ],
+        responses: {
+          200: {
+            description: '실시간 관광지 목록',
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, total: { type: 'integer' }, spots: { type: 'array', items: { type: 'object' } } } } } },
+          },
+        },
+      },
+    },
+
+    '/api/tour/search': {
+      get: {
+        tags: ['관광공사 TourAPI (실시간)'],
+        summary: '실시간 관광지 키워드 검색',
+        description: '한국관광공사 TourAPI searchKeyword1 오퍼레이션을 실시간 호출하여 키워드로 관광지를 검색합니다.',
+        parameters: [
+          { name: 'keyword', in: 'query', required: true, schema: { type: 'string', example: '불암산' }, description: '검색 키워드' },
+          { name: 'region', in: 'query', schema: { type: 'string' }, description: '지역 필터 (nowon, chuncheon)' },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 10 } },
+        ],
+        responses: {
+          200: {
+            description: '검색 결과',
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, total: { type: 'integer' }, spots: { type: 'array', items: { type: 'object' } } } } } },
+          },
+        },
+      },
+    },
+
+    '/api/tour/spots/{content_id}/detail': {
+      get: {
+        tags: ['관광공사 TourAPI (실시간)'],
+        summary: '실시간 관광지 상세정보 및 갤러리 이미지 조회',
+        description: '한국관광공사 TourAPI detailCommon1 및 detailImage1을 실시간 호출하여 스토리텔링 개요와 고해상도 갤러리 이미지를 제공합니다.',
+        parameters: [
+          { name: 'content_id', in: 'path', required: true, schema: { type: 'string', example: '126508' }, description: '한국관광공사 contentId' },
+        ],
+        responses: {
+          200: {
+            description: '상세정보 및 사진 갤러리',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    spot: {
+                      type: 'object',
+                      properties: {
+                        content_id: { type: 'string' },
+                        title: { type: 'string' },
+                        overview: { type: 'string', description: '스토리텔링 개요 (음성해설 원천 데이터)' },
+                        homepage: { type: 'string', nullable: true },
+                        tel: { type: 'string', nullable: true },
+                        address: { type: 'string' },
+                        images: { type: 'array', items: { type: 'object', properties: { image_url: { type: 'string' }, small_image_url: { type: 'string' }, image_name: { type: 'string' } } } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    '/api/tour/spots/{content_id}/barrier-free': {
+      get: {
+        tags: ['관광공사 TourAPI (실시간)'],
+        summary: '실시간 열린관광(무장애 관광) 편의시설 정보 조회',
+        description: '한국관광공사 TourAPI detailWithTour1 오퍼레이션을 실시간 호출하여 장애인 주차장, 휠체어 대여, 점자블록, 수어안내 등의 무장애 정보를 조회합니다.',
+        parameters: [
+          { name: 'content_id', in: 'path', required: true, schema: { type: 'string', example: '126508' }, description: '한국관광공사 contentId' },
+        ],
+        responses: {
+          200: {
+            description: '무장애 편의시설 정보',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    barrier_free: {
+                      type: 'object',
+                      properties: {
+                        content_id: { type: 'string' },
+                        has_barrier_free_info: { type: 'boolean' },
+                        details: {
+                          type: 'object',
+                          properties: {
+                            parking: { type: 'string', nullable: true },
+                            route: { type: 'string', nullable: true },
+                            wheelchair: { type: 'string', nullable: true },
+                            disabled_restroom: { type: 'string', nullable: true },
+                            elevator: { type: 'string', nullable: true },
+                            braileblock: { type: 'string', nullable: true },
+                            help_dog: { type: 'string', nullable: true },
+                            audio_guide: { type: 'string', nullable: true },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },

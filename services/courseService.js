@@ -492,6 +492,11 @@ exports.createCourseFromWalk = async (userId, body) => {
 exports.getCourses = async (query, currentUserId) => {
   const {
     region,
+    category,
+    is_cycle,
+    difficulty_level,
+    tag_name,
+    tag_names,
     page = 1, limit = 20,
     sort = 'latest',        // latest | rating
     is_public,
@@ -514,11 +519,64 @@ exports.getCourses = async (query, currentUserId) => {
       params.push(is_public === 'true');
     }
 
-    // 지역(region) 필터 (예: 춘천시, 마포구 등)
+    // 지역(region) 필터 (노원구 / 춘천시 등)
     if (region && String(region).trim()) {
+      const normalizedRegion = String(region).trim().toLowerCase();
+      let searchKeyword = String(region).trim();
+      if (normalizedRegion === 'nowon' || normalizedRegion === '노원' || normalizedRegion === '노원구' || normalizedRegion === 'seoul' || normalizedRegion === '서울') {
+        searchKeyword = '노원';
+      } else if (normalizedRegion === 'chuncheon' || normalizedRegion === '춘천' || normalizedRegion === '춘천시') {
+        searchKeyword = '춘천';
+      }
       conditions.push(`(c.name ILIKE $${idx} OR c.description ILIKE $${idx})`);
-      params.push(`%${String(region).trim()}%`);
+      params.push(`%${searchKeyword}%`);
       idx += 1;
+    }
+
+    // 코스 카테고리 필터
+    if (category && String(category).trim()) {
+      conditions.push(`c.category ILIKE $${idx}`);
+      params.push(`%${String(category).trim()}%`);
+      idx += 1;
+    }
+
+    // 순환형(원점회귀) 필터
+    if (is_cycle !== undefined && is_cycle !== null && is_cycle !== '') {
+      conditions.push(`c.is_cycle = $${idx++}`);
+      params.push(String(is_cycle) === 'true' || is_cycle === true);
+    }
+
+    // 난이도 필터 (1: 쉬움, 2: 보통, 3: 어려움)
+    if (difficulty_level !== undefined && difficulty_level !== null && difficulty_level !== '') {
+      const level = Number(difficulty_level);
+      if (Number.isFinite(level) && level >= 1 && level <= 3) {
+        conditions.push(`c.difficulty_level = $${idx++}`);
+        params.push(level);
+      }
+    }
+
+    // 태그명 필터
+    const targetTagNames = tag_name || tag_names;
+    if (targetTagNames) {
+      const tagNameList = (Array.isArray(targetTagNames) ? targetTagNames.join(',') : targetTagNames)
+        .split(',')
+        .map((t) => t.trim().replace(/^#/, ''))
+        .filter(Boolean);
+
+      if (tagNameList.length > 0) {
+        conditions.push(`
+          c.course_id IN (
+            SELECT tg.target_id
+            FROM taggings tg
+            JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'course' AND t.is_active = TRUE
+            WHERE tg.target_type = 'course' AND t.name = ANY($${idx}::TEXT[])
+            GROUP BY tg.target_id HAVING COUNT(DISTINCT t.name) >= $${idx + 1}
+          )
+        `);
+        params.push(tagNameList);
+        params.push(tagNameList.length);
+        idx += 2;
+      }
     }
 
     const orderMap = {
@@ -531,6 +589,7 @@ exports.getCourses = async (query, currentUserId) => {
       SELECT
         c.course_id, c.name, c.description, c.category,
         c.total_distance, c.estimated_duration,
+        c.is_cycle, c.difficulty_level,
         c.is_public, c.created_at,
         ST_Y(ST_StartPoint(c.route_geometry::geometry)) AS start_lat,
         ST_X(ST_StartPoint(c.route_geometry::geometry)) AS start_lng,
@@ -571,6 +630,8 @@ exports.getCourses = async (query, currentUserId) => {
 
     const formattedCourses = rows.map((r) => ({
       ...r,
+      is_cycle: Boolean(r.is_cycle),
+      difficulty_level: Number(r.difficulty_level || 1),
       start_location: r.start_lat && r.start_lng ? { lat: Number(r.start_lat), lng: Number(r.start_lng) } : null,
     }));
 

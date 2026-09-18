@@ -301,14 +301,16 @@ async function enrichKakaoSpotTourContent(spot, userId) {
 // 스팟 목록 조회
 // ──────────────────────────────────────────────────────────────────────
 exports.getSpots = async (query) => {
-    const { category, tag_ids, min_recommend_pct, region, page = 1, limit = 20 } = query;
+    const { category, tag_ids, tag_name, tag_names, min_recommend_pct, region, page = 1, limit = 20 } = query;
     const offset = (Number(page) - 1) * Number(limit);
     const whereConditions = ["s.status = 'active'"];
     const queryValues = [];
     let orderBySql = 's.created_at DESC';
 
     if (region && String(region).trim()) {
-        queryValues.push(`%${String(region).trim()}%`);
+        const target = resolveRegion(region);
+        const searchKeyword = target ? target.name : String(region).trim();
+        queryValues.push(`%${searchKeyword}%`);
         whereConditions.push(`(s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
     }
 
@@ -323,6 +325,7 @@ exports.getSpots = async (query) => {
         whereConditions.push(`s.categories @> ARRAY[$${queryValues.length}]::TEXT[]`);
     }
 
+    // 태그 ID 목록 검색 (UUID)
     if (tag_ids) {
         const tagIdList = (Array.isArray(tag_ids) ? tag_ids.join(',') : tag_ids)
             .split(',').map(t => t.trim()).filter(Boolean);
@@ -339,6 +342,29 @@ exports.getSpots = async (query) => {
                     SELECT tg.target_id FROM taggings tg
                     WHERE tg.target_type = 'spot' AND tg.tag_id = ANY($${tagIdx}::UUID[])
                     GROUP BY tg.target_id HAVING COUNT(DISTINCT tg.tag_id) = $${cntIdx}
+                )
+            `);
+        }
+    }
+
+    // 태그 이름(tag_name / tag_names) 검색 지원
+    const targetTagNames = tag_name || tag_names;
+    if (targetTagNames) {
+        const tagNameList = (Array.isArray(targetTagNames) ? targetTagNames.join(',') : targetTagNames)
+            .split(',')
+            .map(t => t.trim().replace(/^#/, ''))
+            .filter(Boolean);
+
+        if (tagNameList.length > 0) {
+            queryValues.push(tagNameList); const tagNamesIdx = queryValues.length;
+            queryValues.push(tagNameList.length); const tagCntIdx = queryValues.length;
+            whereConditions.push(`
+                s.spot_id IN (
+                    SELECT tg.target_id
+                    FROM taggings tg
+                    JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'spot' AND t.is_active = TRUE
+                    WHERE tg.target_type = 'spot' AND t.name = ANY($${tagNamesIdx}::TEXT[])
+                    GROUP BY tg.target_id HAVING COUNT(DISTINCT t.name) >= $${tagCntIdx}
                 )
             `);
         }
@@ -365,6 +391,7 @@ exports.getSpots = async (query) => {
     const spotsResult = await pool.query(
         `SELECT
             s.spot_id, s.name, s.address, s.categories, s.recommend_pct,
+            s.barrier_free_info, s.is_night_tour,
             ST_X(s.location::GEOMETRY) AS x,
             ST_Y(s.location::GEOMETRY) AS y,
             s.content_place IS NOT NULL AS has_content_place,
@@ -411,6 +438,7 @@ exports.getSpotById = async (spotId) => {
         `SELECT
             s.spot_id, s.name, s.address, s.categories, s.kakao_category_name,
             s.recommend_pct, s.source, s.content_place, s.content_history, s.content_tour,
+            s.barrier_free_info, s.is_night_tour,
             ST_X(s.location::GEOMETRY) AS x,
             ST_Y(s.location::GEOMETRY) AS y,
             COALESCE(
