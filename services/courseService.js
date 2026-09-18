@@ -540,14 +540,18 @@ exports.getCourses = async (query, currentUserId) => {
       idx += 1;
     }
 
-    // 순환형(원점회귀) 필터
-    if (is_cycle !== undefined && is_cycle !== null && is_cycle !== '') {
-      conditions.push(`c.is_cycle = $${idx++}`);
-      params.push(String(is_cycle) === 'true' || is_cycle === true);
+    // 순환형(원점회귀) 필터 (선택 안 됨/all/빈값일 경우 조건 없이 전체 조회)
+    if (is_cycle !== undefined && is_cycle !== null && is_cycle !== '' && is_cycle !== 'all' && is_cycle !== 'ALL') {
+      const isCycleStr = String(is_cycle).trim().toLowerCase();
+      if (isCycleStr === 'true' || isCycleStr === '1') {
+        conditions.push(`c.is_cycle = TRUE`);
+      } else if (isCycleStr === 'false' || isCycleStr === '0') {
+        conditions.push(`c.is_cycle = FALSE`);
+      }
     }
 
-    // 난이도 필터 (1: 쉬움, 2: 보통, 3: 어려움)
-    if (difficulty_level !== undefined && difficulty_level !== null && difficulty_level !== '') {
+    // 난이도 필터 (1: 쉬움, 2: 보통, 3: 어려움 / 선택 안 됨/all/0/빈값일 경우 조건 없이 전체 조회)
+    if (difficulty_level !== undefined && difficulty_level !== null && difficulty_level !== '' && difficulty_level !== 'all' && difficulty_level !== 'ALL' && difficulty_level !== '0' && difficulty_level !== 0) {
       const level = Number(difficulty_level);
       if (Number.isFinite(level) && level >= 1 && level <= 3) {
         conditions.push(`c.difficulty_level = $${idx++}`);

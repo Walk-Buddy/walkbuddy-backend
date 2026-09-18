@@ -332,6 +332,12 @@ CREATE TABLE spots (
     -- 후기 등록·수정·삭제 시 트리거 또는 앱단에서 업데이트
     -- 후기 없을 시 NULL
 
+    barrier_free_info   JSONB           NULL,
+    -- 무장애 여행정보(열린관광/KorWithService2 연동 데이터)
+
+    is_night_tour       BOOLEAN         NOT NULL DEFAULT FALSE,
+    -- 야간명소 여부
+
     status              VARCHAR(20)     NOT NULL DEFAULT 'active',
     -- 'active': 정상 / 'hidden': 신고로 숨김
 
@@ -457,6 +463,12 @@ CREATE TABLE courses (
 
     estimated_duration  INT             NOT NULL,
     -- 예상 소요 시간 (분 단위, 도보 평균 속도 기반 자동 계산)
+
+    is_cycle            BOOLEAN         NOT NULL DEFAULT FALSE,
+    -- 순환형(원점회귀) 여부 (TRUE: 순환형, FALSE: 편도형)
+
+    difficulty_level    SMALLINT        NOT NULL DEFAULT 1,
+    -- 코스 기본 난이도 (1: 쉬움, 2: 보통, 3: 어려움)
 
     is_public           BOOLEAN         NOT NULL DEFAULT TRUE,
     -- 공개/비공개 설정
