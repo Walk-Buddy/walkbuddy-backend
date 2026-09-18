@@ -566,21 +566,21 @@ const swaggerDefinition = {
     '/api/tags': {
       get: {
         tags: ['태그'],
-        summary: '전체 태그 목록 조회',
-        description: '사용자가 선택할 수 있는 활성 태그를 코스 태그와 스팟 태그, 그리고 세부 그룹(group_name: 시설·편의, 분위기·테마 등)별로 반환합니다.',
+        summary: '전체 태그 목록 조회 (계층형/그룹형)',
+        description: '사용자가 선택할 수 있는 활성 태그 목록을 코스/스팟 태그 및 큰 태그(group_name: 열린관광, 반려동물, 시설·편의, 분위기·테마 등) 기준의 계층형 딕셔너리로 반환합니다. 프론트엔드에서 대분류 탭/아코디언 선택 후 세부 태그를 선택하는 UI 구성에 사용합니다.',
         security: [],
         responses: {
           200: {
-            description: '태그 목록',
+            description: '태그 목록 (대분류-소분류 계층형 제공)',
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
                   properties: {
                     success: { type: 'boolean', example: true },
-                    total: { type: 'integer', example: 21 },
+                    total: { type: 'integer', example: 35 },
                     course_count: { type: 'integer', example: 7 },
-                    spot_count: { type: 'integer', example: 14 },
+                    spot_count: { type: 'integer', example: 28 },
                     course_tags: {
                       type: 'array',
                       items: {
@@ -599,15 +599,15 @@ const swaggerDefinition = {
                         type: 'object',
                         properties: {
                           tag_id: { type: 'string', format: 'uuid' },
-                          name: { type: 'string', example: '화장실' },
+                          name: { type: 'string', example: '휠체어접근' },
                           type: { type: 'string', example: 'spot' },
-                          group_name: { type: 'string', example: '시설·편의' },
+                          group_name: { type: 'string', example: '열린관광' },
                         },
                       },
                     },
                     course_tags_by_group: {
                       type: 'object',
-                      description: '그룹별로 묶인 코스 태그 목록',
+                      description: '대분류 그룹별로 묶인 코스 태그 목록 (큰 태그 -> 작은 태그 UI용)',
                       example: {
                         '추천·테마': [{ tag_id: 'uuid', name: '추천산책로', type: 'course', group_name: '추천·테마' }],
                         '동반·접근성': [{ tag_id: 'uuid', name: '무장애길', type: 'course', group_name: '동반·접근성' }],
@@ -615,10 +615,34 @@ const swaggerDefinition = {
                     },
                     spot_tags_by_group: {
                       type: 'object',
-                      description: '그룹별로 묶인 스팟 태그 목록',
+                      description: '대분류 그룹별로 묶인 스팟 태그 목록 (큰 태그 -> 작은 태그 UI용)',
                       example: {
-                        '시설·편의': [{ tag_id: 'uuid', name: '화장실', type: 'spot', group_name: '시설·편의' }],
-                        '분위기·테마': [{ tag_id: 'uuid', name: '포토존', type: 'spot', group_name: '분위기·테마' }],
+                        '열린관광': [
+                          { tag_id: 'uuid', name: '휠체어접근', type: 'spot', group_name: '열린관광' },
+                          { tag_id: 'uuid', name: '무단차통로', type: 'spot', group_name: '열린관광' },
+                          { tag_id: 'uuid', name: '장애인화장실', type: 'spot', group_name: '열린관광' },
+                          { tag_id: 'uuid', name: '유모차대여', type: 'spot', group_name: '열린관광' },
+                          { tag_id: 'uuid', name: '수유실', type: 'spot', group_name: '열린관광' },
+                          { tag_id: 'uuid', name: '점자안내', type: 'spot', group_name: '열린관광' },
+                          { tag_id: 'uuid', name: '오디오가이드', type: 'spot', group_name: '열린관광' },
+                        ],
+                        '반려동물': [
+                          { tag_id: 'uuid', name: '반려견동반', type: 'spot', group_name: '반려동물' },
+                          { tag_id: 'uuid', name: '대형견가능', type: 'spot', group_name: '반려동물' },
+                          { tag_id: 'uuid', name: '소형견동반', type: 'spot', group_name: '반려동물' },
+                          { tag_id: 'uuid', name: '반려견놀이터', type: 'spot', group_name: '반려동물' },
+                          { tag_id: 'uuid', name: '반려견배변시설', type: 'spot', group_name: '반려동물' },
+                          { tag_id: 'uuid', name: '도우미견환영', type: 'spot', group_name: '반려동물' },
+                        ],
+                        '시설·편의': [
+                          { tag_id: 'uuid', name: '화장실', type: 'spot', group_name: '시설·편의' },
+                          { tag_id: 'uuid', name: '주차가능', type: 'spot', group_name: '시설·편의' },
+                          { tag_id: 'uuid', name: '벤치·쉼터', type: 'spot', group_name: '시설·편의' },
+                        ],
+                        '분위기·테마': [
+                          { tag_id: 'uuid', name: '포토존', type: 'spot', group_name: '분위기·테마' },
+                          { tag_id: 'uuid', name: '야간명소', type: 'spot', group_name: '분위기·테마' },
+                        ],
                       },
                     },
                   },
@@ -1214,20 +1238,122 @@ const swaggerDefinition = {
     '/api/spots/kakao': {
       post: {
         tags: ['스팟'],
-        summary: '카카오 스팟 저장/조회',
-        description: '사용자가 카카오 API 검색 결과에서 특정 장소를 선택했을 때 호출합니다. DB 저장 기준은 카카오 장소이며, 저장 후 같은 좌표 주변의 TourAPI locationBasedList2 후보와 이름을 매칭합니다. 일치하는 관광 콘텐츠가 있으면 detailCommon2의 overview를 spots.content_tour에 저장해 AI 관광 음성 안내 원문으로 사용합니다. TourAPI 보강 실패는 카카오 스팟 저장 실패로 처리하지 않습니다.',
+        summary: '카카오 스팟 저장/조회 및 관광공사 다각화 데이터 자동 결합',
+        description: '사용자가 카카오 API 검색 결과에서 특정 장소를 선택했을 때 호출합니다. DB 저장 기준은 카카오 장소이며, 저장 후 같은 좌표 주변의 TourAPI(위치기반 관광정보, 무장애 관광정보 KorWithService2, 반려동물 동반여행 KorPetTourService2)를 전방위 결합합니다. 관광 개요(overview), 무장애 편의시설(barrier_free_info), 반려동물 규정 등을 분석하여 계층형 세부 태그(#휠체어접근, #무단차통로, #장애인화장실, #소형견동반 등)를 자동 부착합니다. TourAPI 보강 실패는 카카오 스팟 저장 실패로 처리하지 않습니다.',
         requestBody: {
           required: true,
           content: { 'application/json': { schema: { type: 'object', required: ['kakao_place_id', 'name', 'categories', 'x', 'y'], properties: { kakao_place_id: { type: 'string', description: '카카오 Local API documents[].id' }, name: { type: 'string', description: '카카오 Local API documents[].place_name' }, kakao_category_name: { type: 'string', nullable: true, example: '여행 > 관광,명소 > 문화유적 > 탑,비석' }, categories: { type: 'array', items: { type: 'string' }, minItems: 1, description: '앱 기준 카테고리로 매핑되면 앱 카테고리, 매핑되지 않으면 카카오 category_name의 3번째 값, 없으면 2번째 값을 사용합니다. 예: 공원·광장, 문화유적' }, address: { type: 'string', nullable: true, description: '이미 정리된 주소. road_address_name이 없을 때 사용 가능' }, road_address_name: { type: 'string', nullable: true, description: '카카오 도로명 주소. 있으면 우선 저장' }, address_name: { type: 'string', nullable: true, description: '카카오 지번 주소. 도로명 주소가 없을 때 fallback' }, x: { type: 'number', description: '장소 경도(lng)' }, y: { type: 'number', description: '장소 위도(lat)' } } } } },
         },
         responses: {
           200: {
-            description: '이미 저장된 스팟 반환',
-            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, is_created: { type: 'boolean', example: false }, tour_content_enriched: { type: 'boolean', example: true }, tour_content_status: { type: 'string', example: 'enriched' }, tour_content_match: { type: 'object', nullable: true, properties: { content_id: { type: 'string' }, title: { type: 'string' }, distance: { type: 'number', nullable: true } } }, spot: { type: 'object', properties: { spot_id: { type: 'string', format: 'uuid' }, kakao_place_id: { type: 'string' }, name: { type: 'string' }, address: { type: 'string', nullable: true }, region: { type: 'string', example: '서울' }, sub_region: { type: 'string', example: '노원구', nullable: true }, categories: { type: 'array', items: { type: 'string' } }, kakao_category_name: { type: 'string', nullable: true }, recommend_pct: { type: 'number', nullable: true }, content_tour: { type: 'string', nullable: true }, x: { type: 'number' }, y: { type: 'number' } } } } } } },
+            description: '이미 저장된 스팟 반환 (새로운 관광공사 정보 및 태그 보강 적용)',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    is_created: { type: 'boolean', example: false },
+                    tour_content_enriched: { type: 'boolean', example: true, description: 'TourAPI 개요(overview) 보강 여부' },
+                    barrier_free_enriched: { type: 'boolean', example: true, description: 'TourAPI 무장애 편의시설 정보 보강 여부' },
+                    pet_tour_enriched: { type: 'boolean', example: true, description: 'TourAPI 반려동물 동반 정보 보강 여부' },
+                    tour_content_status: { type: 'string', example: 'enriched', enum: ['enriched', 'matched_without_new_content', 'no_match_found', 'tour_api_error'] },
+                    tour_content_match: {
+                      type: 'object',
+                      nullable: true,
+                      properties: {
+                        content_id: { type: 'string', example: '126508' },
+                        title: { type: 'string', example: '경복궁' },
+                        distance: { type: 'number', example: 15.2, description: '카카오 좌표와 TourAPI 좌표 간 거리(m)' },
+                      },
+                    },
+                    attached_tags: {
+                      type: 'array',
+                      items: { type: 'string' },
+                      example: ['휠체어접근', '무단차통로', '장애인화장실', '소형견동반'],
+                      description: '관광공사 데이터 분석을 통해 자동으로 부착된 계층형 세부 태그 목록',
+                    },
+                    spot: {
+                      type: 'object',
+                      properties: {
+                        spot_id: { type: 'string', format: 'uuid' },
+                        kakao_place_id: { type: 'string' },
+                        name: { type: 'string' },
+                        address: { type: 'string', nullable: true },
+                        region: { type: 'string', example: '서울' },
+                        sub_region: { type: 'string', example: '종로구', nullable: true },
+                        categories: { type: 'array', items: { type: 'string' } },
+                        kakao_category_name: { type: 'string', nullable: true },
+                        recommend_pct: { type: 'number', nullable: true },
+                        content_tour: { type: 'string', nullable: true, description: 'TourAPI 관광 해설 개요' },
+                        barrier_free_info: {
+                          type: 'object',
+                          nullable: true,
+                          description: '무장애(열린관광) 편의시설 상세 데이터',
+                          example: {
+                            wheelchair: '대여 가능',
+                            restroom: '장애인 전용 화장실 구비',
+                            parking: '장애인 전용 주차구역 완비',
+                          },
+                        },
+                        x: { type: 'number' },
+                        y: { type: 'number' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
           201: {
-            description: '새 스팟 저장 완료',
-            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, is_created: { type: 'boolean', example: true }, tour_content_enriched: { type: 'boolean', example: true }, tour_content_status: { type: 'string', example: 'enriched' }, tour_content_match: { type: 'object', nullable: true, properties: { content_id: { type: 'string' }, title: { type: 'string' }, distance: { type: 'number', nullable: true } } }, spot: { type: 'object', properties: { spot_id: { type: 'string', format: 'uuid' }, kakao_place_id: { type: 'string' }, name: { type: 'string' }, address: { type: 'string', nullable: true }, region: { type: 'string', example: '서울' }, sub_region: { type: 'string', example: '노원구', nullable: true }, categories: { type: 'array', items: { type: 'string' } }, kakao_category_name: { type: 'string', nullable: true }, recommend_pct: { type: 'number', nullable: true }, content_tour: { type: 'string', nullable: true }, x: { type: 'number' }, y: { type: 'number' } } } } } } },
+            description: '새 스팟 저장 완료 (새로운 관광공사 정보 및 태그 보강 적용)',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    is_created: { type: 'boolean', example: true },
+                    tour_content_enriched: { type: 'boolean', example: true },
+                    barrier_free_enriched: { type: 'boolean', example: true },
+                    pet_tour_enriched: { type: 'boolean', example: true },
+                    tour_content_status: { type: 'string', example: 'enriched' },
+                    tour_content_match: {
+                      type: 'object',
+                      nullable: true,
+                      properties: {
+                        content_id: { type: 'string', example: '126508' },
+                        title: { type: 'string', example: '경복궁' },
+                        distance: { type: 'number', example: 15.2 },
+                      },
+                    },
+                    attached_tags: {
+                      type: 'array',
+                      items: { type: 'string' },
+                      example: ['휠체어접근', '무단차통로', '장애인화장실', '소형견동반'],
+                    },
+                    spot: {
+                      type: 'object',
+                      properties: {
+                        spot_id: { type: 'string', format: 'uuid' },
+                        kakao_place_id: { type: 'string' },
+                        name: { type: 'string' },
+                        address: { type: 'string', nullable: true },
+                        region: { type: 'string', example: '서울' },
+                        sub_region: { type: 'string', example: '종로구', nullable: true },
+                        categories: { type: 'array', items: { type: 'string' } },
+                        kakao_category_name: { type: 'string', nullable: true },
+                        recommend_pct: { type: 'number', nullable: true },
+                        content_tour: { type: 'string', nullable: true },
+                        barrier_free_info: { type: 'object', nullable: true },
+                        x: { type: 'number' },
+                        y: { type: 'number' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
           400: {
             description: '필수값 누락 또는 잘못된 카테고리/좌표',

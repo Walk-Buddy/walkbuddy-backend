@@ -285,7 +285,7 @@ exports.getSpotReviews = async (spotId, query, userId) => {
      LEFT JOIN reactions r_dislike ON r_dislike.target_id = sr.spot_review_id AND r_dislike.target_type = 'spot_review' AND r_dislike.reaction = 'dislike'
      LEFT JOIN reactions my_r ON my_r.target_id = sr.spot_review_id AND my_r.target_type = 'spot_review' AND my_r.user_id = ${myReactionParamIdx === 'NULL' ? 'NULL' : '$' + myReactionParamIdx}
      WHERE ${whereClause}
-     GROUP BY sr.spot_review_id, u.user_id
+     GROUP BY sr.spot_review_id, u.user_id, lc.course_id, lc.name
      ORDER BY sr.created_at DESC
      LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}`,
     listParams

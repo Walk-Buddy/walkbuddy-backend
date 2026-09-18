@@ -1123,15 +1123,15 @@ function calcSegmentDuration(from, to) {
 // 코스 수정
 // ──────────────────────────────────────────────────────────────────────
 exports.updateCourse = async (userId, courseId, body) => {
-  const { name, description, category, region, sub_region, is_public, tag_ids, waypoints } = body;
+  const { name, description, category, region, sub_region, is_public, tag_ids, waypoints, route } = body;
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // 소유자 확인
+    // 소유자 확인 및 기존 코스 정보 조회
     const { rows: [course] } = await client.query(
-      `SELECT owner_id, region, sub_region FROM courses WHERE course_id=$1 AND status != 'deleted'`,
+      `SELECT owner_id, name, description, category, region, sub_region, is_public FROM courses WHERE course_id=$1 AND status != 'deleted'`,
       [courseId]
     );
     if (!course) {
@@ -1141,20 +1141,41 @@ exports.updateCourse = async (userId, courseId, body) => {
       const err = new Error('수정 권한이 없습니다.'); err.status = 403; throw err;
     }
 
-    // 경유지 변경 시 route_geometry 재계산
+    // 미전달된 필드는 기존 코스 값 유지 (부분 수정 지원)
+    const nextName = name !== undefined ? name.trim() : course.name;
+    const nextDescription = description !== undefined ? description : course.description;
+    const nextCategory = category !== undefined ? category : course.category;
+    const nextRegion = region !== undefined ? region : course.region;
+    const nextSubRegion = sub_region !== undefined ? sub_region : course.sub_region;
+    const nextIsPublic = is_public !== undefined ? (is_public === true || is_public === 'true') : course.is_public;
+
+    // 경로 변경 시 route_geometry 재계산
     let extraSets = '';
     let extraParams = [];
     let paramIdx = 7; // $1=name $2=description $3=category $4=region $5=sub_region $6=is_public 이후
 
-    const nextRegion = region !== undefined ? region : course.region;
-    const nextSubRegion = sub_region !== undefined ? sub_region : course.sub_region;
+    if (route) {
+      const coordinates = route.coordinates ?? route;
+      const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
+      const wkt = await buildLineString(routeWaypoints, client);
+      const stats = await calcStats(wkt, client);
+      const duration = body.estimated_duration ? Math.ceil(body.estimated_duration) : stats.estimatedDuration;
+      extraSets = `, route_geometry=$${paramIdx}::geography, total_distance=$${paramIdx+1}, estimated_duration=$${paramIdx+2}`;
+      extraParams = [wkt, stats.totalDistance, duration];
+      paramIdx += 3;
 
-    if (waypoints) {
+      if (waypoints && waypoints.length) {
+        validateWaypoints(waypoints, { minLength: 0 });
+        await client.query(`DELETE FROM course_waypoints WHERE course_id=$1`, [courseId]);
+        await insertWaypoints(courseId, waypoints, client);
+      }
+    } else if (waypoints) {
       validateWaypoints(waypoints, { minLength: 2 });
       const wkt = await buildLineString(waypoints, client);
       const { totalDistance, estimatedDuration } = await calcStats(wkt, client);
+      const duration = body.estimated_duration ? Math.ceil(body.estimated_duration) : estimatedDuration;
       extraSets = `, route_geometry=$${paramIdx}::geography, total_distance=$${paramIdx+1}, estimated_duration=$${paramIdx+2}`;
-      extraParams = [wkt, totalDistance, estimatedDuration];
+      extraParams = [wkt, totalDistance, duration];
       paramIdx += 3;
 
       // 경유지 교체
@@ -1166,16 +1187,18 @@ exports.updateCourse = async (userId, courseId, body) => {
       `UPDATE courses
        SET name=$1, description=$2, category=$3, region=$4, sub_region=$5, is_public=$6${extraSets}, updated_at=NOW()
        WHERE course_id=$${paramIdx}
-       RETURNING course_id, name, region, sub_region, total_distance, estimated_duration, updated_at`,
-      [name, description ?? null, category ?? null, nextRegion, nextSubRegion, is_public ?? true, ...extraParams, courseId]
+       RETURNING course_id, name, description, category, region, sub_region, is_public, total_distance, estimated_duration, updated_at`,
+      [nextName, nextDescription, nextCategory, nextRegion, nextSubRegion, nextIsPublic, ...extraParams, courseId]
     );
 
     // 태그 교체
-    if (tag_ids) {
+    if (tag_ids !== undefined) {
       await client.query(
         `DELETE FROM taggings WHERE target_id=$1 AND target_type='course'`, [courseId]
       );
-      await insertTags(tag_ids, courseId, userId, client);
+      if (Array.isArray(tag_ids) && tag_ids.length) {
+        await insertTags(tag_ids, courseId, userId, client);
+      }
     }
 
     await client.query('COMMIT');

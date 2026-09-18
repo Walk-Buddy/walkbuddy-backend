@@ -67,6 +67,8 @@ exports.updateCourse = async (req, res, next) => {
 
     if (name !== undefined && !name?.trim())
       return res.status(400).json({ success: false, message: '코스 이름은 필수입니다.' });
+    if (name !== undefined && name.length > 100)
+      return res.status(400).json({ success: false, message: '코스 이름은 100자 이하여야 합니다.' });
     if (waypoints !== undefined && (!Array.isArray(waypoints)))
       return res.status(400).json({ success: false, message: 'waypoints 형식이 올바르지 않습니다.' });
 
