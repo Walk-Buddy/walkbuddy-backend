@@ -1781,6 +1781,141 @@ const swaggerDefinition = {
         },
       },
     },
+
+    '/api/tour/spots/{content_id}/pet': {
+      get: {
+        tags: ['관광공사 TourAPI (실시간)'],
+        summary: '실시간 스팟별 반려동물 동반 상세 정보 조회 (KorPetTourService2)',
+        description: '한국관광공사 반려동물 동반여행 서비스(KorPetTourService2) detailPetTour2 오퍼레이션을 실시간 호출하여 동반 가능 크기, 비치 품목, 주의사항 등을 조회합니다.',
+        parameters: [
+          { name: 'content_id', in: 'path', required: true, schema: { type: 'string', example: '2654601' }, description: '한국관광공사 contentId' },
+        ],
+        responses: {
+          200: {
+            description: '반려동물 동반 정보 조회 성공',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    pet_tour: {
+                      type: 'object',
+                      properties: {
+                        content_id: { type: 'string', example: '2654601' },
+                        has_pet_info: { type: 'boolean', example: true },
+                        summary_tags: { type: 'array', items: { type: 'string' }, example: ['#반려견동반'] },
+                        details: {
+                          type: 'object',
+                          properties: {
+                            pet_tour_info: { type: 'string', nullable: true },
+                            accident_risk: { type: 'string', nullable: true },
+                            accompany_type: { type: 'string', example: '일부구역 동반가능' },
+                            facilities: { type: 'string', nullable: true },
+                            furnished_items: { type: 'string', nullable: true },
+                            purchasable_items: { type: 'string', nullable: true },
+                            rentable_items: { type: 'string', nullable: true },
+                            allowed_pet_size: { type: 'string', example: '전 견종 동반 가능' },
+                            recommend_pet_pattern: { type: 'string', nullable: true },
+                            extra_fee: { type: 'string', nullable: true },
+                            etc_info: { type: 'string', example: '- 맹견의 경우, 입마개 착용 필수\n- 배변봉투 지참 및 배변처리 필수' },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    '/api/tour/pet/spots': {
+      get: {
+        tags: ['관광공사 TourAPI (실시간)'],
+        summary: '실시간 지역별 반려동물 동반 가능 스팟 목록 조회 (LBS 미신고 안전)',
+        description: '스마트폰 GPS 대신 사용자가 선택한 지역(서울 25개 구 / 춘천) 파라미터만 받아 한국관광공사 KorPetTourService2 areaBasedList2를 실시간 호출합니다.',
+        parameters: [
+          { name: 'region', in: 'query', schema: { type: 'string', default: 'nowon' }, description: '지역 (서울 25개 구: nowon, gangnam 등 / chuncheon)' },
+          { name: 'contentTypeId', in: 'query', schema: { type: 'string' }, description: '관광타입 (선택: 12:관광지, 14:문화시설, 28:레포츠, 38:쇼핑, 39:음식점)' },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 10 } },
+        ],
+        responses: {
+          200: {
+            description: '목록 조회 성공',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    total: { type: 'integer', example: 1 },
+                    page: { type: 'integer', example: 1 },
+                    limit: { type: 'integer', example: 10 },
+                    region: { type: 'string', example: '노원구' },
+                    spots: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          content_id: { type: 'string', example: '2654601' },
+                          content_type_id: { type: 'string', example: '12' },
+                          title: { type: 'string', example: '화랑대 철도공원' },
+                          address: { type: 'string', example: '서울특별시 노원구 화랑로 608 (공릉동)' },
+                          image_url: { type: 'string', nullable: true },
+                          tel: { type: 'string', nullable: true },
+                          x: { type: 'number', example: 127.093106 },
+                          y: { type: 'number', example: 37.624505 },
+                          region: { type: 'string', example: '노원구' },
+                          is_pet_friendly: { type: 'boolean', example: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    '/api/tour/pet/search': {
+      get: {
+        tags: ['관광공사 TourAPI (실시간)'],
+        summary: '실시간 반려동물 동반 가능 관광지 키워드 검색',
+        description: '한국관광공사 KorPetTourService2 searchKeyword2 오퍼레이션을 실시간 호출하여 반려동물 동반 가능 장소를 검색합니다.',
+        parameters: [
+          { name: 'keyword', in: 'query', required: true, schema: { type: 'string', example: '공원' }, description: '검색 키워드' },
+          { name: 'region', in: 'query', schema: { type: 'string', example: 'chuncheon' }, description: '지역 필터 (선택: seoul, chuncheon 등)' },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 10 } },
+        ],
+        responses: {
+          200: {
+            description: '검색 성공',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    total: { type: 'integer', example: 8 },
+                    page: { type: 'integer', example: 1 },
+                    limit: { type: 'integer', example: 10 },
+                    keyword: { type: 'string', example: '공원' },
+                    spots: { type: 'array', items: { type: 'object' } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   },
 };
 

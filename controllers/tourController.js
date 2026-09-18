@@ -62,3 +62,32 @@ exports.searchTourPlaces = async (req, res, next) => {
     next(err);
   }
 };
+
+// ── 반려동물 동반여행 API 컨트롤러 ────────────────────────────────────
+
+exports.getPetTourDetail = async (req, res, next) => {
+  try {
+    const result = await tourApiService.getPetTourDetail(req.params.content_id);
+    return res.json({ success: true, pet_tour: result });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.getPetTourSpots = async (req, res, next) => {
+  try {
+    const result = await tourApiService.getPetTourSpots(req.query);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.searchPetTourPlaces = async (req, res, next) => {
+  try {
+    const result = await tourApiService.searchPetTourPlaces(req.query);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+};
