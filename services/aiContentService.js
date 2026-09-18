@@ -2,6 +2,7 @@ const pool = require('../config/db');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const axios = require('axios');
+const odiiService = require('./odiiService');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
@@ -38,7 +39,8 @@ async function uploadToS3(audioBuffer, spotId, contentType) {
 
 async function getAiContentsByTypes(spotId, contentTypes = ['place', 'history', 'tour']) {
   const { rows: spotRows } = await pool.query(
-    `SELECT name, address, content_place, content_history, content_tour
+    `SELECT name, address, ST_X(location::geometry) AS x, ST_Y(location::geometry) AS y,
+            content_place, content_history, content_tour
      FROM spots WHERE spot_id = $1 AND status = 'active'`,
     [spotId]
   );
@@ -63,11 +65,13 @@ async function getAiContentsByTypes(spotId, contentTypes = ['place', 'history', 
   }
 
   const contents = [];
+  let odiiGuideSearched = false;
+  let odiiGuideResult = null;
 
   for (const contentType of selectedContentTypes) {
     const { label, source } = typeMap[contentType];
 
-    // 캐시 확인
+    // 1단계: DB 캐시 확인
     const { rows: cached } = await pool.query(
       `SELECT content_type, script, audio_url
        FROM spot_ai_contents WHERE spot_id = $1 AND content_type = $2`,
@@ -79,7 +83,32 @@ async function getAiContentsByTypes(spotId, contentTypes = ['place', 'history', 
       continue;
     }
 
-    // 원본 소스 있으면 활용, 없으면 이름+주소만으로 생성
+    // 2단계: 한국관광공사 Odii 오디오 가이드 검색 (1순위)
+    if (!odiiGuideSearched) {
+      odiiGuideSearched = true;
+      odiiGuideResult = await odiiService.findBestOdiiGuide({
+        name: spot.name,
+        x: spot.x,
+        y: spot.y,
+      });
+    }
+
+    // Odii 가이드가 존재하면 해당 전문 성우 음성 및 대본을 DB에 캐싱하고 사용
+    if (odiiGuideResult && odiiGuideResult.audio_url) {
+      const scriptText = odiiGuideResult.script || `${spot.name} ${label}`;
+      const { rows: [saved] } = await pool.query(
+        `INSERT INTO spot_ai_contents (spot_id, content_type, script, audio_url)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (spot_id, content_type) DO UPDATE
+           SET script = EXCLUDED.script, audio_url = EXCLUDED.audio_url, updated_at = NOW()
+         RETURNING content_type, script, audio_url`,
+        [spotId, contentType, scriptText, odiiGuideResult.audio_url]
+      );
+      contents.push(saved);
+      continue;
+    }
+
+    // 3단계: Odii 데이터가 없을 경우 Gemini AI + Google TTS + S3 Fallback (2순위)
     const sourceText = source
       ? `원본 정보: ${source}`
       : `이 장소에 대한 추가 정보는 없습니다. 장소명과 주소를 바탕으로 자연스럽게 작성해주세요.`;
