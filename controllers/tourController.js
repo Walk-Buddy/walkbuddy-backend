@@ -27,6 +27,24 @@ exports.getBarrierFreeInfo = async (req, res, next) => {
   }
 };
 
+exports.getBarrierFreeSpots = async (req, res, next) => {
+  try {
+    const result = await tourApiService.getBarrierFreeSpots(req.query);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.searchBarrierFreePlaces = async (req, res, next) => {
+  try {
+    const result = await tourApiService.searchBarrierFreePlaces(req.query);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+};
+
 exports.getTourSpots = async (req, res, next) => {
   try {
     const result = await tourApiService.getTourSpots(req.query);

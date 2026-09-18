@@ -2,6 +2,7 @@ const axios = require("axios");
 const { resolveRegion, TARGET_REGIONS } = require("../constants/spotCategoryRules");
 
 const BASE_URL = "http://apis.data.go.kr/B551011/KorService1";
+const WITH_TOUR_BASE_URL = "https://apis.data.go.kr/B551011/KorWithService2"; // 무장애 여행정보 API
 const PHOTO_BASE_URL = "https://apis.data.go.kr/B551011/PhotoGalleryService1"; // 관광사진 API
 const DEFAULT_MOBILE_OS = "ETC";
 const DEFAULT_MOBILE_APP = "WalkBuddy";
@@ -13,6 +14,13 @@ function getServiceKey() {
     process.env.TOUR_API_KEY ||
     process.env.DURUNUBI_SERVICE_KEY ||
     ""
+  );
+}
+
+function getWithTourServiceKey() {
+  return (
+    process.env.KOR_WITH_SERVICE_KEY ||
+    getServiceKey()
   );
 }
 
@@ -65,6 +73,59 @@ async function requestTourApi(pathname, params = {}) {
   } catch (err) {
     if (err.response?.status === 401) {
       const authErr = new Error("한국관광공사 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.");
+      authErr.status = 401;
+      throw authErr;
+    }
+    throw err;
+  }
+}
+
+function buildWithTourUrl(pathname, params = {}) {
+  const serviceKey = getWithTourServiceKey();
+  if (!serviceKey) {
+    throw new Error("KOR_WITH_SERVICE_KEY 또는 TOURAPI_SERVICE_KEY 환경변수가 설정되지 않았습니다.");
+  }
+
+  const url = new URL(`${WITH_TOUR_BASE_URL}/${pathname}`);
+  const defaultParams = {
+    MobileOS: DEFAULT_MOBILE_OS,
+    MobileApp: DEFAULT_MOBILE_APP,
+    _type: "json",
+  };
+
+  Object.entries({ ...defaultParams, ...params }).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      url.searchParams.append(key, String(value));
+    }
+  });
+
+  if (serviceKey.includes("%")) {
+    return `${url.toString()}&serviceKey=${serviceKey}`;
+  }
+
+  url.searchParams.append("serviceKey", serviceKey);
+  return url.toString();
+}
+
+async function requestWithTourApi(pathname, params = {}) {
+  const url = buildWithTourUrl(pathname, params);
+  try {
+    const { data } = await http.get(url);
+    const header = data?.response?.header;
+    if (header?.resultCode && header.resultCode !== "0000") {
+      // 03: 데이터 없음
+      if (header.resultCode === "03") {
+        return { response: { body: { items: { item: [] }, totalCount: 0 } } };
+      }
+      const err = new Error(header.resultMsg || "무장애 TourAPI 호출 실패");
+      err.code = header.resultCode;
+      err.status = 502;
+      throw err;
+    }
+    return data;
+  } catch (err) {
+    if (err.response?.status === 401) {
+      const authErr = new Error("한국관광공사 무장애 TourAPI 인증 실패: 서비스 키를 확인해주세요.");
       authErr.status = 401;
       throw authErr;
     }
@@ -189,7 +250,8 @@ exports.getSpotDetail = async (contentId) => {
 };
 
 /**
- * 3. 실시간 열린관광(무장애 관광) 편의시설 정보 조회 (detailWithTour)
+ * 3. 실시간 열린관광(무장애 관광) 5대 이동약자 편의시설 정보 조회 (detailWithTour2)
+ * 지체장애, 시각장애, 청각장애, 영유아가족, 대중교통/공통 편의시설
  */
 exports.getBarrierFreeInfo = async (contentId) => {
   if (!contentId) {
@@ -198,35 +260,170 @@ exports.getBarrierFreeInfo = async (contentId) => {
     throw err;
   }
 
-  const data = await requestTourApi("detailWithTour1", {
-    contentId,
-  });
+  let data;
+  try {
+    data = await requestWithTourApi("detailWithTour2", { contentId });
+  } catch (e) {
+    // KorWithService2 호출 실패 시 KorService1의 detailWithTour1으로 fallback
+    data = await requestTourApi("detailWithTour1", { contentId }).catch(() => null);
+  }
 
-  const [item] = getItems(data);
+  const [item] = data ? getItems(data) : [];
   if (!item) {
     return {
       content_id: contentId,
       has_barrier_free_info: false,
+      summary_tags: [],
       details: null,
     };
   }
 
+  // 11개 스팟 태그에 매핑할 수 있는 편의시설 요약 태그 자동 추출
+  const summaryTags = [];
+  if (item.parking) summaryTags.push("#주차가능");
+  if (item.restroom) summaryTags.push("#화장실");
+  if (item.audioguide) summaryTags.push("#음성해설");
+  if (item.helpdog) summaryTags.push("#반려견동반");
+  if (item.wheelchair || item.route) summaryTags.push("#열린관광");
+
   return {
     content_id: contentId,
     has_barrier_free_info: true,
+    summary_tags: summaryTags,
     details: {
-      parking: item.parking || null, // 장애인 주차구역
-      route: item.route || null, // 접근 경사로
-      public_transport: item.publictransport || null, // 대중교통 접근성
-      wheelchair: item.wheelchair || null, // 휠체어 대여
-      disabled_restroom: item.restroom || null, // 장애인 화장실
-      elevator: item.elevator || null, // 엘리베이터
-      braileblock: item.braileblock || null, // 점자블록
-      help_dog: item.helpdog || null, // 보조견 동반
-      audio_guide: item.audioguide || null, // 음성안내기
-      sign_language: item.signlanguage || null, // 수어안내
-      baby_carriage: item.babycarriage || null, // 유모차 대여
+      // 1. 지체장애 / 휠체어 이동 편의
+      physical: {
+        parking: item.parking || null, // 장애인 전용 주차구역
+        route: item.route || null, // 주출입구 경사로/단차(턱) 여부
+        wheelchair: item.wheelchair || null, // 휠체어 대여
+        restroom: item.restroom || null, // 장애인 전용 화장실
+        elevator: item.elevator || null, // 엘리베이터
+        exit: item.exit || null, // 출입통로
+        ticket_office: item.ticketoffice || null, // 매표소
+      },
+      // 2. 시각장애인 편의
+      visual: {
+        braile_block: item.braileblock || null, // 점자블록
+        help_dog: item.helpdog || null, // 보조견/안내견 동반
+        audio_guide: item.audioguide || null, // 음성안내기
+        guide_human: item.guidehuman || null, // 유도안내 전문인력
+        braile_promotion: item.brailepromotion || null, // 점자 홍보물
+      },
+      // 3. 청각장애인 편의
+      hearing: {
+        sign_language: item.signguide || item.signlanguage || null, // 수어안내
+        video_guide: item.videoguide || null, // 영상 자막 안내
+      },
+      // 4. 영유아 동반 가족 / 부모 편의
+      infant: {
+        stroller: item.stroller || item.babycarriage || null, // 유모차 대여
+        lactation_room: item.lactationroom || null, // 수유실
+        baby_spare_chair: item.babysparechair || null, // 유아용 보조의자
+      },
+      // 5. 대중교통 및 일반 편의
+      general: {
+        public_transport: item.publictransport || null, // 대중교통 접근성
+      },
     },
+  };
+};
+
+/**
+ * 3-1. 실시간 지역별 열린관광(무장애 인증) 스팟 목록 조회 (areaBasedList2)
+ * LBS 미신고 안전: GPS 좌표 대신 서울(25개 구) / 춘천 지역코드만 사용
+ */
+exports.getBarrierFreeSpots = async ({ region, contentTypeId, page = 1, limit = 10 } = {}) => {
+  const target = resolveRegion(region) || TARGET_REGIONS.SEOUL;
+
+  const params = {
+    areaCode: target.tourApi.areaCode,
+    pageNo: page,
+    numOfRows: limit,
+    arrange: "C", // 최신 수정일순
+  };
+
+  if (target.tourApi.sigunguCode) {
+    params.sigunguCode = target.tourApi.sigunguCode;
+  }
+  if (contentTypeId) {
+    params.contentTypeId = contentTypeId;
+  }
+
+  const data = await requestWithTourApi("areaBasedList2", params);
+  const rawItems = getItems(data);
+
+  const spots = rawItems.map((item) => ({
+    content_id: item.contentid,
+    content_type_id: item.contenttypeid,
+    title: item.title,
+    address: item.addr1 + (item.addr2 ? " " + item.addr2 : ""),
+    image_url: item.firstimage || item.firstimage2 || null,
+    tel: item.tel || null,
+    x: item.mapx ? Number(item.mapx) : null,
+    y: item.mapy ? Number(item.mapy) : null,
+    cat1: item.cat1 || null,
+    cat2: item.cat2 || null,
+    cat3: item.cat3 || null,
+    region: target.name,
+    is_barrier_free: true,
+  }));
+
+  return {
+    total: getTotalCount(data),
+    page: Number(page),
+    limit: Number(limit),
+    region: target.name,
+    spots,
+  };
+};
+
+/**
+ * 3-2. 실시간 열린관광(무장애) 키워드 검색 (searchKeyword2)
+ */
+exports.searchBarrierFreePlaces = async ({ region, keyword, page = 1, limit = 10 } = {}) => {
+  if (!keyword || !keyword.trim()) {
+    const err = new Error("keyword는 필수입니다.");
+    err.status = 400;
+    throw err;
+  }
+
+  const target = resolveRegion(region);
+  const params = {
+    keyword: keyword.trim(),
+    pageNo: page,
+    numOfRows: limit,
+    arrange: "P",
+  };
+
+  if (target) {
+    params.areaCode = target.tourApi.areaCode;
+    if (target.tourApi.sigunguCode) {
+      params.sigunguCode = target.tourApi.sigunguCode;
+    }
+  }
+
+  const data = await requestWithTourApi("searchKeyword2", params);
+  const rawItems = getItems(data);
+
+  const spots = rawItems.map((item) => ({
+    content_id: item.contentid,
+    content_type_id: item.contenttypeid,
+    title: item.title,
+    address: item.addr1 + (item.addr2 ? " " + item.addr2 : ""),
+    image_url: item.firstimage || item.firstimage2 || null,
+    tel: item.tel || null,
+    x: item.mapx ? Number(item.mapx) : null,
+    y: item.mapy ? Number(item.mapy) : null,
+    region: target ? target.name : "전체",
+    is_barrier_free: true,
+  }));
+
+  return {
+    total: getTotalCount(data),
+    page: Number(page),
+    limit: Number(limit),
+    keyword: keyword.trim(),
+    spots,
   };
 };
 

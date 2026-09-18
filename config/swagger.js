@@ -1661,14 +1661,14 @@ const swaggerDefinition = {
     '/api/tour/spots/{content_id}/barrier-free': {
       get: {
         tags: ['관광공사 TourAPI (실시간)'],
-        summary: '실시간 열린관광(무장애 관광) 편의시설 정보 조회',
-        description: '한국관광공사 TourAPI detailWithTour1 오퍼레이션을 실시간 호출하여 장애인 주차장, 휠체어 대여, 점자블록, 수어안내 등의 무장애 정보를 조회합니다.',
+        summary: '실시간 열린관광(무장애 관광) 5대 약자 편의시설 정보 조회',
+        description: '한국관광공사 무장애 여행 정보(KorWithService2) detailWithTour2 오퍼레이션을 실시간 호출하여 지체장애, 시각장애, 청각장애, 영유아 동반 부모, 대중교통 등 5대 항목별 편의시설 정보를 제공합니다.',
         parameters: [
           { name: 'content_id', in: 'path', required: true, schema: { type: 'string', example: '126508' }, description: '한국관광공사 contentId' },
         ],
         responses: {
           200: {
-            description: '무장애 편의시설 정보',
+            description: '무장애 편의시설 상세 정보',
             content: {
               'application/json': {
                 schema: {
@@ -1680,21 +1680,99 @@ const swaggerDefinition = {
                       properties: {
                         content_id: { type: 'string' },
                         has_barrier_free_info: { type: 'boolean' },
+                        summary_tags: { type: 'array', items: { type: 'string' }, example: ['#열린관광', '#주차가능', '#화장실', '#음성해설'] },
                         details: {
                           type: 'object',
                           properties: {
-                            parking: { type: 'string', nullable: true },
-                            route: { type: 'string', nullable: true },
-                            wheelchair: { type: 'string', nullable: true },
-                            disabled_restroom: { type: 'string', nullable: true },
-                            elevator: { type: 'string', nullable: true },
-                            braileblock: { type: 'string', nullable: true },
-                            help_dog: { type: 'string', nullable: true },
-                            audio_guide: { type: 'string', nullable: true },
+                            physical: { type: 'object', description: '지체장애/휠체어 이동 편의 (주차구역, 경사로, 휠체어대여, 엘리베이터 등)' },
+                            visual: { type: 'object', description: '시각장애 편의 (점자블록, 보조견동반, 음성안내기 등)' },
+                            hearing: { type: 'object', description: '청각장애 편의 (수어안내, 영상자막 등)' },
+                            infant: { type: 'object', description: '영유아 동반 가족 편의 (유모차대여, 수유실 등)' },
+                            general: { type: 'object', description: '대중교통 및 공통 편의' },
                           },
                         },
                       },
                     },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    '/api/tour/barrier-free/spots': {
+      get: {
+        tags: ['관광공사 TourAPI (실시간)'],
+        summary: '실시간 지역별 열린관광(무장애 인증) 스팟 목록 조회',
+        description: '한국관광공사 무장애 여행 정보(KorWithService2) areaBasedList2 오퍼레이션을 실시간 호출하여 서울(25개 구) / 춘천 지역의 무장애 인증 관광지 목록을 반환합니다. (LBS 미신고 100% 준수: GPS 대신 region 파라미터 사용)',
+        parameters: [
+          { name: 'region', in: 'query', schema: { type: 'string', example: 'nowon' }, description: '타겟 지역 (seoul, nowon, gangnam, chuncheon 등)' },
+          { name: 'contentTypeId', in: 'query', schema: { type: 'string', example: '12' }, description: '관광타입 (12:관광지, 14:문화시설, 15:축제, 28:레포츠, 38:쇼핑, 39:음식점)' },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 10 } },
+        ],
+        responses: {
+          200: {
+            description: '무장애 스팟 목록',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    total: { type: 'integer' },
+                    page: { type: 'integer' },
+                    limit: { type: 'integer' },
+                    region: { type: 'string' },
+                    spots: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          content_id: { type: 'string' },
+                          title: { type: 'string' },
+                          address: { type: 'string' },
+                          image_url: { type: 'string', nullable: true },
+                          x: { type: 'number' },
+                          y: { type: 'number' },
+                          is_barrier_free: { type: 'boolean', example: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    '/api/tour/barrier-free/search': {
+      get: {
+        tags: ['관광공사 TourAPI (실시간)'],
+        summary: '실시간 열린관광(무장애) 키워드 검색',
+        description: '한국관광공사 무장애 여행 정보(KorWithService2) searchKeyword2 오퍼레이션을 실시간 호출하여 무장애 관광지를 검색합니다.',
+        parameters: [
+          { name: 'keyword', in: 'query', required: true, schema: { type: 'string', example: '공원' }, description: '검색할 키워드' },
+          { name: 'region', in: 'query', schema: { type: 'string', example: 'seoul' }, description: '타겟 지역 (서울 25개 구 / 춘천)' },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 10 } },
+        ],
+        responses: {
+          200: {
+            description: '검색 결과',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    total: { type: 'integer' },
+                    keyword: { type: 'string' },
+                    spots: { type: 'array' },
                   },
                 },
               },
