@@ -36,6 +36,43 @@ const swaggerDefinition = {
           message: { type: 'string' },
         },
       },
+      TourTrafficLog: {
+        type: 'object',
+        properties: {
+          id: { type: 'integer', example: 1 },
+          at: { type: 'string', format: 'date-time' },
+          api: { type: 'string', example: 'KorService2' },
+          pathname: { type: 'string', example: 'searchFestival2' },
+          params: { type: 'object', additionalProperties: true, description: '요청 파라미터 (serviceKey는 자동 마스킹되어 남지 않음)' },
+          status: { type: 'string', enum: ['ok', 'error'] },
+          httpStatus: { type: 'integer', nullable: true, example: 200 },
+          resultCode: { type: 'string', nullable: true, example: '0000' },
+          message: { type: 'string', nullable: true },
+          durationMs: { type: 'integer', example: 140 },
+          actor: { type: 'string', nullable: true },
+        },
+      },
+      TourTrafficStats: {
+        type: 'object',
+        properties: {
+          process_started_at: { type: 'string', format: 'date-time' },
+          uptime_sec: { type: 'integer', example: 3600 },
+          buffered: { type: 'integer', example: 42 },
+          max_buffer: { type: 'integer', example: 1000 },
+          last_call_at: { type: 'string', format: 'date-time', nullable: true },
+          last_call_api: { type: 'string', nullable: true, example: 'KorService2/searchFestival2' },
+          counters: {
+            type: 'object',
+            properties: {
+              total: { type: 'integer', example: 120 },
+              ok: { type: 'integer', example: 118 },
+              error: { type: 'integer', example: 2 },
+              byApi: { type: 'object', additionalProperties: { type: 'integer' }, example: { KorService2: 100, Durunubi: 20 } },
+              byPath: { type: 'object', additionalProperties: { type: 'integer' }, example: { 'KorService2/searchFestival2': 5 } },
+            },
+          },
+        },
+      },
     },
   },
   security: [{ bearerAuth: [] }],
@@ -2217,6 +2254,126 @@ const swaggerDefinition = {
     // ─────────────────────────────────────────
     // 알림 (설계 단계 / 라우터 미연결)
     // ─────────────────────────────────────────
+    // ─────────────────────────────────────────
+    // 관리자 - 공공데이터 OpenAPI 실시간 트래픽 로그
+    // ─────────────────────────────────────────
+    '/api/admin/tour-traffic': {
+      get: {
+        tags: ['관리자 - 트래픽 로그'],
+        summary: 'OpenAPI 실시간 트래픽 로그 조회 (관리자)',
+        description: '앱이 공공데이터포털(관광공사 TourAPI·무장애·반려동물·관광사진·두루누비·Odii)을 실시간 호출한 내역(최신순)과 누적 통계를 반환합니다. serviceKey는 로그에서 자동 마스킹됩니다. 메모리 버퍼 기반이라 프로세스 재시작 시 초기화됩니다.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 100 }, description: '최근 로그 개수 (1~1000)' },
+          { name: 'api', in: 'query', schema: { type: 'string', example: 'KorService2' }, description: '서비스 구분 필터' },
+          { name: 'pathname', in: 'query', schema: { type: 'string', example: 'searchFestival2' }, description: '오퍼레이션 필터' },
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['ok', 'error'] }, description: '성공/실패 필터' },
+        ],
+        responses: {
+          200: {
+            description: '로그 조회 성공',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    stats: { $ref: '#/components/schemas/TourTrafficStats' },
+                    logs: { type: 'array', items: { $ref: '#/components/schemas/TourTrafficLog' } },
+                  },
+                },
+              },
+            },
+          },
+          401: { description: '인증 실패' },
+          403: { description: '관리자 권한 없음' },
+        },
+      },
+      delete: {
+        tags: ['관리자 - 트래픽 로그'],
+        summary: '트래픽 로그 버퍼 비우기 (관리자)',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: '버퍼 비우기 성공',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    message: { type: 'string', example: '트래픽 버퍼를 비웠습니다.' },
+                  },
+                },
+              },
+            },
+          },
+          403: { description: '관리자 권한 없음' },
+        },
+      },
+    },
+    '/api/admin/tour-traffic/stats': {
+      get: {
+        tags: ['관리자 - 트래픽 로그'],
+        summary: 'OpenAPI 누적 통계 조회 (관리자)',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: '통계 조회 성공',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    process_started_at: { type: 'string', format: 'date-time' },
+                    uptime_sec: { type: 'integer', example: 3600 },
+                    buffered: { type: 'integer', example: 42 },
+                    max_buffer: { type: 'integer', example: 1000 },
+                    last_call_at: { type: 'string', format: 'date-time', nullable: true },
+                    last_call_api: { type: 'string', nullable: true, example: 'KorService2/searchFestival2' },
+                    counters: {
+                      type: 'object',
+                      properties: {
+                        total: { type: 'integer' },
+                        ok: { type: 'integer' },
+                        error: { type: 'integer' },
+                        byApi: { type: 'object', additionalProperties: { type: 'integer' } },
+                        byPath: { type: 'object', additionalProperties: { type: 'integer' } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          403: { description: '관리자 권한 없음' },
+        },
+      },
+    },
+    '/api/admin/tour-traffic/stream': {
+      get: {
+        tags: ['관리자 - 트래픽 로그'],
+        summary: 'OpenAPI 실시간 트래픽 스트림 (SSE, 관리자)',
+        description: 'Server-Sent Events(text/event-stream)로 OpenAPI 호출을 실시간 전송합니다. 연결 직후 event: stats 1회, 이후 호출마다 event: call 이벤트가 전송됩니다. 15초마다 ping 주석으로 연결을 유지합니다.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'SSE 스트림',
+            content: {
+              'text/event-stream': {
+                schema: {
+                  type: 'string',
+                  example: 'event: call\\ndata: {"id":1,"api":"KorService2","pathname":"searchFestival2","status":"ok","durationMs":140}\\n\\n',
+                },
+              },
+            },
+          },
+          403: { description: '관리자 권한 없음' },
+        },
+      },
+    },
+
     '/api/notifications': {
       get: {
         tags: ['알림 (설계중)'],
