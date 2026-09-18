@@ -12,38 +12,246 @@ const SPOT_CATEGORIES = [
   '전통시장·로컬마켓',
 ];
 
-// 타겟 지역 정의 (서울 노원구 & 강원 춘천시)
+// 타겟 지역 정의 (서울 전체 + 25개 구 & 강원 춘천시)
+// TourAPI 4.0 서울 시군구 코드: areaCode=1, sigunguCode 1~25
 const TARGET_REGIONS = {
+  // ── 서울 전체 (구 미지정, 서울 전역 조회) ──────────────────────
+  SEOUL: {
+    code: 'seoul',
+    name: '서울',
+    fullName: '서울특별시',
+    tourApi: { areaCode: '1', sigunguCode: null }, // sigunguCode 없이 서울 전체 조회
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['서울', 'seoul', '서울특별시', 'seoul_all'],
+  },
+  // ── 서울 25개 구 ────────────────────────────────────────────────
+  GANGNAM: {
+    code: 'gangnam',
+    name: '강남구',
+    fullName: '서울특별시 강남구',
+    tourApi: { areaCode: '1', sigunguCode: '1' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['강남', '강남구', 'gangnam'],
+  },
+  GANGDONG: {
+    code: 'gangdong',
+    name: '강동구',
+    fullName: '서울특별시 강동구',
+    tourApi: { areaCode: '1', sigunguCode: '2' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['강동', '강동구', 'gangdong'],
+  },
+  GANGBUK: {
+    code: 'gangbuk',
+    name: '강북구',
+    fullName: '서울특별시 강북구',
+    tourApi: { areaCode: '1', sigunguCode: '3' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['강북', '강북구', 'gangbuk'],
+  },
+  GANGSEO: {
+    code: 'gangseo',
+    name: '강서구',
+    fullName: '서울특별시 강서구',
+    tourApi: { areaCode: '1', sigunguCode: '4' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['강서', '강서구', 'gangseo'],
+  },
+  GWANAK: {
+    code: 'gwanak',
+    name: '관악구',
+    fullName: '서울특별시 관악구',
+    tourApi: { areaCode: '1', sigunguCode: '5' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['관악', '관악구', 'gwanak'],
+  },
+  GWANGJIN: {
+    code: 'gwangjin',
+    name: '광진구',
+    fullName: '서울특별시 광진구',
+    tourApi: { areaCode: '1', sigunguCode: '6' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['광진', '광진구', 'gwangjin'],
+  },
+  GURO: {
+    code: 'guro',
+    name: '구로구',
+    fullName: '서울특별시 구로구',
+    tourApi: { areaCode: '1', sigunguCode: '7' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['구로', '구로구', 'guro'],
+  },
+  GEUMCHEON: {
+    code: 'geumcheon',
+    name: '금천구',
+    fullName: '서울특별시 금천구',
+    tourApi: { areaCode: '1', sigunguCode: '8' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['금천', '금천구', 'geumcheon'],
+  },
   NOWON: {
     code: 'nowon',
     name: '노원구',
     fullName: '서울특별시 노원구',
-    tourApi: { areaCode: '1', sigunguCode: '9' }, // TourAPI 4.0 서울(1) 노원구(9)
-    aliases: ['노원', '노원구', 'nowon', 'seoul_nowon', '서울', 'seoul'],
+    tourApi: { areaCode: '1', sigunguCode: '9' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['노원', '노원구', 'nowon', 'seoul_nowon'],
   },
+  DOBONG: {
+    code: 'dobong',
+    name: '도봉구',
+    fullName: '서울특별시 도봉구',
+    tourApi: { areaCode: '1', sigunguCode: '10' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['도봉', '도봉구', 'dobong'],
+  },
+  DONGDAEMUN: {
+    code: 'dongdaemun',
+    name: '동대문구',
+    fullName: '서울특별시 동대문구',
+    tourApi: { areaCode: '1', sigunguCode: '11' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['동대문', '동대문구', 'dongdaemun'],
+  },
+  DONGJAK: {
+    code: 'dongjak',
+    name: '동작구',
+    fullName: '서울특별시 동작구',
+    tourApi: { areaCode: '1', sigunguCode: '12' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['동작', '동작구', 'dongjak'],
+  },
+  MAPO: {
+    code: 'mapo',
+    name: '마포구',
+    fullName: '서울특별시 마포구',
+    tourApi: { areaCode: '1', sigunguCode: '13' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['마포', '마포구', 'mapo'],
+  },
+  SEODAEMUN: {
+    code: 'seodaemun',
+    name: '서대문구',
+    fullName: '서울특별시 서대문구',
+    tourApi: { areaCode: '1', sigunguCode: '14' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['서대문', '서대문구', 'seodaemun'],
+  },
+  SEOCHO: {
+    code: 'seocho',
+    name: '서초구',
+    fullName: '서울특별시 서초구',
+    tourApi: { areaCode: '1', sigunguCode: '15' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['서초', '서초구', 'seocho'],
+  },
+  SEONGDONG: {
+    code: 'seongdong',
+    name: '성동구',
+    fullName: '서울특별시 성동구',
+    tourApi: { areaCode: '1', sigunguCode: '16' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['성동', '성동구', 'seongdong'],
+  },
+  SEONGBUK: {
+    code: 'seongbuk',
+    name: '성북구',
+    fullName: '서울특별시 성북구',
+    tourApi: { areaCode: '1', sigunguCode: '17' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['성북', '성북구', 'seongbuk'],
+  },
+  SONGPA: {
+    code: 'songpa',
+    name: '송파구',
+    fullName: '서울특별시 송파구',
+    tourApi: { areaCode: '1', sigunguCode: '18' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['송파', '송파구', 'songpa'],
+  },
+  YANGCHEON: {
+    code: 'yangcheon',
+    name: '양천구',
+    fullName: '서울특별시 양천구',
+    tourApi: { areaCode: '1', sigunguCode: '19' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['양천', '양천구', 'yangcheon'],
+  },
+  YEONGDEUNGPO: {
+    code: 'yeongdeungpo',
+    name: '영등포구',
+    fullName: '서울특별시 영등포구',
+    tourApi: { areaCode: '1', sigunguCode: '20' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['영등포', '영등포구', 'yeongdeungpo'],
+  },
+  YONGSAN: {
+    code: 'yongsan',
+    name: '용산구',
+    fullName: '서울특별시 용산구',
+    tourApi: { areaCode: '1', sigunguCode: '21' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['용산', '용산구', 'yongsan'],
+  },
+  EUNPYEONG: {
+    code: 'eunpyeong',
+    name: '은평구',
+    fullName: '서울특별시 은평구',
+    tourApi: { areaCode: '1', sigunguCode: '22' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['은평', '은평구', 'eunpyeong'],
+  },
+  JONGNO: {
+    code: 'jongno',
+    name: '종로구',
+    fullName: '서울특별시 종로구',
+    tourApi: { areaCode: '1', sigunguCode: '23' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['종로', '종로구', 'jongno'],
+  },
+  JUNG: {
+    code: 'jung',
+    name: '중구',
+    fullName: '서울특별시 중구',
+    tourApi: { areaCode: '1', sigunguCode: '24' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['중구', 'jung', '서울중구'],
+  },
+  JUNGNANG: {
+    code: 'jungnang',
+    name: '중랑구',
+    fullName: '서울특별시 중랑구',
+    tourApi: { areaCode: '1', sigunguCode: '25' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['중랑', '중랑구', 'jungnang'],
+  },
+  // ── 강원 춘천시 ─────────────────────────────────────────────────
   CHUNCHEON: {
     code: 'chuncheon',
     name: '춘천시',
     fullName: '강원특별자치도 춘천시',
-    tourApi: { areaCode: '32', sigunguCode: '13' }, // TourAPI 4.0 강원(32) 춘천시(13)
+    tourApi: { areaCode: '32', sigunguCode: '13' },
+    durunubi: { sigun: '춘천시' },
     aliases: ['춘천', '춘천시', 'chuncheon', 'gangwon_chuncheon'],
   },
 };
 
+/**
+ * region 문자열을 받아 TARGET_REGIONS 항목을 반환합니다.
+ * - '서울' / 'seoul' → SEOUL (전 구 조회, sigunguCode 없음)
+ * - '강남구' / '강남' → GANGNAM
+ * - '춘천' / '춘천시' → CHUNCHEON
+ * - 매칭 없으면 null 반환 (caller에서 처리)
+ */
 function resolveRegion(regionInput) {
   if (!regionInput) return null;
   const normalized = String(regionInput).trim().toLowerCase();
 
   for (const regionKey of Object.keys(TARGET_REGIONS)) {
     const r = TARGET_REGIONS[regionKey];
-    if (r.aliases.some((alias) => alias.toLowerCase() === normalized) || normalized.includes(r.name)) {
+    if (r.aliases.some((alias) => alias.toLowerCase() === normalized)) {
       return r;
     }
-  }
-
-  // 기본 fallback: '서울' 입력 시 노원구 타겟팅
-  if (normalized === 'seoul' || normalized === '서울' || normalized === '서울특별시') {
-    return TARGET_REGIONS.NOWON;
   }
 
   return null;

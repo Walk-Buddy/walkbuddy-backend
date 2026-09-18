@@ -322,3 +322,111 @@ exports.searchTourPlaces = async ({ region, keyword, page = 1, limit = 10 } = {}
     spots,
   };
 };
+
+/**
+ * 6. 관광사진 키워드 검색 (PhotoGalleryService1 - galleryList1)
+ * content_id 없는 스팟·코스의 사진 fallback으로 사용
+ * @param {string} keyword - 검색할 장소 이름
+ * @param {number} limit   - 가져올 사진 수 (기본 10)
+ */
+exports.getPhotosByKeyword = async (keyword, limit = 10) => {
+  if (!keyword || !keyword.trim()) {
+    const err = new Error("keyword는 필수입니다.");
+    err.status = 400;
+    throw err;
+  }
+
+  const serviceKey = getServiceKey();
+  if (!serviceKey) {
+    throw new Error("TOURAPI_SERVICE_KEY 환경변수가 설정되지 않았습니다.");
+  }
+
+  // 관광사진 API는 BASE_URL이 달라서 직접 URL을 만들어요
+  const url = new URL(`${PHOTO_BASE_URL}/galleryList1`);
+  url.searchParams.append("serviceKey", serviceKey);
+  url.searchParams.append("MobileOS", DEFAULT_MOBILE_OS);
+  url.searchParams.append("MobileApp", DEFAULT_MOBILE_APP);
+  url.searchParams.append("_type", "json");
+  url.searchParams.append("keyword", keyword.trim());
+  url.searchParams.append("numOfRows", String(limit));
+  url.searchParams.append("pageNo", "1");
+
+  try {
+    const { data } = await http.get(url.toString());
+    const header = data?.response?.header;
+    if (header?.resultCode && header.resultCode !== "0000") {
+      // 결과 없음(03)은 에러가 아니라 빈 배열로 처리
+      if (header.resultCode === "03") return [];
+      const err = new Error(header.resultMsg || "관광사진 API 호출 실패");
+      err.code = header.resultCode;
+      err.status = 502;
+      throw err;
+    }
+
+    const item = data?.response?.body?.items?.item;
+    const rawItems = !item ? [] : Array.isArray(item) ? item : [item];
+
+    return rawItems.map((img) => ({
+      thumbnail: img.galWebImageUrl || img.galThumbnailImage || null,
+      original: img.galWebImageUrl || null,
+      title: img.galTitle || null,
+    }));
+  } catch (err) {
+    if (err.status) throw err;
+    console.error("[PhotoGallery API 오류]", err.message);
+    return []; // 사진 API 실패는 서비스 전체를 막지 않음
+  }
+};
+
+/**
+ * 7. 스팟 사진 조회 (혼합 전략)
+ * - content_id 있으면 → detailImage1 (정확도 높음)
+ * - content_id 없으면 → galleryList1 keyword 검색 (fallback)
+ * @param {string|null} contentId - TourAPI content_id (없으면 null)
+ * @param {string}      spotName  - 스팟 이름 (fallback 검색용)
+ */
+exports.getSpotPhotos = async (contentId, spotName) => {
+  // 방법 A: content_id가 있으면 detailImage1 우선 시도
+  if (contentId) {
+    try {
+      const data = await requestTourApi("detailImage1", {
+        contentId,
+        imageYN: "Y",
+        subImageYN: "Y",
+      });
+
+      const rawItems = getItems(data);
+      const photos = rawItems.map((img) => ({
+        thumbnail: img.smallimageurl || img.originimgurl || null,
+        original: img.originimgurl || null,
+        title: img.imgname || null,
+      }));
+
+      if (photos.length > 0) {
+        return { source: "detailImage1", photos };
+      }
+      // 사진이 0장이면 아래 fallback으로 내려감
+    } catch (err) {
+      console.error("[detailImage1 실패, galleryList1으로 fallback]", err.message);
+    }
+  }
+
+  // 방법 B: content_id 없거나 A가 빈 결과면 → 이름으로 관광사진 검색
+  if (spotName) {
+    const photos = await exports.getPhotosByKeyword(spotName);
+    return { source: "galleryList1", photos };
+  }
+
+  return { source: null, photos: [] };
+};
+
+/**
+ * 8. 코스 사진 조회 (galleryList1 키워드 검색)
+ * 코스는 TourAPI content_id가 없으므로 이름으로만 검색
+ * @param {string} courseName - 코스 이름
+ */
+exports.getCoursePhotos = async (courseName) => {
+  if (!courseName) return { source: null, photos: [] };
+  const photos = await exports.getPhotosByKeyword(courseName);
+  return { source: "galleryList1", photos };
+};

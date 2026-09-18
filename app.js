@@ -41,6 +41,7 @@ const bookmarkRoutes     = require('./routes/bookmarks');
 const reportRoutes       = require('./routes/reports');
 const adminRoutes        = require('./routes/admin');
 const tourRoutes          = require('./routes/tourRoutes');
+const durunubiRoutes      = require('./routes/durunubi');
 // const notificationRoutes = require('./routes/notifications');
 
 app.use('/api/auth', authRoutes);
@@ -50,6 +51,8 @@ app.use('/api/courses',       courseRoutes);
 app.use('/api/spots',         spotRoutes);
 app.use('/api/walks',         walkRoutes);
 app.use('/api/upload',        uploadRoutes);
+// 두루누비는 tourRoutes보다 먼저 등록 (경로 충돌 방지)
+app.use('/api/tour/durunubi', durunubiRoutes);
 app.use('/api/tour',          tourRoutes);
 
 app.use('/api/reviews',       reviewRoutes);

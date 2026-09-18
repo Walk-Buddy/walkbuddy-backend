@@ -1,4 +1,6 @@
 const courseService = require('../services/courseService');
+const tourApiService = require('../services/tourApiService');
+const pool = require('../config/db');
 
 exports.previewCourse = async (req, res, next) => {
   try {
@@ -90,3 +92,25 @@ exports.deleteCourse = async (req, res, next) => {
     return res.status(200).json(result);
   } catch (err) { next(err); }
 };
+
+// 코스 사진 조회 (관광사진 API - galleryList1 키워드 검색)
+exports.getCoursePhotos = async (req, res, next) => {
+  try {
+    const { course_id } = req.params;
+
+    // DB에서 코스 이름 조회
+    const { rows } = await pool.query(
+      `SELECT name FROM courses WHERE course_id = $1 AND status != 'deleted'`,
+      [course_id]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ success: false, message: '코스를 찾을 수 없습니다.' });
+    }
+
+    const { name } = rows[0];
+    const result = await tourApiService.getCoursePhotos(name);
+
+    return res.json({ success: true, course_id, course_name: name, ...result });
+  } catch (err) { next(err); }
+};

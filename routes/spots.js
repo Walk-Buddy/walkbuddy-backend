@@ -23,6 +23,7 @@ router.get('/search', spotController.searchSpots);
 router.get('/filter', spotController.filterSpots);
 router.get('/', spotController.getSpots);
 router.get('/:spot_id/ai-contents', spotController.getAiContents);
+router.get('/:spot_id/photos', spotController.getSpotPhotos);
 router.get('/:spot_id', spotController.getSpotById);
 router.post('/kakao', authenticate, spotController.saveKakaoSpot);
 router.post('/', authenticate, spotController.createSpot);
