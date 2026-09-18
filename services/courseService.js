@@ -507,195 +507,51 @@ exports.createCourseFromWalk = async (userId, body) => {
 // ──────────────────────────────────────────────────────────────────────
 // 코스 목록 조회
 // ──────────────────────────────────────────────────────────────────────
-exports.getCourses = async (query, currentUserId) => {
-  const {
-    region,
-    sub_region,
-    category,
-    is_cycle,
-    difficulty_level,
-    tag_name,
-    tag_names,
-    page = 1, limit = 20,
-    sort = 'latest',        // latest | rating
-    is_public,
-  } = query;
-
-  const offset = (page - 1) * limit;
-  const client = await pool.connect();
-  try {
-    const conditions = [`c.status = 'active'`, `c.is_public=TRUE`];
-    const params = [];
-    let idx = 1;
-
-    if (currentUserId) {
-      conditions.push(`(c.owner_id IS NULL OR c.owner_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = $${idx++}))`);
-      params.push(currentUserId);
-    }
-
-    if (is_public !== undefined) {
-      conditions.push(`c.is_public = $${idx++}`);
-      params.push(is_public === 'true');
-    }
-
-    // 지역(region) 필터 (서울 / 춘천 / 특정 구·권역명 유연 매칭)
-    if (region && String(region).trim()) {
-      const reg = String(region).trim();
-      const normalizedReg = reg.toLowerCase();
-      if (normalizedReg === 'seoul' || reg === '서울' || reg === '서울특별시') {
-        conditions.push(`c.region = $${idx++}`);
-        params.push('서울');
-      } else if (normalizedReg === 'chuncheon' || reg === '춘천' || reg === '춘천시') {
-        conditions.push(`c.region = $${idx++}`);
-        params.push('춘천');
-      } else {
-        // '노원구'나 '의암호' 등 자치구/권역명이 region 파라미터로 들어온 경우
-        conditions.push(`(c.sub_region ILIKE $${idx} OR c.region ILIKE $${idx} OR c.name ILIKE $${idx + 1} OR c.description ILIKE $${idx + 1})`);
-        params.push(`%${reg}%`, `%${reg}%`);
-        idx += 2;
-      }
-    }
-
-    // 세부 권역(sub_region) 필터
-    if (sub_region && String(sub_region).trim()) {
-      conditions.push(`(c.sub_region ILIKE $${idx} OR c.name ILIKE $${idx + 1} OR c.description ILIKE $${idx + 1})`);
-      params.push(`%${String(sub_region).trim()}%`, `%${String(sub_region).trim()}%`);
-      idx += 2;
-    }
-
-    // 코스 카테고리 필터
-    if (category && String(category).trim()) {
-      conditions.push(`c.category ILIKE $${idx}`);
-      params.push(`%${String(category).trim()}%`);
-      idx += 1;
-    }
-
-    // 순환형(원점회귀) 필터 (선택 안 됨/all/빈값일 경우 조건 없이 전체 조회)
-    if (is_cycle !== undefined && is_cycle !== null && is_cycle !== '' && is_cycle !== 'all' && is_cycle !== 'ALL') {
-      const isCycleStr = String(is_cycle).trim().toLowerCase();
-      if (isCycleStr === 'true' || isCycleStr === '1') {
-        conditions.push(`c.is_cycle = TRUE`);
-      } else if (isCycleStr === 'false' || isCycleStr === '0') {
-        conditions.push(`c.is_cycle = FALSE`);
-      }
-    }
-
-    // 난이도 필터 (1: 쉬움, 2: 보통, 3: 어려움 / 선택 안 됨/all/0/빈값일 경우 조건 없이 전체 조회)
-    if (difficulty_level !== undefined && difficulty_level !== null && difficulty_level !== '' && difficulty_level !== 'all' && difficulty_level !== 'ALL' && difficulty_level !== '0' && difficulty_level !== 0) {
-      const level = Number(difficulty_level);
-      if (Number.isFinite(level) && level >= 1 && level <= 3) {
-        conditions.push(`c.difficulty_level = $${idx++}`);
-        params.push(level);
-      }
-    }
-
-    // 태그명 필터
-    const targetTagNames = tag_name || tag_names;
-    if (targetTagNames) {
-      const tagNameList = (Array.isArray(targetTagNames) ? targetTagNames.join(',') : targetTagNames)
-        .split(',')
-        .map((t) => t.trim().replace(/^#/, ''))
-        .filter(Boolean);
-
-      if (tagNameList.length > 0) {
-        conditions.push(`
-          c.course_id IN (
-            SELECT tg.target_id
-            FROM taggings tg
-            JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'course' AND t.is_active = TRUE
-            WHERE tg.target_type = 'course' AND t.name = ANY($${idx}::TEXT[])
-            GROUP BY tg.target_id HAVING COUNT(DISTINCT t.name) >= $${idx + 1}
-          )
-        `);
-        params.push(tagNameList);
-        params.push(tagNameList.length);
-        idx += 2;
-      }
-    }
-
-    const orderMap = {
-      rating: 'avg_rating DESC NULLS LAST, c.created_at DESC',
-      latest: 'c.created_at DESC',
-    };
-    const orderBy = orderMap[sort] || 'c.created_at DESC';
-
-    const sql = `
-      SELECT
-        c.course_id, c.name, c.description, c.category,
-        c.region, c.sub_region,
-        c.total_distance, c.estimated_duration,
-        c.is_cycle, c.difficulty_level,
-        c.is_public, c.created_at,
-        ST_Y(ST_StartPoint(c.route_geometry::geometry)) AS start_lat,
-        ST_X(ST_StartPoint(c.route_geometry::geometry)) AS start_lng,
-        ROUND(AVG(cr.rating)::numeric, 1)          AS avg_rating,
-        ROUND(AVG(CASE cr.difficulty
-          WHEN 'easy'   THEN 1
-          WHEN 'normal' THEN 2
-          WHEN 'hard'   THEN 3 END)::numeric, 1)   AS avg_difficulty,
-        COUNT(DISTINCT cr.course_review_id)         AS review_count,
-        COALESCE(
-          json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
-          FILTER (WHERE t.tag_id IS NOT NULL), '[]'
-        ) AS tags
-      FROM courses c
-      LEFT JOIN course_reviews cr
-        ON cr.course_id = c.course_id AND cr.status = 'active'
-      LEFT JOIN taggings tg
-        ON tg.target_id = c.course_id AND tg.target_type = 'course'
-      LEFT JOIN tags t
-        ON t.tag_id = tg.tag_id AND t.is_active = TRUE
-      WHERE ${conditions.join(' AND ')}
-      GROUP BY c.course_id
-      ORDER BY ${orderBy}
-      LIMIT $${idx} OFFSET $${idx+1}
-    `;
-    params.push(+limit, +offset);
-
-    const countSql = `
-      SELECT COUNT(DISTINCT c.course_id) AS total
-      FROM courses c
-      WHERE ${conditions.join(' AND ')}
-    `;
-
-    const [{ rows }, { rows: countRows }] = await Promise.all([
-      client.query(sql, params),
-      client.query(countSql, params.slice(0, -2)), // limit/offset 제외
-    ]);
-
-    const formattedCourses = rows.map((r) => ({
-      ...r,
-      is_cycle: Boolean(r.is_cycle),
-      difficulty_level: Number(r.difficulty_level || 1),
-      start_location: r.start_lat && r.start_lng ? { lat: Number(r.start_lat), lng: Number(r.start_lng) } : null,
-    }));
-
-    return {
-      total: +countRows[0].total,
-      page: +page,
-      courses: formattedCourses,
-    };
-  } finally { client.release(); }
-};
-
-// 코스 검색
-// 지역명·키워드, 거리/시간, 후기 기반 난이도·평점, 코스 태그, 포함 스팟 태그로 필터링
 // ──────────────────────────────────────────────────────────────────────
-exports.searchCourses = async (query, currentUserId) => {
+// 코스 목록 & 검색 & 필터 통합 조회
+// ──────────────────────────────────────────────────────────────────────
+exports.getCourses = async (query, currentUserId) => {
   const keyword = readQueryValue(query.keyword, query.q);
   const normalizedKeyword = isMissing(keyword) ? null : String(keyword).trim();
   const region = readQueryValue(query.region);
   const normalizedRegion = isMissing(region) ? null : String(region).trim();
   const subRegion = readQueryValue(query.sub_region);
   const normalizedSubRegion = isMissing(subRegion) ? null : String(subRegion).trim();
-  const minTotalDistance = parseNumberParam(query.min_total_distance, 'min_total_distance', { min: 0 });
-  const maxTotalDistance = parseNumberParam(query.max_total_distance, 'max_total_distance', { min: 0 });
-  const minEstimatedDuration = parseNumberParam(query.min_estimated_duration, 'min_estimated_duration', { min: 0 });
-  const maxEstimatedDuration = parseNumberParam(query.max_estimated_duration, 'max_estimated_duration', { min: 0 });
-  const minAvgRating = parseNumberParam(query.min_avg_rating, 'min_avg_rating', { min: 0, max: 5 });
-  const difficulty = normalizeDifficulty(query.difficulty);
+  const category = readQueryValue(query.category);
+  const normalizedCategory = isMissing(category) ? null : String(category).trim();
+
+  const minTotalDistance = parseNumberParam(query.min_total_distance ?? query.min_distance, 'min_total_distance', { min: 0 });
+  const maxTotalDistance = parseNumberParam(query.max_total_distance ?? query.max_distance, 'max_total_distance', { min: 0 });
+  const minEstimatedDuration = parseNumberParam(query.min_estimated_duration ?? query.min_duration, 'min_estimated_duration', { min: 0 });
+  const maxEstimatedDuration = parseNumberParam(query.max_estimated_duration ?? query.max_duration, 'max_estimated_duration', { min: 0 });
+  const minAvgRating = parseNumberParam(query.min_avg_rating ?? query.min_rating, 'min_avg_rating', { min: 0, max: 5 });
+
+  // 난이도 (easy/normal/hard 또는 1/2/3)
+  let difficulty = null;
+  if (query.difficulty) {
+    difficulty = normalizeDifficulty(query.difficulty);
+  } else if (query.difficulty_level && query.difficulty_level !== 'all' && query.difficulty_level !== '0') {
+    const level = Number(query.difficulty_level);
+    if (level === 1) difficulty = 'easy';
+    else if (level === 2) difficulty = 'normal';
+    else if (level === 3) difficulty = 'hard';
+  }
+
+  // 태그 ID 및 태그명 필터
   const courseTagIds = parseUuidList(query.course_tag_ids ?? query.tag_ids, 'course_tag_ids');
   const spotTagIds = parseUuidList(query.spot_tag_ids, 'spot_tag_ids');
+  const targetTagNames = query.tag_name || query.tag_names;
+  let tagNameList = [];
+  if (targetTagNames) {
+    tagNameList = (Array.isArray(targetTagNames) ? targetTagNames.join(',') : targetTagNames)
+      .split(',')
+      .map((t) => t.trim().replace(/^#/, ''))
+      .filter(Boolean);
+  }
+
+  const isCycle = query.is_cycle;
+  const isPublic = query.is_public;
+
   const page = parseIntegerParam(query.page, 'page', { defaultValue: 1, min: 1, max: 10000 });
   const limit = parseIntegerParam(query.limit, 'limit', { defaultValue: 20, min: 1, max: 100 });
   const offset = (page - 1) * limit;
@@ -709,18 +565,26 @@ exports.searchCourses = async (query, currentUserId) => {
   }
 
   const params = [];
-  const conditions = [`c.status = 'active'`, `c.is_public = TRUE`];
+  const conditions = [`c.status = 'active'`];
+
+  if (isPublic !== undefined) {
+    params.push(isPublic === 'true' || isPublic === true);
+    conditions.push(`c.is_public = $${params.length}`);
+  } else {
+    conditions.push(`c.is_public = TRUE`);
+  }
 
   if (currentUserId) {
     params.push(currentUserId);
     conditions.push(`(c.owner_id IS NULL OR c.owner_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = $${params.length}))`);
   }
 
+  // 지역 필터
   if (normalizedRegion) {
-    if (normalizedRegion === '서울' || normalizedRegion.toLowerCase() === 'seoul') {
+    if (normalizedRegion === '서울' || normalizedRegion.toLowerCase() === 'seoul' || normalizedRegion === '서울특별시') {
       params.push('서울');
       conditions.push(`c.region = $${params.length}`);
-    } else if (normalizedRegion === '춘천' || normalizedRegion.toLowerCase() === 'chuncheon') {
+    } else if (normalizedRegion === '춘천' || normalizedRegion.toLowerCase() === 'chuncheon' || normalizedRegion === '춘천시') {
       params.push('춘천');
       conditions.push(`c.region = $${params.length}`);
     } else {
@@ -734,6 +598,7 @@ exports.searchCourses = async (query, currentUserId) => {
     }
   }
 
+  // 세부 권역 필터
   if (normalizedSubRegion) {
     params.push(`%${normalizedSubRegion}%`);
     conditions.push(`(
@@ -743,45 +608,64 @@ exports.searchCourses = async (query, currentUserId) => {
     )`);
   }
 
+  // 카테고리 필터
+  if (normalizedCategory) {
+    params.push(`%${normalizedCategory}%`);
+    conditions.push(`c.category ILIKE $${params.length}`);
+  }
+
+  // 키워드 검색
   if (normalizedKeyword) {
     params.push(`%${normalizedKeyword}%`);
     conditions.push(`(
       c.name ILIKE $${params.length}
       OR c.description ILIKE $${params.length}
       OR c.category ILIKE $${params.length}
+      OR c.sub_region ILIKE $${params.length}
     )`);
   }
 
+  // 순환 여부 필터
+  if (isCycle !== undefined && isCycle !== null && isCycle !== '' && isCycle !== 'all' && isCycle !== 'ALL') {
+    const isCycleStr = String(isCycle).trim().toLowerCase();
+    if (isCycleStr === 'true' || isCycleStr === '1') {
+      conditions.push(`c.is_cycle = TRUE`);
+    } else if (isCycleStr === 'false' || isCycleStr === '0') {
+      conditions.push(`c.is_cycle = FALSE`);
+    }
+  }
+
+  // 거리 / 소요시간 필터
   if (minTotalDistance !== null) {
     params.push(minTotalDistance);
     conditions.push(`c.total_distance >= $${params.length}`);
   }
-
   if (maxTotalDistance !== null) {
     params.push(maxTotalDistance);
     conditions.push(`c.total_distance <= $${params.length}`);
   }
-
   if (minEstimatedDuration !== null) {
     params.push(minEstimatedDuration);
     conditions.push(`c.estimated_duration >= $${params.length}`);
   }
-
   if (maxEstimatedDuration !== null) {
     params.push(maxEstimatedDuration);
     conditions.push(`c.estimated_duration <= $${params.length}`);
   }
 
+  // 난이도 필터
   if (difficulty) {
     params.push(difficulty);
     conditions.push(`rs.difficulty = $${params.length}`);
   }
 
+  // 평점 필터
   if (minAvgRating !== null) {
     params.push(minAvgRating);
     conditions.push(`rs.avg_rating >= $${params.length}`);
   }
 
+  // 코스 태그 ID 필터
   if (courseTagIds.length > 0) {
     params.push(courseTagIds);
     const tagIdsParamIndex = params.length;
@@ -804,13 +688,31 @@ exports.searchCourses = async (query, currentUserId) => {
     `);
   }
 
+  // 코스 태그명 필터
+  if (tagNameList.length > 0) {
+    params.push(tagNameList);
+    const tagNamesParamIndex = params.length;
+    params.push(tagNameList.length);
+    const tagCountParamIndex = params.length;
+
+    conditions.push(`
+      c.course_id IN (
+        SELECT tg.target_id
+        FROM taggings tg
+        JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'course' AND t.is_active = TRUE
+        WHERE tg.target_type = 'course' AND t.name = ANY($${tagNamesParamIndex}::TEXT[])
+        GROUP BY tg.target_id HAVING COUNT(DISTINCT t.name) >= $${tagCountParamIndex}
+      )
+    `);
+  }
+
+  // 스팟 태그 ID 필터
   if (spotTagIds.length > 0) {
     params.push(spotTagIds);
     const tagIdsParamIndex = params.length;
     params.push(spotTagIds.length);
     const tagCountParamIndex = params.length;
 
-    // 장소 태그는 코스에 포함된 스팟들의 태그 합집합이 선택 태그를 모두 포함하는지로 판단합니다.
     conditions.push(`
       c.course_id IN (
         SELECT cw.course_id
@@ -830,10 +732,15 @@ exports.searchCourses = async (query, currentUserId) => {
     `);
   }
 
+  // 정렬 매핑
   const orderMap = {
     rating: 'rs.avg_rating DESC NULLS LAST, c.created_at DESC',
     length: 'c.total_distance ASC, c.created_at DESC',
+    distance_asc: 'c.total_distance ASC, c.created_at DESC',
+    distance_desc: 'c.total_distance DESC, c.created_at DESC',
     duration: 'c.estimated_duration ASC, c.created_at DESC',
+    duration_asc: 'c.estimated_duration ASC, c.created_at DESC',
+    duration_desc: 'c.estimated_duration DESC, c.created_at DESC',
     latest: 'c.created_at DESC',
   };
   const sort = readQueryValue(query.sort);
@@ -922,6 +829,8 @@ exports.searchCourses = async (query, currentUserId) => {
       c.sub_region,
       c.total_distance,
       c.estimated_duration,
+      c.is_cycle,
+      c.difficulty_level,
       c.is_public,
       c.created_at,
       ST_Y(ST_StartPoint(c.route_geometry::geometry)) AS start_lat,
@@ -955,6 +864,8 @@ exports.searchCourses = async (query, currentUserId) => {
 
       return {
         ...course,
+        is_cycle: Boolean(course.is_cycle),
+        difficulty_level: Number(course.difficulty_level || 1),
         start_location: course.start_lat && course.start_lng ? { lat: Number(course.start_lat), lng: Number(course.start_lng) } : null,
         avg_rating: course.avg_rating === null ? null : Number(course.avg_rating),
         avg_difficulty_score: course.avg_difficulty_score === null
@@ -967,11 +878,19 @@ exports.searchCourses = async (query, currentUserId) => {
       };
     });
 
+    const totalCount = Number(countRows[0]?.total || 0);
+
     return {
       success: true,
+      total: totalCount,
+      total_count: totalCount,
+      page,
+      limit,
       filters: {
         keyword: normalizedKeyword || null,
         region: normalizedRegion || null,
+        sub_region: normalizedSubRegion || null,
+        category: normalizedCategory || null,
         min_total_distance: minTotalDistance,
         max_total_distance: maxTotalDistance,
         min_estimated_duration: minEstimatedDuration,
@@ -980,15 +899,18 @@ exports.searchCourses = async (query, currentUserId) => {
         min_avg_rating: minAvgRating,
         course_tag_ids: courseTagIds,
         spot_tag_ids: spotTagIds,
-        sort,
+        sort: sort || 'latest',
       },
-      total_count: Number(countRows[0]?.total || 0),
-      page,
-      limit,
       courses,
     };
+  } finally {
+    client.release();
+  }
+};
 
-  } finally { client.release(); }
+// searchCourses는 하위 호환성을 위해 getCourses로 위임
+exports.searchCourses = async (query, currentUserId) => {
+  return exports.getCourses(query, currentUserId);
 };
 
 // ──────────────────────────────────────────────────────────────────────

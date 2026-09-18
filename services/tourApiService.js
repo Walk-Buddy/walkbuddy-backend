@@ -208,7 +208,7 @@ function getTotalCount(data) {
  * 서울 25개 구 / 춘천시 대상
  */
 exports.getFestivals = async ({ region, eventStartDate, page = 1, limit = 10 } = {}) => {
-  const target = resolveRegion(region) || TARGET_REGIONS.SEOUL;
+  const target = resolveRegion(region) || TARGET_REGIONS.CHUNCHEON;
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const startDate = eventStartDate || today;
 
@@ -377,7 +377,7 @@ exports.getBarrierFreeInfo = async (contentId) => {
  * 3-1. 실시간 지역별 열린관광(무장애 인증) 스팟 목록 조회 (areaBasedList2)
  */
 exports.getBarrierFreeSpots = async ({ region, contentTypeId, page = 1, limit = 10 } = {}) => {
-  const target = resolveRegion(region) || TARGET_REGIONS.SEOUL;
+  const target = resolveRegion(region) || TARGET_REGIONS.CHUNCHEON;
 
   const params = {
     areaCode: target.tourApi.areaCode,
@@ -475,7 +475,7 @@ exports.searchBarrierFreePlaces = async ({ region, keyword, page = 1, limit = 10
  * 4. 실시간 지역/테마별 관광 스팟 목록 조회 (areaBasedList1)
  */
 exports.getTourSpots = async ({ region, contentTypeId, cat1, cat2, cat3, page = 1, limit = 10 } = {}) => {
-  const target = resolveRegion(region) || TARGET_REGIONS.SEOUL;
+  const target = resolveRegion(region) || TARGET_REGIONS.CHUNCHEON;
 
   const params = {
     areaCode: target.tourApi.areaCode,
@@ -713,7 +713,7 @@ exports.getPetTourDetail = async (contentId) => {
  * LBS 미신고 안전: 스마트폰 실시간 GPS 대신 서울(25개 구) / 춘천시 지역코드만 사용
  */
 exports.getPetTourSpots = async ({ region, contentTypeId, page = 1, limit = 10 } = {}) => {
-  const target = resolveRegion(region) || TARGET_REGIONS.SEOUL;
+  const target = resolveRegion(region) || TARGET_REGIONS.CHUNCHEON;
 
   const params = {
     areaCode: target.tourApi.areaCode,

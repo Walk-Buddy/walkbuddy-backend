@@ -303,12 +303,36 @@ async function enrichKakaoSpotTourContent(spot, userId) {
 // 스팟 목록 조회
 // ──────────────────────────────────────────────────────────────────────
 exports.getSpots = async (query) => {
-    const { category, tag_ids, tag_name, tag_names, min_recommend_pct, region, sub_region, page = 1, limit = 20 } = query;
+    const {
+        category,
+        tag_ids,
+        tag_name,
+        tag_names,
+        min_recommend_pct,
+        region,
+        sub_region,
+        sort = 'latest',
+        page = 1,
+        limit = 20,
+    } = query;
+
+    const rawKeyword = Array.isArray(query.keyword ?? query.q) ? (query.keyword ?? query.q)[0] : (query.keyword ?? query.q);
+    const keyword = rawKeyword === undefined || rawKeyword === null ? null : String(rawKeyword).trim();
+
     const offset = (Number(page) - 1) * Number(limit);
     const whereConditions = ["s.status = 'active'"];
     const queryValues = [];
-    let orderBySql = 's.created_at DESC';
 
+    // 정렬 매핑
+    const orderMap = {
+        recommend: 's.recommend_pct DESC NULLS LAST, s.created_at DESC',
+        recommend_pct: 's.recommend_pct DESC NULLS LAST, s.created_at DESC',
+        name: 's.name ASC, s.created_at DESC',
+        latest: 's.created_at DESC',
+    };
+    const orderBySql = orderMap[sort] || 's.created_at DESC';
+
+    // 지역 필터
     if (region && String(region).trim()) {
         const reg = String(region).trim();
         const normalizedReg = reg.toLowerCase();
@@ -324,11 +348,13 @@ exports.getSpots = async (query) => {
         }
     }
 
+    // 세부 권역 필터
     if (sub_region && String(sub_region).trim()) {
         queryValues.push(`%${String(sub_region).trim()}%`);
         whereConditions.push(`(s.sub_region ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
     }
 
+    // 카테고리 필터
     if (category) {
         if (!SPOT_CATEGORIES.includes(category)) {
             const err = new Error('unsupported spot category');
@@ -338,6 +364,12 @@ exports.getSpots = async (query) => {
         }
         queryValues.push(category);
         whereConditions.push(`s.categories @> ARRAY[$${queryValues.length}]::TEXT[]`);
+    }
+
+    // 키워드 검색 (스팟명, 주소, 세부권역)
+    if (keyword) {
+        queryValues.push(`%${keyword}%`);
+        whereConditions.push(`(s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length} OR s.sub_region ILIKE $${queryValues.length})`);
     }
 
     // 태그 ID 목록 검색 (UUID)
@@ -438,8 +470,11 @@ exports.getSpots = async (query) => {
         tags: s.tags || [],
     }));
 
+    const total = Number(countResult.rows[0]?.total || 0);
+
     return {
-        total: Number(countResult.rows[0]?.total || 0),
+        total,
+        total_count: total,
         page: Number(page),
         limit: Number(limit),
         spots,
@@ -793,97 +828,9 @@ exports.searchSpots = async (query) => {
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 스팟 필터 조회
+// 스팟 필터 조회 (하위 호환성을 위해 getSpots로 위임)
 // ──────────────────────────────────────────────────────────────────────
 exports.filterSpots = async (query) => {
-    const { category, tag_ids, min_recommend_pct, region, sub_region } = query;
-    const whereConditions = ["s.status = 'active'"];
-    const queryValues = [];
-    let orderBySql = 's.created_at DESC';
-
-    if (region && String(region).trim()) {
-        const reg = String(region).trim();
-        const normalizedReg = reg.toLowerCase();
-        if (normalizedReg === 'seoul' || reg === '서울' || reg === '서울특별시') {
-            queryValues.push('서울');
-            whereConditions.push(`s.region = $${queryValues.length}`);
-        } else if (normalizedReg === 'chuncheon' || reg === '춘천' || reg === '춘천시') {
-            queryValues.push('춘천');
-            whereConditions.push(`s.region = $${queryValues.length}`);
-        } else {
-            queryValues.push(`%${reg}%`);
-            whereConditions.push(`(s.sub_region ILIKE $${queryValues.length} OR s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
-        }
-    }
-
-    if (sub_region && String(sub_region).trim()) {
-        queryValues.push(`%${String(sub_region).trim()}%`);
-        whereConditions.push(`(s.sub_region ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
-    }
-
-    if (category) {
-        if (!SPOT_CATEGORIES.includes(category)) {
-            const err = new Error('unsupported spot category');
-            err.status = 400; err.supported_categories = SPOT_CATEGORIES; throw err;
-        }
-        queryValues.push(category);
-        whereConditions.push(`s.categories @> ARRAY[$${queryValues.length}]::TEXT[]`);
-    }
-
-    if (tag_ids) {
-        const tagIdList = (Array.isArray(tag_ids) ? tag_ids.join(',') : tag_ids)
-            .split(',').map(t => t.trim()).filter(Boolean);
-        const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (tagIdList.some(t => !uuidPattern.test(t))) {
-            const err = new Error('tag_ids must be comma-separated UUID values');
-            err.status = 400; throw err;
-        }
-        if (tagIdList.length > 0) {
-            queryValues.push(tagIdList); const tagIdx = queryValues.length;
-            queryValues.push(tagIdList.length); const cntIdx = queryValues.length;
-            whereConditions.push(`
-                s.spot_id IN (
-                    SELECT tg.target_id FROM taggings tg
-                    WHERE tg.target_type = 'spot' AND tg.tag_id = ANY($${tagIdx}::UUID[])
-                    GROUP BY tg.target_id HAVING COUNT(DISTINCT tg.tag_id) = $${cntIdx}
-                )
-            `);
-        }
-    }
-
-    if (min_recommend_pct) {
-        const pct = Number(min_recommend_pct);
-        if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
-            const err = new Error('min_recommend_pct must be a number between 0 and 100');
-            err.status = 400; throw err;
-        }
-        queryValues.push(pct);
-        whereConditions.push(`s.recommend_pct >= $${queryValues.length}`);
-    }
-
-    const result = await pool.query(
-        `SELECT s.spot_id, s.kakao_place_id, s.name, s.address, s.categories, s.kakao_category_name,
-                s.region, s.sub_region,
-                s.recommend_pct, ST_X(s.location::GEOMETRY) AS x, ST_Y(s.location::GEOMETRY) AS y,
-                COALESCE(json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
-                FILTER (WHERE t.tag_id IS NOT NULL), '[]') AS tags
-         FROM spots s
-         LEFT JOIN taggings tg_all ON tg_all.target_type = 'spot' AND tg_all.target_id = s.spot_id
-         LEFT JOIN tags t ON t.tag_id = tg_all.tag_id AND t.type = 'spot' AND t.is_active = true
-         WHERE ${whereConditions.join(' AND ')}
-         GROUP BY s.spot_id ORDER BY ${orderBySql} LIMIT 50`,
-        queryValues
-    );
-
-    return {
-        filters: { category: category || null, region: region || null, tag_ids: tag_ids || null, min_recommend_pct: min_recommend_pct || null },
-        total_count: result.rows.length,
-        spots: result.rows.map(s => ({
-            ...s,
-            x: Number(s.x),
-            y: Number(s.y),
-            recommend_pct: s.recommend_pct == null ? null : Number(s.recommend_pct),
-        })),
-    };
+    return exports.getSpots(query);
 };
 

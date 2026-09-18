@@ -567,12 +567,64 @@ const swaggerDefinition = {
       get: {
         tags: ['태그'],
         summary: '전체 태그 목록 조회',
-        description: '사용자가 선택할 수 있는 활성 태그를 코스 태그와 스팟 태그로 나누어 반환합니다.',
+        description: '사용자가 선택할 수 있는 활성 태그를 코스 태그와 스팟 태그, 그리고 세부 그룹(group_name: 시설·편의, 분위기·테마 등)별로 반환합니다.',
         security: [],
         responses: {
           200: {
             description: '태그 목록',
-            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, total: { type: 'integer', example: 21 }, course_count: { type: 'integer', example: 7 }, spot_count: { type: 'integer', example: 14 }, course_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string', example: '추천산책로' }, type: { type: 'string', example: 'course' } } } }, spot_tags: { type: 'array', items: { type: 'object', properties: { tag_id: { type: 'string', format: 'uuid' }, name: { type: 'string', example: '문화/예술' }, type: { type: 'string', example: 'spot' } } } } } } } },
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    total: { type: 'integer', example: 21 },
+                    course_count: { type: 'integer', example: 7 },
+                    spot_count: { type: 'integer', example: 14 },
+                    course_tags: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          tag_id: { type: 'string', format: 'uuid' },
+                          name: { type: 'string', example: '추천산책로' },
+                          type: { type: 'string', example: 'course' },
+                          group_name: { type: 'string', example: '추천·테마' },
+                        },
+                      },
+                    },
+                    spot_tags: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          tag_id: { type: 'string', format: 'uuid' },
+                          name: { type: 'string', example: '화장실' },
+                          type: { type: 'string', example: 'spot' },
+                          group_name: { type: 'string', example: '시설·편의' },
+                        },
+                      },
+                    },
+                    course_tags_by_group: {
+                      type: 'object',
+                      description: '그룹별로 묶인 코스 태그 목록',
+                      example: {
+                        '추천·테마': [{ tag_id: 'uuid', name: '추천산책로', type: 'course', group_name: '추천·테마' }],
+                        '동반·접근성': [{ tag_id: 'uuid', name: '무장애길', type: 'course', group_name: '동반·접근성' }],
+                      },
+                    },
+                    spot_tags_by_group: {
+                      type: 'object',
+                      description: '그룹별로 묶인 스팟 태그 목록',
+                      example: {
+                        '시설·편의': [{ tag_id: 'uuid', name: '화장실', type: 'spot', group_name: '시설·편의' }],
+                        '분위기·테마': [{ tag_id: 'uuid', name: '포토존', type: 'spot', group_name: '분위기·테마' }],
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -811,29 +863,42 @@ const swaggerDefinition = {
     '/api/courses': {
       get: {
         tags: ['코스'],
-        summary: '코스 목록 조회',
-        description: '공개 코스 목록을 조회합니다. region(예: 서울, 춘천), sub_region(예: 노원구, 의암호·공지천권), category, is_cycle(순환형), difficulty_level(1~3), tag_name으로 필터링할 수 있습니다.',
+        summary: '코스 목록 및 통합 검색/필터 조회',
+        description: '공개 코스 목록을 조회하거나 키워드 검색, 다중 조건 필터링을 수행합니다. 키워드, 지역, 세부권역, 카테고리, 순환 여부, 난이도, 거리/소요시간/평점 범위, 태그 목록을 쿼리 스트링으로 자유롭게 조합할 수 있습니다.',
         parameters: [
+          { name: 'keyword', in: 'query', schema: { type: 'string' }, description: '코스명, 설명, 카테고리 키워드 검색 (q도 동일하게 사용 가능)' },
           { name: 'region', in: 'query', schema: { type: 'string' }, description: '시/도 지역 필터 (예: 서울, 춘천)' },
           { name: 'sub_region', in: 'query', schema: { type: 'string' }, description: '세부 자치구/권역 필터 (예: 노원구, 마포구, 의암호·공지천권)' },
           { name: 'category', in: 'query', schema: { type: 'string', enum: ['둘레길·트레킹', '도심·골목산책', '수변·공원길'] }, description: '코스 표준 카테고리' },
           { name: 'is_cycle', in: 'query', schema: { type: 'boolean' }, description: '순환형(원점회귀) 여부 (true: 순환형, false: 편도형)' },
-          { name: 'difficulty_level', in: 'query', schema: { type: 'integer', enum: [1, 2, 3] }, description: '난이도 (1: 쉬움, 2: 보통, 3: 어려움)' },
-          { name: 'tag_name', in: 'query', schema: { type: 'string' }, description: '코스 태그명 (예: 추천코스, 힐링, 반려동물, 무장애길, 아이와함께)' },
-          { name: 'sort', in: 'query', schema: { type: 'string', enum: ['latest', 'rating'], default: 'latest' } },
+          { name: 'difficulty_level', in: 'query', schema: { type: 'integer', enum: [1, 2, 3] }, description: '난이도 숫자 필터 (1: 쉬움, 2: 보통, 3: 어려움)' },
+          { name: 'difficulty', in: 'query', schema: { type: 'string', enum: ['easy', 'normal', 'medium', 'hard'] }, description: '후기 난이도 평균 기반 필터' },
+          { name: 'min_total_distance', in: 'query', schema: { type: 'number' }, description: '최소 총 길이(m) (min_distance도 사용 가능)' },
+          { name: 'max_total_distance', in: 'query', schema: { type: 'number' }, description: '최대 총 길이(m) (max_distance도 사용 가능)' },
+          { name: 'min_estimated_duration', in: 'query', schema: { type: 'number' }, description: '최소 예상 소요 시간(분) (min_duration도 사용 가능)' },
+          { name: 'max_estimated_duration', in: 'query', schema: { type: 'number' }, description: '최대 예상 소요 시간(분) (max_duration도 사용 가능)' },
+          { name: 'min_avg_rating', in: 'query', schema: { type: 'number', minimum: 0, maximum: 5 }, description: '최소 평균 평점 (min_rating도 사용 가능)' },
+          { name: 'tag_name', in: 'query', schema: { type: 'string' }, description: '코스 태그명 (예: 추천코스, 힐링, 반려동물, 무장애길)' },
+          { name: 'course_tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표로 구분한 코스 태그 UUID 목록 (tag_ids도 사용 가능)' },
+          { name: 'spot_tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표로 구분한 장소 태그 UUID 목록' },
+          { name: 'sort', in: 'query', schema: { type: 'string', enum: ['latest', 'rating', 'length', 'distance_asc', 'distance_desc', 'duration', 'duration_asc', 'duration_desc'], default: 'latest' } },
           { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
         ],
         responses: {
           200: {
-            description: '코스 목록',
+            description: '코스 목록 및 검색 결과',
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
                   properties: {
+                    success: { type: 'boolean', example: true },
                     total: { type: 'integer' },
+                    total_count: { type: 'integer' },
                     page: { type: 'integer' },
+                    limit: { type: 'integer' },
+                    filters: { type: 'object' },
                     courses: {
                       type: 'array',
                       items: {
@@ -850,8 +915,12 @@ const swaggerDefinition = {
                           is_cycle: { type: 'boolean', description: '순환형 여부' },
                           difficulty_level: { type: 'integer', description: '난이도 (1~3)' },
                           start_location: { type: 'object', properties: { lat: { type: 'number' }, lng: { type: 'number' } } },
-                          avg_rating: { type: 'number' },
+                          avg_rating: { type: 'number', nullable: true },
+                          avg_difficulty_score: { type: 'number', nullable: true },
+                          difficulty: { type: 'string', nullable: true },
                           review_count: { type: 'integer' },
+                          course_tags: { type: 'array', items: { type: 'object' } },
+                          spot_tags: { type: 'array', items: { type: 'object' } },
                           tags: { type: 'array', items: { type: 'object' } },
                           is_public: { type: 'boolean' },
                         },
@@ -1217,27 +1286,31 @@ const swaggerDefinition = {
     '/api/spots': {
       get: {
         tags: ['스팟'],
-        summary: '스팟 목록 조회',
-        description: '스팟 목록을 조회합니다. region(예: 서울, 춘천), sub_region(예: 노원구, 마포구, 의암호·공지천권), category(10대 표준 카테고리), tag_name(음성해설, 열린관광, 야간명소 등) 쿼리로 필터링할 수 있습니다.',
+        summary: '스팟 목록 및 통합 검색/필터 조회',
+        description: 'DB에 저장된 스팟 목록을 조회하거나 키워드 검색, 다중 조건 필터링을 수행합니다. 키워드, 지역, 세부권역, 카테고리, 태그, 추천율 필터 및 정렬을 쿼리 스트링으로 조합할 수 있습니다.',
         parameters: [
+          { name: 'keyword', in: 'query', schema: { type: 'string' }, description: '스팟명, 주소, 세부권역 키워드 검색 (q도 동일하게 사용 가능)' },
           { name: 'region', in: 'query', schema: { type: 'string' }, description: '시/도 지역 필터 (예: 서울, 춘천)' },
           { name: 'sub_region', in: 'query', schema: { type: 'string' }, description: '세부 자치구/권역 필터 (예: 노원구, 마포구, 의암호·공지천권)' },
           { name: 'category', in: 'query', schema: { type: 'string', enum: ['산·등산로', '숲·휴양림', '수목원·정원', '강·하천', '호수·저수지', '공원·광장', '역사·유적', '전시·문화공간', '카페·맛집', '전통시장·로컬마켓'] }, description: '스팟 10대 표준 카테고리' },
           { name: 'tag_name', in: 'query', schema: { type: 'string' }, description: '스팟 태그명 (예: 음성해설, 열린관광, 야간명소, 포토존, 전통·한옥, 낮그늘, 실시간축제, 반려견동반, 화장실, 주차가능, 벤치·쉼터)' },
-          { name: 'tag_ids', in: 'query', schema: { type: 'string' }, description: '콤마로 구분된 태그 UUID 목록' },
+          { name: 'tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표로 구분된 태그 UUID 목록' },
           { name: 'min_recommend_pct', in: 'query', schema: { type: 'number', minimum: 0, maximum: 100 }, description: '최소 추천율 (0~100)' },
+          { name: 'sort', in: 'query', schema: { type: 'string', enum: ['latest', 'recommend', 'name'], default: 'latest' }, description: '정렬 기준 (latest: 최신순, recommend: 추천율순, name: 이름순)' },
           { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
         ],
         responses: {
           200: {
-            description: '스팟 목록',
+            description: '스팟 목록 및 검색 결과',
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
                   properties: {
+                    success: { type: 'boolean', example: true },
                     total: { type: 'integer' },
+                    total_count: { type: 'integer' },
                     page: { type: 'integer' },
                     limit: { type: 'integer' },
                     spots: {

@@ -227,6 +227,12 @@ CREATE TABLE tags (
     -- 태그 적용 대상 구분
     -- 'course': 코스 태그 / 'spot': 스팟 태그
 
+    group_name  VARCHAR(30)     NOT NULL DEFAULT '기타',
+    -- 태그 세부 분류 그룹명
+    -- UI에서 태그를 섹션별로 나누어 노출하기 위한 그룹
+    -- 스팟: '시설·편의', '동반·접근성', '분위기·테마', '해설·안내' 등
+    -- 코스: '추천·테마', '동반·접근성' 등
+
     is_active   BOOLEAN         NOT NULL DEFAULT TRUE,
     -- 태그 활성화 여부
     -- TRUE: 활성화 (사용자 선택 가능)
@@ -248,10 +254,10 @@ CREATE TABLE tags (
     -- type 허용값 외 입력 차단
 );
 
--- 태그 type 별 조회용
--- 코스 등록·스팟 등록 시 해당 type 태그 목록 조회 빈도 높음
-CREATE INDEX ix_tags_type
-    ON tags (type);
+-- 태그 type 및 그룹별 조회용
+-- 코스 등록·스팟 등록·필터 UI에서 type 및 group_name 별 조회 빈도 높음
+CREATE INDEX ix_tags_type_group
+    ON tags (type, group_name);
 -- [주의] tags 삭제 시 users.pref_tag_ids 배열에 남아있는
 --        tag_id 정리는 앱단에서 처리 필요 (배열 타입 FK 미지원)
 
