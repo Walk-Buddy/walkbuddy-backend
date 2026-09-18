@@ -438,22 +438,30 @@ exports.getSpots = async (query) => {
     if (region && String(region).trim()) {
         const reg = String(region).trim();
         const normalizedReg = reg.toLowerCase();
-        if (normalizedReg === 'seoul' || reg === '서울' || reg === '서울특별시') {
-            queryValues.push('서울');
-            whereConditions.push(`s.region = $${queryValues.length}`);
-        } else if (normalizedReg === 'chuncheon' || reg === '춘천' || reg === '춘천시') {
-            queryValues.push('춘천');
-            whereConditions.push(`s.region = $${queryValues.length}`);
-        } else {
-            queryValues.push(`%${reg}%`);
-            whereConditions.push(`(s.sub_region ILIKE $${queryValues.length} OR s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
+        if (!['전국', '전체', 'all'].includes(normalizedReg)) {
+            if (['seoul', '서울', '서울특별시'].includes(normalizedReg) || reg === '서울' || reg === '서울특별시') {
+                queryValues.push('서울');
+                whereConditions.push(`s.region = $${queryValues.length}`);
+            } else if (
+                ['chuncheon', '춘천', '춘천시', '강원', '강원도', '강원특별자치도', 'gangwon'].includes(normalizedReg) ||
+                ['춘천', '춘천시', '강원', '강원도', '강원특별자치도'].includes(reg)
+            ) {
+                queryValues.push('춘천');
+                whereConditions.push(`s.region = $${queryValues.length}`);
+            } else {
+                queryValues.push(`%${reg}%`);
+                whereConditions.push(`(s.sub_region ILIKE $${queryValues.length} OR s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
+            }
         }
     }
 
     // 세부 권역 필터
     if (sub_region && String(sub_region).trim()) {
-        queryValues.push(`%${String(sub_region).trim()}%`);
-        whereConditions.push(`(s.sub_region ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
+        const sub = String(sub_region).trim();
+        if (!['전체', 'all'].includes(sub.toLowerCase()) && sub !== '전체') {
+            queryValues.push(`%${sub}%`);
+            whereConditions.push(`(s.sub_region ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
+        }
     }
 
     // 카테고리 필터
@@ -849,8 +857,23 @@ exports.searchSpots = async (query) => {
     let orderBySql = 's.created_at DESC';
 
     if (region && String(region).trim()) {
-        queryValues.push(`%${String(region).trim()}%`);
-        whereConditions.push(`(s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length})`);
+        const reg = String(region).trim();
+        const normalizedReg = reg.toLowerCase();
+        if (!['전국', '전체', 'all'].includes(normalizedReg)) {
+            if (['seoul', '서울', '서울특별시'].includes(normalizedReg) || reg === '서울' || reg === '서울특별시') {
+                queryValues.push('서울');
+                whereConditions.push(`s.region = $${queryValues.length}`);
+            } else if (
+                ['chuncheon', '춘천', '춘천시', '강원', '강원도', '강원특별자치도', 'gangwon'].includes(normalizedReg) ||
+                ['춘천', '춘천시', '강원', '강원도', '강원특별자치도'].includes(reg)
+            ) {
+                queryValues.push('춘천');
+                whereConditions.push(`s.region = $${queryValues.length}`);
+            } else {
+                queryValues.push(`%${reg}%`);
+                whereConditions.push(`(s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length} OR s.sub_region ILIKE $${queryValues.length})`);
+            }
+        }
     }
 
     if (category) {

@@ -140,7 +140,7 @@ exports.getDurunubiCourses = async ({ region, brdDiv, page = 1, limit = 10 } = {
   const rawItems = getItems(data);
 
   // 지역 필터링 (sigun 필드에 타겟 지역명이 포함되어 있는지 확인)
-  const filtered = rawItems.filter((item) => {
+  let filtered = rawItems.filter((item) => {
     if (!item.sigun) return false;
     return (
       item.sigun.includes(target.name) ||
@@ -148,6 +148,16 @@ exports.getDurunubiCourses = async ({ region, brdDiv, page = 1, limit = 10 } = {
       (target.fullName && item.sigun.includes(target.fullName))
     );
   });
+
+  // 두루누비 140개 전국 둘레길 API 중 춘천시 단독 둘레길이 없을 경우 강원도 지역(강릉, 철원, 화천, 양구 등) 둘레길로 확장 제공
+  if (filtered.length === 0 && (target.name.includes('춘천') || (target.fullName && target.fullName.includes('강원')))) {
+    filtered = rawItems.filter((item) => item.sigun && (item.sigun.includes('강원') || item.sigun.includes('춘천')));
+  }
+
+  // 전체 검색이거나 필터링 결과가 비어있을 경우 전국 주요 둘레길 제공
+  if (filtered.length === 0) {
+    filtered = rawItems;
+  }
 
   const total = filtered.length;
   const startIndex = (page - 1) * limit;
@@ -158,8 +168,8 @@ exports.getDurunubiCourses = async ({ region, brdDiv, page = 1, limit = 10 } = {
     crs_kod: item.crsKod || item.crskod || null,
     crs_name: item.crsKorNm || item.crskorNm || null,
     crs_level: item.crsLevel || item.crslevel || null,
-    crs_distance: item.crsDist || null,
-    crs_time: item.crsTime || null,
+    crs_distance: item.crsDstnc || item.crsDist || null,
+    crs_time: item.crsTotlRqrmHour || item.crsTime || null,
     sigun: item.sigun || null,
     image_url: item.imgUrl || null,
     summary: item.crsSummary || null,

@@ -1,5 +1,6 @@
 const axios = require("axios");
-const { resolveRegion, TARGET_REGIONS } = require("../constants/spotCategoryRules");
+const { resolveRegion, TARGET_REGIONS, inferSpotCategories, inferSpotCategoriesWithFallback, extractRegionFromAddress } = require("../constants/spotCategoryRules");
+const pool = require("../config/db");
 
 const BASE_URL = "https://apis.data.go.kr/B551011/KorService2";
 const WITH_TOUR_BASE_URL = "https://apis.data.go.kr/B551011/KorWithService2"; // 무장애 여행정보 API
@@ -471,51 +472,226 @@ exports.searchBarrierFreePlaces = async ({ region, keyword, page = 1, limit = 10
   };
 };
 
+function mapCategoryToTourParams(category) {
+  if (!category) return {};
+  const cat = String(category).trim();
+
+  if (cat === '카페·맛집' || cat === '카페' || cat === '음식점' || cat.includes('맛집')) {
+    return { contentTypeId: '39' };
+  }
+  if (cat === '전시·문화공간' || cat === '박물관' || cat === '미술관' || cat.includes('전시') || cat.includes('문화')) {
+    return { contentTypeId: '14' };
+  }
+  if (cat === '전통시장·로컬마켓' || cat === '시장' || cat === '전통시장' || cat.includes('쇼핑')) {
+    return { contentTypeId: '38' };
+  }
+  if (cat === '역사·유적' || cat.includes('유적') || cat.includes('고궁') || cat.includes('사찰')) {
+    return { contentTypeId: '12', cat2: 'A0201' };
+  }
+  if (cat === '산·등산로' || cat === '산' || cat.includes('등산')) {
+    return { contentTypeId: '12', cat2: 'A0101' };
+  }
+  if (cat === '숲·휴양림' || cat.includes('휴양림') || cat.includes('숲')) {
+    return { contentTypeId: '12', cat2: 'A0102' };
+  }
+  if (cat === '수목원·정원' || cat.includes('수목원') || cat.includes('정원')) {
+    return { contentTypeId: '12', cat2: 'A0101' };
+  }
+  if (cat === '공원·광장' || cat === '강·하천' || cat === '호수·저수지' || cat.includes('공원')) {
+    return { contentTypeId: '12' };
+  }
+
+  return {};
+}
+
 /**
- * 4. 실시간 지역/테마별 관광 스팟 목록 조회 (areaBasedList1)
+ * 4. 실시간 지역/테마/위치별 관광 스팟 목록 조회 (areaBasedList2 / locationBasedList2)
  */
-exports.getTourSpots = async ({ region, contentTypeId, cat1, cat2, cat3, page = 1, limit = 10 } = {}) => {
-  const target = resolveRegion(region) || TARGET_REGIONS.CHUNCHEON;
+exports.getTourSpots = async ({
+  region,
+  sub_region,
+  contentTypeId,
+  cat1,
+  cat2,
+  cat3,
+  category,
+  tag_ids,
+  min_recommend_pct,
+  latitude,
+  longitude,
+  radius,
+  page = 1,
+  limit = 10,
+} = {}) => {
+  const targetRegionInput = sub_region || region;
+  const target = resolveRegion(targetRegionInput) || resolveRegion(region) || TARGET_REGIONS.CHUNCHEON;
 
-  const params = {
-    areaCode: target.tourApi.areaCode,
-    sigunguCode: target.tourApi.sigunguCode,
-    pageNo: page,
-    numOfRows: limit,
-    arrange: "P",
-  };
+  const hasCoordinates =
+    latitude != null &&
+    longitude != null &&
+    !isNaN(Number(latitude)) &&
+    !isNaN(Number(longitude));
 
-  if (contentTypeId) params.contentTypeId = contentTypeId;
-  if (cat1) params.cat1 = cat1;
-  if (cat2) params.cat2 = cat2;
-  if (cat3) params.cat3 = cat3;
+  const categoryTourParams = mapCategoryToTourParams(category);
+  const effectiveContentTypeId = contentTypeId || categoryTourParams.contentTypeId;
+  const effectiveCat1 = cat1 || categoryTourParams.cat1;
+  const effectiveCat2 = cat2 || categoryTourParams.cat2;
+  const effectiveCat3 = cat3 || categoryTourParams.cat3;
 
-  const data = await requestTourApi("areaBasedList2", params);
+  let data;
+  let targetName = target ? target.name : "서울";
+
+  if (hasCoordinates) {
+    const lat = Number(latitude);
+    const lng = Number(longitude);
+    const rad = radius ? Number(radius) : 3000;
+
+    const locationParams = {
+      mapX: lng,
+      mapY: lat,
+      radius: Math.min(Math.max(rad, 100), 20000),
+      pageNo: page,
+      numOfRows: limit,
+      arrange: "E",
+    };
+
+    if (effectiveContentTypeId) locationParams.contentTypeId = effectiveContentTypeId;
+    if (effectiveCat1) locationParams.cat1 = effectiveCat1;
+    if (effectiveCat2) locationParams.cat2 = effectiveCat2;
+    if (effectiveCat3) locationParams.cat3 = effectiveCat3;
+
+    data = await requestTourApi("locationBasedList2", locationParams);
+  } else {
+    const params = {
+      areaCode: target.tourApi.areaCode,
+      sigunguCode: target.tourApi.sigunguCode,
+      pageNo: page,
+      numOfRows: limit,
+      arrange: "P",
+    };
+
+    if (effectiveContentTypeId) params.contentTypeId = effectiveContentTypeId;
+    if (effectiveCat1) params.cat1 = effectiveCat1;
+    if (effectiveCat2) params.cat2 = effectiveCat2;
+    if (effectiveCat3) params.cat3 = effectiveCat3;
+
+    data = await requestTourApi("areaBasedList2", params);
+  }
+
   const rawItems = getItems(data);
 
-  const spots = rawItems.map((item) => ({
-    content_id: item.contentid,
-    content_type_id: item.contenttypeid,
-    title: item.title,
-    address: item.addr1 + (item.addr2 ? " " + item.addr2 : ""),
-    image_url: item.firstimage || item.firstimage2 || null,
-    tel: item.tel || null,
-    x: item.mapx ? Number(item.mapx) : null,
-    y: item.mapy ? Number(item.mapy) : null,
-    cat1: item.cat1 || null,
-    cat2: item.cat2 || null,
-    cat3: item.cat3 || null,
-    region: target.name,
-  }));
+  let spots = rawItems.map((item) => {
+    const itemRegionInfo = extractRegionFromAddress(item.addr1);
+    const itemCategories = inferSpotCategoriesWithFallback({
+      place_name: item.title,
+      name: item.title,
+      category_name: item.cat3 || item.cat2 || item.cat1 || "",
+    });
+
+    return {
+      content_id: item.contentid,
+      content_type_id: item.contenttypeid,
+      title: item.title,
+      address: item.addr1 + (item.addr2 ? " " + item.addr2 : ""),
+      image_url: item.firstimage || item.firstimage2 || null,
+      tel: item.tel || null,
+      x: item.mapx ? Number(item.mapx) : null,
+      y: item.mapy ? Number(item.mapy) : null,
+      cat1: item.cat1 || null,
+      cat2: item.cat2 || null,
+      cat3: item.cat3 || null,
+      region: itemRegionInfo.region || targetName,
+      categories: itemCategories,
+      recommend_pct: null,
+      tags: [],
+    };
+  });
+
+  // DB 연동 및 추천도/태그 보강
+  if (spots.length > 0) {
+    try {
+      const titles = spots.map((s) => s.title);
+      const dbSpotsResult = await pool.query(
+        `SELECT s.spot_id, s.name, s.recommend_pct,
+                COALESCE(json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
+                FILTER (WHERE t.tag_id IS NOT NULL), '[]') AS tags
+         FROM spots s
+         LEFT JOIN taggings tg ON tg.target_id = s.spot_id AND tg.target_type = 'spot'
+         LEFT JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+         WHERE s.name = ANY($1::TEXT[]) AND s.status = 'active'
+         GROUP BY s.spot_id`,
+        [titles]
+      );
+
+      if (dbSpotsResult.rows.length > 0) {
+        const dbMap = new Map();
+        for (const row of dbSpotsResult.rows) {
+          dbMap.set(row.name, row);
+        }
+
+        spots = spots.map((s) => {
+          const dbSpot = dbMap.get(s.title);
+          if (dbSpot) {
+            return {
+              ...s,
+              recommend_pct: dbSpot.recommend_pct == null ? null : Number(dbSpot.recommend_pct),
+              tags: dbSpot.tags || [],
+            };
+          }
+          return s;
+        });
+      }
+    } catch (dbErr) {
+      console.error("TourAPI spots DB enrichment error:", dbErr.message);
+    }
+  }
+
+  // 필터링: category
+  if (category && String(category).trim()) {
+    const targetCat = String(category).trim();
+    if (!effectiveContentTypeId) {
+      spots = spots.filter(
+        (s) =>
+          s.categories.includes(targetCat) ||
+          s.categories.some((c) => c.includes(targetCat) || targetCat.includes(c))
+      );
+    }
+  }
+
+  // 필터링: min_recommend_pct
+  if (min_recommend_pct != null && min_recommend_pct !== "") {
+    const minPct = Number(min_recommend_pct);
+    if (!isNaN(minPct) && minPct >= 0 && minPct <= 100) {
+      spots = spots.filter(
+        (s) => s.recommend_pct != null && s.recommend_pct >= minPct
+      );
+    }
+  }
+
+  // 필터링: tag_ids
+  if (tag_ids && String(tag_ids).trim()) {
+    const targetTagIdList = (Array.isArray(tag_ids) ? tag_ids.join(",") : String(tag_ids))
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    if (targetTagIdList.length > 0) {
+      spots = spots.filter((s) => {
+        const spotTagIds = new Set((s.tags || []).map((t) => t.tag_id));
+        return targetTagIdList.every((id) => spotTagIds.has(id));
+      });
+    }
+  }
 
   return {
     total: getTotalCount(data),
     page: Number(page),
     limit: Number(limit),
-    region: target.name,
+    region: targetName,
     spots,
   };
 };
+
 
 /**
  * 5. 실시간 키워드 관광지 검색 (searchKeyword2)

@@ -590,6 +590,7 @@ const swaggerDefinition = {
                           name: { type: 'string', example: '추천산책로' },
                           type: { type: 'string', example: 'course' },
                           group_name: { type: 'string', example: '추천·테마' },
+                          api_theme: { type: 'string', nullable: true, example: null, description: '전용 API 테마 (barrier-free, pet, null)' },
                         },
                       },
                     },
@@ -602,47 +603,47 @@ const swaggerDefinition = {
                           name: { type: 'string', example: '휠체어접근' },
                           type: { type: 'string', example: 'spot' },
                           group_name: { type: 'string', example: '열린관광' },
+                          api_theme: { type: 'string', nullable: true, example: 'barrier-free', description: '전용 API 테마 (barrier-free, pet, null)' },
                         },
                       },
                     },
                     course_tags_by_group: {
                       type: 'object',
-                      description: '대분류 그룹별로 묶인 코스 태그 목록 (큰 태그 -> 작은 태그 UI용)',
+                      description: '대분류 그룹별로 묶인 코스 태그 목록 (api_theme 및 세부 tags 배열 포함)',
                       example: {
-                        '추천·테마': [{ tag_id: 'uuid', name: '추천산책로', type: 'course', group_name: '추천·테마' }],
-                        '동반·접근성': [{ tag_id: 'uuid', name: '무장애길', type: 'course', group_name: '동반·접근성' }],
+                        '추천·테마': {
+                          api_theme: null,
+                          tags: [{ tag_id: 'uuid', name: '추천산책로', type: 'course', group_name: '추천·테마', api_theme: null }],
+                        },
+                        '동반·접근성': {
+                          api_theme: 'barrier-free',
+                          tags: [{ tag_id: 'uuid', name: '무장애길', type: 'course', group_name: '동반·접근성', api_theme: 'barrier-free' }],
+                        },
                       },
                     },
                     spot_tags_by_group: {
                       type: 'object',
-                      description: '대분류 그룹별로 묶인 스팟 태그 목록 (큰 태그 -> 작은 태그 UI용)',
+                      description: '대분류 그룹별로 묶인 스팟 태그 목록 (api_theme 및 세부 tags 배열 포함)',
                       example: {
-                        '열린관광': [
-                          { tag_id: 'uuid', name: '휠체어접근', type: 'spot', group_name: '열린관광' },
-                          { tag_id: 'uuid', name: '무단차통로', type: 'spot', group_name: '열린관광' },
-                          { tag_id: 'uuid', name: '장애인화장실', type: 'spot', group_name: '열린관광' },
-                          { tag_id: 'uuid', name: '유모차대여', type: 'spot', group_name: '열린관광' },
-                          { tag_id: 'uuid', name: '수유실', type: 'spot', group_name: '열린관광' },
-                          { tag_id: 'uuid', name: '점자안내', type: 'spot', group_name: '열린관광' },
-                          { tag_id: 'uuid', name: '오디오가이드', type: 'spot', group_name: '열린관광' },
-                        ],
-                        '반려동물': [
-                          { tag_id: 'uuid', name: '반려견동반', type: 'spot', group_name: '반려동물' },
-                          { tag_id: 'uuid', name: '대형견가능', type: 'spot', group_name: '반려동물' },
-                          { tag_id: 'uuid', name: '소형견동반', type: 'spot', group_name: '반려동물' },
-                          { tag_id: 'uuid', name: '반려견놀이터', type: 'spot', group_name: '반려동물' },
-                          { tag_id: 'uuid', name: '반려견배변시설', type: 'spot', group_name: '반려동물' },
-                          { tag_id: 'uuid', name: '도우미견환영', type: 'spot', group_name: '반려동물' },
-                        ],
-                        '시설·편의': [
-                          { tag_id: 'uuid', name: '화장실', type: 'spot', group_name: '시설·편의' },
-                          { tag_id: 'uuid', name: '주차가능', type: 'spot', group_name: '시설·편의' },
-                          { tag_id: 'uuid', name: '벤치·쉼터', type: 'spot', group_name: '시설·편의' },
-                        ],
-                        '분위기·테마': [
-                          { tag_id: 'uuid', name: '포토존', type: 'spot', group_name: '분위기·테마' },
-                          { tag_id: 'uuid', name: '야간명소', type: 'spot', group_name: '분위기·테마' },
-                        ],
+                        '열린관광': {
+                          api_theme: 'barrier-free',
+                          tags: [
+                            { tag_id: 'uuid', name: '휠체어접근', type: 'spot', group_name: '열린관광', api_theme: 'barrier-free' },
+                            { tag_id: 'uuid', name: '무단차통로', type: 'spot', group_name: '열린관광', api_theme: 'barrier-free' },
+                          ],
+                        },
+                        '반려동물': {
+                          api_theme: 'pet',
+                          tags: [
+                            { tag_id: 'uuid', name: '반려견동반', type: 'spot', group_name: '반려동물', api_theme: 'pet' },
+                          ],
+                        },
+                        '시설·편의': {
+                          api_theme: null,
+                          tags: [
+                            { tag_id: 'uuid', name: '화장실', type: 'spot', group_name: '시설·편의', api_theme: null },
+                          ],
+                        },
                       },
                     },
                   },
@@ -660,8 +661,8 @@ const swaggerDefinition = {
     '/api/regions': {
       get: {
         tags: ['지역'],
-        summary: '지원 지역 목록 조회 (서울 25개 구 / 춘천 권역)',
-        description: '사용자의 GPS 수집 없이 지역 기반으로 안전하게 탐색할 수 있도록 지원하는 시/도 및 하위 자치구/권역 목록을 반환합니다.',
+        summary: '지원 지역 목록 조회 (전국 / 서울특별시 25개 구 / 강원특별자치도 춘천시)',
+        description: '프론트엔드 지역 필터링 UI 구성을 위한 계층형 지역 목록을 반환합니다. 전국, 서울특별시(25개 구), 강원특별자치도(춘천시 및 권역)가 포함되어 있으며, 각 항목의 params 객체를 코스/스팟 조회 시 쿼리 파라미터로 그대로 전달할 수 있습니다.',
         security: [],
         responses: {
           200: {
@@ -672,19 +673,40 @@ const swaggerDefinition = {
                   type: 'object',
                   properties: {
                     success: { type: 'boolean', example: true },
-                    total_cities: { type: 'integer', example: 2 },
+                    total_regions: { type: 'integer', example: 3 },
+                    total_cities: { type: 'integer', example: 3 },
                     regions: {
                       type: 'array',
                       items: {
                         type: 'object',
                         properties: {
+                          id: { type: 'string', example: 'seoul' },
                           code: { type: 'string', example: 'seoul' },
-                          name: { type: 'string', example: '서울' },
+                          name: { type: 'string', example: '서울특별시' },
                           fullName: { type: 'string', example: '서울특별시' },
+                          params: {
+                            type: 'object',
+                            properties: {
+                              region: { type: 'string', nullable: true, example: '서울' },
+                              sub_region: { type: 'string', nullable: true, example: null },
+                            },
+                          },
                           sub_regions: {
                             type: 'array',
-                            items: { type: 'string' },
-                            example: ['강남구', '강동구', '마포구', '노원구'],
+                            items: {
+                              type: 'object',
+                              properties: {
+                                name: { type: 'string', example: '강남구' },
+                                code: { type: 'string', example: '강남구' },
+                                params: {
+                                  type: 'object',
+                                  properties: {
+                                    region: { type: 'string', nullable: true, example: '서울' },
+                                    sub_region: { type: 'string', nullable: true, example: '강남구' },
+                                  },
+                                },
+                              },
+                            },
                           },
                         },
                       },
@@ -2433,20 +2455,73 @@ const swaggerDefinition = {
     '/api/tour/spots': {
       get: {
         tags: ['관광공사 TourAPI (실시간)'],
-        summary: '실시간 지역/테마별 관광지 목록 조회',
-        description: '한국관광공사 TourAPI areaBasedList1 오퍼레이션을 실시간 호출하여 인기순 관광지 목록을 조회합니다.',
+        summary: '실시간 지역/테마/위치별 관광지 목록 조회',
+        description: '한국관광공사 TourAPI areaBasedList2 및 locationBasedList2 오퍼레이션을 실시간 호출하여 인기순/거리순 관광지 목록을 조회합니다. 위치 반경, 카테고리, 태그, 추천도 필터를 적용할 수 있습니다.',
         parameters: [
-          { name: 'region', in: 'query', schema: { type: 'string', default: 'nowon' }, description: '지역명 (nowon, chuncheon)' },
+          { name: 'region', in: 'query', schema: { type: 'string', default: 'chuncheon' }, description: '지역명 (춘천, 서울, 노원구, 강남구 등)' },
+          { name: 'sub_region', in: 'query', schema: { type: 'string' }, description: '세부 권역 또는 자치구명' },
+          { name: 'category', in: 'query', schema: { type: 'string' }, description: '장소 유형 필터 (예: 카페, 음식점, 공원·광장, 산·등산로, 전시·문화공간 등)' },
+          { name: 'tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표 구분 태그 UUID 목록' },
+          { name: 'min_recommend_pct', in: 'query', schema: { type: 'integer', minimum: 0, maximum: 100 }, description: '최소 추천도 (0–100)' },
+          { name: 'latitude', in: 'query', schema: { type: 'number' }, description: '사용자 위치 위도 (반경 검색 시)' },
+          { name: 'longitude', in: 'query', schema: { type: 'number' }, description: '사용자 위치 경도 (반경 검색 시)' },
+          { name: 'radius', in: 'query', schema: { type: 'number', default: 3000 }, description: '검색 반경 (미터 단위, 기본 3000m, 최대 20000m)' },
           { name: 'contentTypeId', in: 'query', schema: { type: 'string', enum: ['12', '14', '15', '25', '28', '32', '38', '39'] }, description: '관광타입 (12:관광지, 14:문화시설, 15:축제, 28:레포츠, 38:쇼핑, 39:음식점)' },
           { name: 'cat1', in: 'query', schema: { type: 'string' }, description: '대분류 (A01:자연, A02:인문, A03:레포츠, A04:쇼핑, A05:음식)' },
           { name: 'cat2', in: 'query', schema: { type: 'string' }, description: '중분류 (A0101, A0201, A0206 등)' },
+          { name: 'cat3', in: 'query', schema: { type: 'string' }, description: '소분류' },
           { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', default: 10 } },
         ],
         responses: {
           200: {
             description: '실시간 관광지 목록',
-            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, total: { type: 'integer' }, spots: { type: 'array', items: { type: 'object' } } } } } },
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    total: { type: 'integer', example: 120 },
+                    page: { type: 'integer', example: 1 },
+                    limit: { type: 'integer', example: 10 },
+                    region: { type: 'string', example: '춘천시' },
+                    spots: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          content_id: { type: 'string', example: '128001' },
+                          content_type_id: { type: 'string', example: '12' },
+                          title: { type: 'string', example: '남이섬' },
+                          address: { type: 'string', example: '강원특별자치도 춘천시 남산면 남이섬길 1' },
+                          image_url: { type: 'string', nullable: true },
+                          tel: { type: 'string', nullable: true },
+                          x: { type: 'number', example: 127.5255 },
+                          y: { type: 'number', example: 37.7912 },
+                          cat1: { type: 'string', nullable: true },
+                          cat2: { type: 'string', nullable: true },
+                          cat3: { type: 'string', nullable: true },
+                          region: { type: 'string', example: '춘천' },
+                          categories: { type: 'array', items: { type: 'string' }, example: ['공원·광장'] },
+                          recommend_pct: { type: 'number', nullable: true, example: 95.0 },
+                          tags: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                tag_id: { type: 'string', format: 'uuid' },
+                                name: { type: 'string' },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },
