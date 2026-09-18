@@ -28,6 +28,60 @@ const fetchSpotCoords = async (spotIds, client) => {
 };
 
 // ──────────────────────────────────────────────────────────────────────
+// 내부 헬퍼: waypoints 유효성 검증
+// ──────────────────────────────────────────────────────────────────────
+const validateWaypoints = (waypoints, { minLength = 2 } = {}) => {
+  if (!waypoints || !Array.isArray(waypoints) || waypoints.length < minLength) {
+    const err = new Error(`코스를 생성하려면 waypoints(경유지 목록, 최소 ${minLength}개)가 필요합니다.`);
+    err.status = 400;
+    throw err;
+  }
+  for (const [i, w] of waypoints.entries()) {
+    if (!w || typeof w !== 'object') {
+      const err = new Error(`waypoints[${i}]: 올바른 waypoint 객체여야 합니다.`);
+      err.status = 400;
+      throw err;
+    }
+    if (w.type === 'spot') {
+      if (!w.spot_id) {
+        const err = new Error(`waypoints[${i}]: spot 타입은 spot_id가 필수입니다.`);
+        err.status = 400;
+        throw err;
+      }
+    } else if (w.type === 'pin') {
+      if (w.lat == null || w.lng == null) {
+        const err = new Error(`waypoints[${i}]: pin 타입은 lat, lng가 필수입니다.`);
+        err.status = 400;
+        throw err;
+      }
+    } else {
+      const err = new Error(`waypoints[${i}]: type은 'spot' 또는 'pin'이어야 합니다.`);
+      err.status = 400;
+      throw err;
+    }
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 내부 헬퍼: course_waypoints 테이블에 순서대로 저장
+// ──────────────────────────────────────────────────────────────────────
+const insertWaypoints = async (courseId, waypoints, client) => {
+  for (const [i, w] of waypoints.entries()) {
+    if (w.type === 'spot') {
+      await client.query(
+        `INSERT INTO course_waypoints (course_id, seq, type, spot_id) VALUES ($1, $2, 'spot', $3)`,
+        [courseId, i + 1, w.spot_id]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO course_waypoints (course_id, seq, type, lat, lng) VALUES ($1, $2, 'pin', $3, $4)`,
+        [courseId, i + 1, w.lat, w.lng]
+      );
+    }
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────────
 // 내부 헬퍼: waypoints → T맵 보행자 경로 WKT LINESTRING
 // ──────────────────────────────────────────────────────────────────────
 const buildLineString = async (waypoints, client) => {
@@ -353,19 +407,10 @@ exports.previewCourse = async (waypoints) => {
 exports.createCourse = async (userId, body) => {
   const { name, description, category, is_public = true, tag_ids = [], waypoints = [], route } = body;
 
-  for (const [i, w] of waypoints.entries()) {
-    if (w.type === 'spot' && !w.spot_id) {
-      const err = new Error(`waypoints[${i}]: spot 타입은 spot_id가 필수입니다.`);
-      err.status = 400; throw err;
-    }
-    if (w.type === 'pin' && (w.lat == null || w.lng == null)) {
-      const err = new Error(`waypoints[${i}]: pin 타입은 lat, lng가 필수입니다.`);
-      err.status = 400; throw err;
-    }
-    if (!['spot', 'pin'].includes(w.type)) {
-      const err = new Error(`waypoints[${i}]: type은 'spot' 또는 'pin'이어야 합니다.`);
-      err.status = 400; throw err;
-    }
+  if (!route) {
+    validateWaypoints(waypoints, { minLength: 2 });
+  } else if (waypoints && waypoints.length) {
+    validateWaypoints(waypoints, { minLength: 0 });
   }
 
   const client = await pool.connect();
@@ -379,22 +424,22 @@ exports.createCourse = async (userId, body) => {
     let estimatedDuration;
 
     if (route) {
-    const coordinates = route.coordinates ?? route;
-    const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
-    wkt = await buildLineString(routeWaypoints, client);
-    const stats = await calcStats(wkt, client);
-    totalDistance = stats.totalDistance;
-    estimatedDuration = body.estimated_duration
-      ? Math.ceil(body.estimated_duration)
-      : stats.estimatedDuration;
-  } else {
-    wkt = await buildLineString(waypoints, client);
-    const stats = await calcStats(wkt, client);
-    totalDistance = stats.totalDistance;
-    estimatedDuration = body.estimated_duration
-      ? Math.ceil(body.estimated_duration)
-      : stats.estimatedDuration;
-  }
+      const coordinates = route.coordinates ?? route;
+      const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
+      wkt = await buildLineString(routeWaypoints, client);
+      const stats = await calcStats(wkt, client);
+      totalDistance = stats.totalDistance;
+      estimatedDuration = body.estimated_duration
+        ? Math.ceil(body.estimated_duration)
+        : stats.estimatedDuration;
+    } else {
+      wkt = await buildLineString(waypoints, client);
+      const stats = await calcStats(wkt, client);
+      totalDistance = stats.totalDistance;
+      estimatedDuration = body.estimated_duration
+        ? Math.ceil(body.estimated_duration)
+        : stats.estimatedDuration;
+    }
 
     // region, sub_region 결정 (입력값 우선, 없으면 name/description에서 추론)
     let determinedRegion = body.region || null;
@@ -413,18 +458,7 @@ exports.createCourse = async (userId, body) => {
     );
 
     // waypoints: 장소 목록 독립적으로 저장
-    for (const [i, w] of waypoints.entries()) {
-      if (w.type === 'spot')
-        await client.query(
-          `INSERT INTO course_waypoints (course_id, seq, type, spot_id) VALUES ($1,$2,'spot',$3)`,
-          [course.course_id, i + 1, w.spot_id]
-        );
-      else
-        await client.query(
-          `INSERT INTO course_waypoints (course_id, seq, type, lat, lng) VALUES ($1,$2,'pin',$3,$4)`,
-          [course.course_id, i + 1, w.lat, w.lng]
-        );
-    }
+    await insertWaypoints(course.course_id, waypoints, client);
 
     await insertTags(tag_ids, course.course_id, userId, client);
 
@@ -449,7 +483,7 @@ exports.createCourse = async (userId, body) => {
 // 산책 기록 기반 코스 생성 (waypoints 기반 — GPS 궤적 전송 없음)
 // ──────────────────────────────────────────────────────────────────────
 exports.createCourseFromWalk = async (userId, body) => {
-  const { walk_record_id, name, description, is_public = true, tag_ids = [] } = body;
+  const { walk_record_id, name, description, category, is_public = true, tag_ids = [] } = body;
 
   const client = await pool.connect();
   try {
@@ -470,11 +504,7 @@ exports.createCourseFromWalk = async (userId, body) => {
 
     // 사용자가 지도에서 직접 선택한 경유지(waypoints)만 허용
     // GPS 실제 이동 궤적(coordinates, actual_route)은 수신하지 않음
-    if (!body.waypoints || !Array.isArray(body.waypoints) || body.waypoints.length < 2) {
-      const err = new Error('코스를 생성하려면 waypoints(경유지 목록, 최소 2개)가 필요합니다.');
-      err.status = 400; throw err;
-    }
-
+    validateWaypoints(body.waypoints, { minLength: 2 });
     const routeWaypoints = body.waypoints;
 
     const wkt = await buildLineString(routeWaypoints, client);
@@ -489,16 +519,19 @@ exports.createCourseFromWalk = async (userId, body) => {
     }
 
     const { rows: [course] } = await client.query(
-      `INSERT INTO courses (owner_id, name, description, route_geometry, total_distance, estimated_duration, is_public, region, sub_region)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      `INSERT INTO courses (owner_id, name, description, category, route_geometry, total_distance, estimated_duration, is_public, region, sub_region)
+       VALUES ($1,$2,$3,$4,$5::geography,$6,$7,$8,$9,$10)
        RETURNING course_id, name, region, sub_region, total_distance, estimated_duration, is_public, created_at`,
-      [userId, name, description || null, wkt, stats.totalDistance, duration, is_public, determinedRegion || '서울', determinedSubRegion || null]
+      [userId, name, description || null, category || null, wkt, stats.totalDistance, duration, is_public, determinedRegion || '서울', determinedSubRegion || null]
     );
+
+    // waypoints 영속화 (course_waypoints 테이블에 순서대로 저장)
+    await insertWaypoints(course.course_id, routeWaypoints, client);
 
     await insertTags(tag_ids, course.course_id, userId, client);
 
     await client.query('COMMIT');
-    return course;
+    return { ...course, waypoints_count: routeWaypoints.length };
   } catch (err) {
     await client.query('ROLLBACK'); throw err;
   } finally { client.release(); }
@@ -1060,6 +1093,7 @@ exports.getCourseById = async (courseId, userId) => {
       ...course,
       ...buildCourseDetailDescription(course),
       waypoints: spots,
+      spots,
       nearby_spots: nearbySpots.map((spot) => ({
         ...spot,
         x: Number(spot.x),
@@ -1121,6 +1155,7 @@ exports.updateCourse = async (userId, courseId, body) => {
     const nextSubRegion = sub_region !== undefined ? sub_region : course.sub_region;
 
     if (waypoints) {
+      validateWaypoints(waypoints, { minLength: 2 });
       const wkt = await buildLineString(waypoints, client);
       const { totalDistance, estimatedDuration } = await calcStats(wkt, client);
       extraSets = `, route_geometry=$${paramIdx}::geography, total_distance=$${paramIdx+1}, estimated_duration=$${paramIdx+2}`;
@@ -1129,18 +1164,7 @@ exports.updateCourse = async (userId, courseId, body) => {
 
       // 경유지 교체
       await client.query(`DELETE FROM course_waypoints WHERE course_id=$1`, [courseId]);
-      for (const [i, w] of waypoints.entries()) {
-        if (w.type === 'spot')
-          await client.query(
-            `INSERT INTO course_waypoints (course_id,seq,type,spot_id) VALUES($1,$2,'spot',$3)`,
-            [courseId, i+1, w.spot_id]
-          );
-        else
-          await client.query(
-            `INSERT INTO course_waypoints (course_id,seq,type,lat,lng) VALUES($1,$2,'pin',$3,$4)`,
-            [courseId, i+1, w.lat, w.lng]
-          );
-      }
+      await insertWaypoints(courseId, waypoints, client);
     }
 
     const { rows: [updated] } = await client.query(
