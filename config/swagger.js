@@ -829,8 +829,9 @@ const swaggerDefinition = {
     '/api/courses/search': {
       get: {
         tags: ['코스'],
-        summary: '코스 검색',
-        description: '공개 코스를 키워드, 지역, 세부권역, 난이도·평점, 코스 태그, 포함 스팟 태그로 검색합니다. region(예: 서울, 춘천) 및 sub_region(예: 마포구, 의암호·공지천권) 쿼리로 지역별 코스를 조회할 수 있습니다.',
+        summary: '[하위 호환] 코스 검색 (GET /api/courses 사용 권장)',
+        description: '⚠️ **하위 호환(Deprecated)**: 이 엔드포인트는 `GET /api/courses`로 완전 통합되었습니다. 기존 클라이언트의 호환성을 위해 유지되며, 신규 개발 시에는 `GET /api/courses` 엔드포인트를 사용해 주세요.',
+        deprecated: true,
         security: [],
         parameters: [
           { name: 'region', in: 'query', schema: { type: 'string' }, description: '시/도 지역명 필터 (예: 서울, 춘천, 강남구)' },
@@ -1195,8 +1196,9 @@ const swaggerDefinition = {
     '/api/spots/filter': {
       get: {
         tags: ['스팟'],
-        summary: '스팟 필터링 조회',
-        description: '카테고리, 태그, 추천율, 지역, 세부 권역 조건을 조합하여 DB에 저장된 활성 스팟을 최대 50건 조회합니다.',
+        summary: '[하위 호환] 스팟 필터링 조회 (GET /api/spots 사용 권장)',
+        description: '⚠️ **하위 호환(Deprecated)**: 이 엔드포인트는 `GET /api/spots`로 완전 통합되었습니다. 기존 클라이언트의 호환성을 위해 유지되며, 신규 개발 시에는 `GET /api/spots` 엔드포인트를 사용해 주세요.',
+        deprecated: true,
         security: [],
         parameters: [
           { name: 'category', in: 'query', schema: { type: 'string', enum: ['음식점', '카페', '편의점', '약국', '공중화장실', '주차장', '관광명소', '문화시설', '숙박', '쇼핑', '축제공연행사', '여행코스', '레포츠', '기타'] }, description: '스팟 카테고리' },
