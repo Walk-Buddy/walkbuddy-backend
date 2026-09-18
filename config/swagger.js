@@ -141,7 +141,7 @@ const swaggerDefinition = {
     '/api/auth/login/kakao': {
       post: {
         tags: ['로그인'],
-        summary: '카카오 소셜 로그인',
+        summary: '카카오 소셜 로그인 (POST)',
         security: [],
         requestBody: {
           required: true,
@@ -149,8 +149,22 @@ const swaggerDefinition = {
         },
         responses: {
           200: {
-            description: '카카오 로그인 성공',
+            description: '카카오 로그인 성공 (딥링크 리다이렉트 또는 토큰 반환)',
             content: { 'application/json': { schema: { type: 'object', properties: { access_token: { type: 'string' }, refresh_token: { type: 'string' }, is_new_user: { type: 'boolean' }, user: { type: 'object', properties: { user_id: { type: 'string', format: 'uuid' }, email: { type: 'string' }, nickname: { type: 'string' } } } } } } },
+          },
+        },
+      },
+      get: {
+        tags: ['로그인'],
+        summary: '카카오 소셜 로그인 (GET 콜백)',
+        description: '카카오 OAuth 인가코드 콜백을 수신하여 모바일 딥링크(walkbuddy://login-success?access_token=...&refresh_token=...)로 리다이렉트합니다.',
+        security: [],
+        parameters: [
+          { name: 'code', in: 'query', required: true, schema: { type: 'string' }, description: '카카오 OAuth 인가코드' },
+        ],
+        responses: {
+          302: {
+            description: '모바일 딥링크 리다이렉트',
           },
         },
       },
@@ -167,7 +181,7 @@ const swaggerDefinition = {
         responses: {
           200: {
             description: '임시 비밀번호 발송 완료',
-            content: { 'application/json': { schema: { type: 'object', properties: { message: { type: 'string', example: '임시 비밀번호가 이메일로 발송되었습니다.' } } } } },
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, message: { type: 'string', example: '임시 비밀번호가 이메일로 발송되었습니다.' } } } } },
           },
         },
       },
@@ -193,10 +207,11 @@ const swaggerDefinition = {
       post: {
         tags: ['로그인'],
         summary: '로그아웃',
+        security: [{ bearerAuth: [] }],
         responses: {
           200: {
             description: '로그아웃 완료',
-            content: { 'application/json': { schema: { type: 'object', properties: { message: { type: 'string', example: '로그아웃 되었습니다.' } } } } },
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true }, message: { type: 'string', example: '로그아웃 되었습니다.' } } } } },
           },
         },
       },
@@ -286,6 +301,141 @@ const swaggerDefinition = {
           200: {
             description: '통계 정보',
             content: { 'application/json': { schema: { type: 'object', properties: { total_distance: { type: 'integer', example: 42000 }, total_duration: { type: 'integer', example: 18000 }, total_walks: { type: 'integer', example: 15 }, completed_courses: { type: 'integer', example: 12 } } } } },
+          },
+        },
+      },
+    },
+    '/api/users/me/history': {
+      get: {
+        tags: ['회원'],
+        summary: '내 이용 기록 통합 조회 (마이페이지)',
+        description: '산책 기록, 후기(코스/스팟), 내가 생성한 코스, 북마크(코스/스팟) 등 사용자의 모든 활동 이력을 최신순으로 통합 조회합니다.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
+        ],
+        responses: {
+          200: {
+            description: '이용 기록 목록',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    total: { type: 'integer', example: 45 },
+                    page: { type: 'integer', example: 1 },
+                    history: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          history_type: { type: 'string', enum: ['walk', 'course_review', 'spot_review', 'course_created', 'bookmark_course', 'bookmark_spot'], example: 'walk' },
+                          item_id: { type: 'string', format: 'uuid' },
+                          title: { type: 'string', example: '불암산 둘레길 산책' },
+                          occurred_at: { type: 'string', format: 'date-time' },
+                          detail: { type: 'object' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/users/me/courses': {
+      get: {
+        tags: ['회원'],
+        summary: '내가 등록한 코스 목록 조회 (마이페이지)',
+        description: '현재 로그인한 사용자가 직접 생성한 코스 목록을 최신순으로 조회합니다.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'is_public', in: 'query', schema: { type: 'boolean' }, description: '공개/비공개 코스 필터 (true: 공개, false: 비공개)' },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
+        ],
+        responses: {
+          200: {
+            description: '내가 등록한 코스 목록',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    total: { type: 'integer', example: 5 },
+                    page: { type: 'integer', example: 1 },
+                    courses: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          course_id: { type: 'string', format: 'uuid' },
+                          name: { type: 'string', example: '내가 만든 노원 힐링길' },
+                          description: { type: 'string', nullable: true },
+                          category: { type: 'string', nullable: true },
+                          total_distance: { type: 'integer', example: 3500 },
+                          estimated_duration: { type: 'integer', example: 2700 },
+                          is_public: { type: 'boolean', example: true },
+                          status: { type: 'string', example: 'active' },
+                          created_at: { type: 'string', format: 'date-time' },
+                          updated_at: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/users/me/reviews': {
+      get: {
+        tags: ['회원'],
+        summary: '내가 작성한 후기 목록 조회 (마이페이지)',
+        description: '현재 로그인한 사용자가 작성한 코스 및 스팟 후기를 최신순으로 통합 조회합니다.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
+        ],
+        responses: {
+          200: {
+            description: '내가 작성한 후기 목록',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    total: { type: 'integer', example: 12 },
+                    page: { type: 'integer', example: 1 },
+                    reviews: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          review_type: { type: 'string', enum: ['course', 'spot'], example: 'course' },
+                          review_id: { type: 'string', format: 'uuid' },
+                          target_id: { type: 'string', format: 'uuid' },
+                          target_name: { type: 'string', example: '불암산 나비정원 산책로' },
+                          description: { type: 'string', nullable: true },
+                          rating: { type: 'number', nullable: true, example: 5 },
+                          difficulty: { type: 'string', nullable: true, example: 'easy' },
+                          is_recommended: { type: 'boolean', nullable: true },
+                          photos: { type: 'array', items: { type: 'string' }, nullable: true },
+                          is_public: { type: 'boolean', example: true },
+                          created_at: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -427,6 +577,145 @@ const swaggerDefinition = {
     // ─────────────────────────────────────────
     // 코스
     // ─────────────────────────────────────────
+    '/api/courses/preview': {
+      post: {
+        tags: ['코스'],
+        summary: '코스 미리보기 (거리/시간/경로 계산)',
+        description: 'DB 저장 없이 경유지 목록(waypoints)을 전달받아 T맵 보행자 경로 API를 통해 GeoJSON LineString, 총 거리(m), 예상 소요 시간(초)을 실시간으로 계산해 반환합니다.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['waypoints'],
+                properties: {
+                  waypoints: {
+                    type: 'array',
+                    minItems: 2,
+                    description: '경유지 목록 (최소 2개, spot 또는 pin 객체)',
+                    items: {
+                      oneOf: [
+                        {
+                          type: 'object',
+                          required: ['type', 'spot_id'],
+                          properties: {
+                            type: { type: 'string', enum: ['spot'], example: 'spot' },
+                            spot_id: { type: 'string', format: 'uuid' },
+                          },
+                        },
+                        {
+                          type: 'object',
+                          required: ['type', 'lat', 'lng'],
+                          properties: {
+                            type: { type: 'string', enum: ['pin'], example: 'pin' },
+                            lat: { type: 'number', example: 37.5457837 },
+                            lng: { type: 'number', example: 126.9490481 },
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: '미리보기 계산 완료',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    geojson: { type: 'object', description: 'GeoJSON LineString Geometry' },
+                    total_distance: { type: 'integer', example: 3200, description: '총 거리 (미터)' },
+                    estimated_duration: { type: 'integer', example: 2880, description: '예상 소요 시간 (초)' },
+                  },
+                },
+              },
+            },
+          },
+          400: { description: 'waypoints 형식 오류 또는 최소 개수 미달' },
+        },
+      },
+    },
+    '/api/courses/from-walk': {
+      post: {
+        tags: ['코스'],
+        summary: '산책 기록 기반 코스 생성',
+        description: '완료된 산책 기록(walk_record_id)과 사용자가 지정한 경유지(waypoints)를 바탕으로 새로운 코스를 생성합니다.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['walk_record_id', 'name', 'waypoints'],
+                properties: {
+                  walk_record_id: { type: 'string', format: 'uuid', description: '산책 기록 ID' },
+                  name: { type: 'string', example: '내가 걸었던 불암산 힐링코스' },
+                  description: { type: 'string', nullable: true, example: '산책 후 등록한 코스' },
+                  waypoints: {
+                    type: 'array',
+                    minItems: 2,
+                    description: '선택한 경유지 목록',
+                    items: {
+                      oneOf: [
+                        {
+                          type: 'object',
+                          required: ['type', 'spot_id'],
+                          properties: {
+                            type: { type: 'string', enum: ['spot'] },
+                            spot_id: { type: 'string', format: 'uuid' },
+                          },
+                        },
+                        {
+                          type: 'object',
+                          required: ['type', 'lat', 'lng'],
+                          properties: {
+                            type: { type: 'string', enum: ['pin'] },
+                            lat: { type: 'number' },
+                            lng: { type: 'number' },
+                          },
+                        },
+                      ],
+                    },
+                  },
+                  tag_ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
+                  is_public: { type: 'boolean', default: true },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: '코스 생성 완료',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    course_id: { type: 'string', format: 'uuid' },
+                    name: { type: 'string' },
+                    total_distance: { type: 'integer' },
+                    estimated_duration: { type: 'integer' },
+                    is_public: { type: 'boolean' },
+                    created_at: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          400: { description: '필수 파라미터 누락 또는 waypoints 오류' },
+          404: { description: '종료된 산책 기록을 찾을 수 없음' },
+        },
+      },
+    },
     '/api/courses/search': {
       get: {
         tags: ['코스'],
@@ -695,6 +984,50 @@ const swaggerDefinition = {
         },
       },
     },
+    '/api/courses/{course_id}/photos': {
+      get: {
+        tags: ['코스'],
+        summary: '코스 관련 사진 조회 (한국관광공사 사진 갤러리 API)',
+        description: '한국관광공사 관광사진 정보(PhotoGalleryService1 galleryList1)를 실시간 호출하여 코스 이름 기반으로 관광 사진 목록을 조회합니다.',
+        security: [],
+        parameters: [
+          { name: 'course_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: '코스 고유 ID' },
+        ],
+        responses: {
+          200: {
+            description: '코스 사진 목록',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    course_id: { type: 'string', format: 'uuid' },
+                    course_name: { type: 'string', example: '불암산 둘레길' },
+                    source: { type: 'string', example: 'PhotoGalleryService1.galleryList1' },
+                    total_count: { type: 'integer', example: 5 },
+                    photos: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          title: { type: 'string', example: '불암산 설경' },
+                          image_url: { type: 'string', example: 'http://tong.visitkorea.or.kr/cms2/website/...' },
+                          created_time: { type: 'string' },
+                          photographer: { type: 'string', nullable: true },
+                          location: { type: 'string', nullable: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          404: { description: '코스를 찾을 수 없음' },
+        },
+      },
+    },
 
     // ─────────────────────────────────────────
     // 스팟
@@ -725,6 +1058,64 @@ const swaggerDefinition = {
             description: '카카오 API 키 누락 또는 서버 오류',
             content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: false }, message: { type: 'string' } } } } },
           },
+        },
+      },
+    },
+    '/api/spots/filter': {
+      get: {
+        tags: ['스팟'],
+        summary: '스팟 필터링 조회',
+        description: '카테고리, 태그, 추천율, 지역 조건을 조합하여 DB에 저장된 활성 스팟을 최대 50건 조회합니다.',
+        security: [],
+        parameters: [
+          { name: 'category', in: 'query', schema: { type: 'string', enum: ['음식점', '카페', '편의점', '약국', '공중화장실', '주차장', '관광명소', '문화시설', '숙박', '쇼핑', '축제공연행사', '여행코스', '레포츠', '기타'] }, description: '스팟 카테고리' },
+          { name: 'tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표로 구분한 스팟 태그 UUID 목록' },
+          { name: 'min_recommend_pct', in: 'query', schema: { type: 'number', minimum: 0, maximum: 100 }, description: '최소 추천율 (%)' },
+          { name: 'region', in: 'query', schema: { type: 'string' }, description: '지역/장소명/주소 검색어 (예: 서울, 강남구)' },
+        ],
+        responses: {
+          200: {
+            description: '스팟 필터 결과',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    filters: {
+                      type: 'object',
+                      properties: {
+                        category: { type: 'string', nullable: true },
+                        region: { type: 'string', nullable: true },
+                        tag_ids: { type: 'string', nullable: true },
+                        min_recommend_pct: { type: 'number', nullable: true },
+                      },
+                    },
+                    total_count: { type: 'integer', example: 15 },
+                    spots: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          spot_id: { type: 'string', format: 'uuid' },
+                          kakao_place_id: { type: 'string', nullable: true },
+                          name: { type: 'string', example: '불암산 생태학습관' },
+                          address: { type: 'string', nullable: true },
+                          categories: { type: 'array', items: { type: 'string' } },
+                          kakao_category_name: { type: 'string', nullable: true },
+                          recommend_pct: { type: 'number', nullable: true },
+                          x: { type: 'number', example: 127.08123 },
+                          y: { type: 'number', example: 37.65432 },
+                          tags: { type: 'array', items: { type: 'object' } },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          400: { description: '지원하지 않는 카테고리 또는 잘못된 파라미터' },
         },
       },
     },
@@ -848,6 +1239,50 @@ const swaggerDefinition = {
             description: 'AI 콘텐츠 목록',
             content: { 'application/json': { schema: { type: 'object', properties: { spot_id: { type: 'string', format: 'uuid' }, contents: { type: 'array', items: { type: 'object', properties: { content_type: { type: 'string', example: 'history' }, script: { type: 'string' }, audio_url: { type: 'string' } } } } } } } },
           },
+        },
+      },
+    },
+    '/api/spots/{spot_id}/photos': {
+      get: {
+        tags: ['스팟'],
+        summary: '스팟 관련 사진 조회 (한국관광공사 사진 갤러리 API)',
+        description: '한국관광공사 관광사진 정보(PhotoGalleryService1 galleryList1)를 실시간 호출하여 스팟 이름 기반으로 관광 사진 목록을 조회합니다.',
+        security: [],
+        parameters: [
+          { name: 'spot_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: '스팟 고유 ID' },
+        ],
+        responses: {
+          200: {
+            description: '스팟 사진 목록',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    spot_id: { type: 'string', format: 'uuid' },
+                    spot_name: { type: 'string', example: '화랑대 철도공원' },
+                    source: { type: 'string', example: 'PhotoGalleryService1.galleryList1' },
+                    total_count: { type: 'integer', example: 4 },
+                    photos: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          title: { type: 'string', example: '화랑대 철도공원 풍경' },
+                          image_url: { type: 'string', example: 'http://tong.visitkorea.or.kr/cms2/website/...' },
+                          created_time: { type: 'string' },
+                          photographer: { type: 'string', nullable: true },
+                          location: { type: 'string', nullable: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          404: { description: '스팟을 찾을 수 없음' },
         },
       },
     },
@@ -1135,28 +1570,60 @@ const swaggerDefinition = {
       post: {
         tags: ['반응'],
         summary: '반응 등록 (좋아요/싫어요)',
+        security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
-          content: { 'application/json': { schema: { type: 'object', required: ['target_id', 'target_type', 'reaction'], properties: { target_id: { type: 'string', format: 'uuid' }, target_type: { type: 'string', example: 'review' }, reaction: { type: 'string', enum: ['like', 'dislike'] } } } } },
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['target_id', 'target_type', 'reaction'],
+                properties: {
+                  target_id: { type: 'string', format: 'uuid', description: '후기 ID (course_review_id 또는 spot_review_id)' },
+                  target_type: { type: 'string', enum: ['course_review', 'spot_review'], description: '반응 대상 유형' },
+                  reaction: { type: 'string', enum: ['like', 'dislike'], description: '반응 종류' },
+                },
+              },
+            },
+          },
         },
         responses: {
           201: {
             description: '반응 등록 완료',
-            content: { 'application/json': { schema: { type: 'object', properties: { reaction_id: { type: 'string', format: 'uuid' }, reaction: { type: 'string' }, created_at: { type: 'string', format: 'date-time' } } } } },
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    target_id: { type: 'string', format: 'uuid' },
+                    target_type: { type: 'string', example: 'course_review' },
+                    reaction: { type: 'string', example: 'like' },
+                    created_at: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
           },
+          400: { description: '유효하지 않은 target_type 또는 reaction' },
         },
       },
     },
-    '/api/reactions/{reaction_id}': {
+    '/api/reactions/{target_type}/{target_id}': {
       delete: {
         tags: ['반응'],
         summary: '반응 취소',
-        parameters: [{ name: 'reaction_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        description: '특정 후기(코스 후기 또는 스팟 후기)에 등록했던 좋아요/싫어요 반응을 취소(삭제)합니다.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'target_type', in: 'path', required: true, schema: { type: 'string', enum: ['course_review', 'spot_review'] }, description: '대상 유형' },
+          { name: 'target_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: '후기 고유 ID' },
+        ],
         responses: {
           200: {
             description: '반응 취소 완료',
             content: { 'application/json': { schema: { type: 'object', properties: { message: { type: 'string', example: '취소되었습니다.' } } } } },
           },
+          404: { description: '반응을 찾을 수 없음' },
         },
       },
     },
@@ -1492,12 +1959,13 @@ const swaggerDefinition = {
     },
 
     // ─────────────────────────────────────────
-    // 알림
+    // 알림 (설계 단계 / 라우터 미연결)
     // ─────────────────────────────────────────
     '/api/notifications': {
       get: {
-        tags: ['알림'],
-        summary: '알림 목록 조회',
+        tags: ['알림 (설계중)'],
+        summary: '알림 목록 조회 (미구현)',
+        description: '현재 라우터가 비활성화된 상태의 설계 API입니다.',
         parameters: [
           { name: 'is_read', in: 'query', schema: { type: 'boolean' } },
           { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
@@ -1512,14 +1980,164 @@ const swaggerDefinition = {
     },
     '/api/notifications/{notification_id}/read': {
       patch: {
-        tags: ['알림'],
-        summary: '알림 읽음 처리',
+        tags: ['알림 (설계중)'],
+        summary: '알림 읽음 처리 (미구현)',
+        description: '현재 라우터가 비활성화된 상태의 설계 API입니다.',
         parameters: [{ name: 'notification_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         responses: {
           200: {
             description: '읽음 처리 완료',
             content: { 'application/json': { schema: { type: 'object', properties: { notification_id: { type: 'string', format: 'uuid' }, is_read: { type: 'boolean', example: true } } } } },
           },
+        },
+      },
+    },
+
+    // ─────────────────────────────────────────
+    // 한국관광공사 두루누비 정보 서비스 (실시간 연동)
+    // ─────────────────────────────────────────
+    '/api/tour/durunubi/courses': {
+      get: {
+        tags: ['관광정보 - 두루누비 (실시간)'],
+        summary: '두루누비 코스 목록 실시간 조회',
+        description: '한국관광공사_두루누비 정보 서비스(B551011/Durunubi courseList)를 실시간으로 호출하여 지역별 걷기 코스 목록을 조회합니다. (공모전 실시간 트래픽 집계 충족)',
+        security: [],
+        parameters: [
+          { name: 'region', in: 'query', required: true, schema: { type: 'string', default: '서울' }, description: '지역명 (예: 서울, 강남구, 노원구, 춘천)' },
+          { name: 'brdDiv', in: 'query', schema: { type: 'string' }, description: '코스 구분 코드 (선택, 빈 값이면 전체)' },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 10 } },
+        ],
+        responses: {
+          200: {
+            description: '두루누비 코스 목록',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    total: { type: 'integer', example: 15 },
+                    page: { type: 'integer', example: 1 },
+                    limit: { type: 'integer', example: 10 },
+                    region: { type: 'string', example: '서울' },
+                    region_full: { type: 'string', example: '서울특별시' },
+                    durunubi_sigun: { type: 'string', example: '서울' },
+                    courses: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          crs_idx: { type: 'string', example: 'T_CRS_MNG_2022000001' },
+                          crs_kod: { type: 'string' },
+                          crs_name: { type: 'string', example: '서울둘레길 1코스 수락·불암산코스' },
+                          crs_level: { type: 'string', example: '3' },
+                          crs_distance: { type: 'string', example: '18.6km' },
+                          crs_time: { type: 'string', example: '8시간 30분' },
+                          sigun: { type: 'string', example: '서울' },
+                          image_url: { type: 'string', nullable: true },
+                          summary: { type: 'string', nullable: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          400: { description: 'region 파라미터 누락 또는 지원하지 않는 지역' },
+        },
+      },
+    },
+    '/api/tour/durunubi/courses/{crs_idx}': {
+      get: {
+        tags: ['관광정보 - 두루누비 (실시간)'],
+        summary: '두루누비 코스 상세 실시간 조회',
+        description: '한국관광공사 두루누비 정보 서비스(courseDetail)를 실시간 호출하여 특정 코스의 상세 소개, 경로(GPX), 여행 팁 등을 조회합니다.',
+        security: [],
+        parameters: [
+          { name: 'crs_idx', in: 'path', required: true, schema: { type: 'string' }, description: '두루누비 코스 고유 ID' },
+        ],
+        responses: {
+          200: {
+            description: '두루누비 코스 상세 정보',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    course: {
+                      type: 'object',
+                      properties: {
+                        crs_idx: { type: 'string' },
+                        crs_kod: { type: 'string' },
+                        crs_name: { type: 'string' },
+                        crs_level: { type: 'string' },
+                        crs_distance: { type: 'string' },
+                        crs_time: { type: 'string' },
+                        crs_cycle: { type: 'string', nullable: true },
+                        sigun: { type: 'string' },
+                        summary: { type: 'string', nullable: true },
+                        contents: { type: 'string', nullable: true },
+                        tour_info: { type: 'string', nullable: true },
+                        traveler_info: { type: 'string', nullable: true },
+                        image_url: { type: 'string', nullable: true },
+                        gpx: { type: 'string', nullable: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          400: { description: 'crs_idx 누락' },
+          404: { description: '코스 정보를 찾을 수 없음' },
+        },
+      },
+    },
+    '/api/tour/durunubi/courses/{crs_idx}/spots': {
+      get: {
+        tags: ['관광정보 - 두루누비 (실시간)'],
+        summary: '두루누비 코스 내 스팟 목록 실시간 조회',
+        description: '한국관광공사 두루누비 정보 서비스(courseSpotList)를 실시간 호출하여 해당 코스에 포함된 경유지(스팟) 목록을 조회합니다.',
+        security: [],
+        parameters: [
+          { name: 'crs_idx', in: 'path', required: true, schema: { type: 'string' }, description: '두루누비 코스 고유 ID' },
+        ],
+        responses: {
+          200: {
+            description: '코스 스팟 목록',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    crs_idx: { type: 'string' },
+                    total: { type: 'integer' },
+                    spots: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          spot_idx: { type: 'string' },
+                          spot_name: { type: 'string' },
+                          spot_address: { type: 'string', nullable: true },
+                          x: { type: 'number', nullable: true },
+                          y: { type: 'number', nullable: true },
+                          image_url: { type: 'string', nullable: true },
+                          spot_type: { type: 'string', nullable: true },
+                          order_no: { type: 'integer', nullable: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          400: { description: 'crs_idx 누락' },
         },
       },
     },
