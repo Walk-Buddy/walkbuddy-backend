@@ -1,6 +1,7 @@
 const axios = require("axios");
 const { resolveRegion, TARGET_REGIONS, inferSpotCategories, inferSpotCategoriesWithFallback, extractRegionFromAddress } = require("../constants/spotCategoryRules");
 const pool = require("../config/db");
+const trafficLog = require("./tourTrafficLog");
 
 const BASE_URL = "https://apis.data.go.kr/B551011/KorService2";
 const WITH_TOUR_BASE_URL = "https://apis.data.go.kr/B551011/KorWithService2"; // 무장애 여행정보 API
@@ -9,29 +10,33 @@ const PHOTO_BASE_URL = "https://apis.data.go.kr/B551011/PhotoGalleryService1"; /
 const DEFAULT_MOBILE_OS = "ETC";
 const DEFAULT_MOBILE_APP = "WalkBuddy";
 
-// TOURAPI_SERVICE_KEY 또는 기존 키 fallback
+// ─────────────────────────────────────────────
+//  공공데이터포털 서비스 키 (단일 값으로 통일)
+//
+//  코스(KorService2)·무장애(KorWithService2)·반려동물(KorPetTourService2)·
+//  관광사진(PhotoGalleryService1)·두루누비(Durunubi) OpenAPI는
+//  모두 "같은" 공공데이터포털 인증키를 사용한다.
+//
+//  표준 변수 TOURAPI_SERVICE_KEY 를 최우선으로 읽고,
+//  기존 개별 변수는 하위 호환을 위한 fallback 으로만 남긴다.
+// ─────────────────────────────────────────────
 function getServiceKey() {
   return (
     process.env.TOURAPI_SERVICE_KEY ||
     process.env.TOUR_API_KEY ||
+    process.env.KOR_WITH_SERVICE_KEY ||
+    process.env.KOR_PET_TOUR_SERVICE_KEY ||
     process.env.DURUNUBI_SERVICE_KEY ||
     ""
   );
 }
 
 function getWithTourServiceKey() {
-  return (
-    process.env.KOR_WITH_SERVICE_KEY ||
-    getServiceKey()
-  );
+  return getServiceKey();
 }
 
 function getPetTourServiceKey() {
-  return (
-    process.env.KOR_PET_TOUR_SERVICE_KEY ||
-    process.env.TOURAPI_SERVICE_KEY ||
-    getServiceKey()
-  );
+  return getServiceKey();
 }
 
 const http = axios.create({
@@ -40,6 +45,36 @@ const http = axios.create({
     "User-Agent": "WalkBuddy-TourAPI-Client/1.0",
   },
 });
+
+/**
+ * OpenAPI를 실제로 호출하고 응답 상태·소요시간을 함께 돌려준다.
+ * 네트워크/HTTP 오류는 여기서 트래픽 로그에 기록한 뒤 다시 던진다.
+ * (resultCode 오류·성공 로깅은 각 호출 함수에서 담당)
+ */
+async function fetchJson({ api, pathname, params, url, authMessage }) {
+  const startedAt = Date.now();
+  try {
+    const res = await http.get(url);
+    return { data: res.data, httpStatus: res.status, durationMs: Date.now() - startedAt, startedAt };
+  } catch (err) {
+    trafficLog.record({
+      api,
+      pathname,
+      params,
+      status: "error",
+      httpStatus: err.response?.status ?? null,
+      message: err.message,
+      durationMs: Date.now() - startedAt,
+      startedAt,
+    });
+    if (err.response?.status === 401) {
+      const authErr = new Error(authMessage || "한국관광공사 OpenAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.");
+      authErr.status = 401;
+      throw authErr;
+    }
+    throw err;
+  }
+}
 
 function buildUrl(pathname, params = {}) {
   const serviceKey = getServiceKey();
@@ -70,24 +105,26 @@ function buildUrl(pathname, params = {}) {
 
 async function requestTourApi(pathname, params = {}) {
   const url = buildUrl(pathname, params);
-  try {
-    const { data } = await http.get(url);
-    const header = data?.response?.header;
-    if (header?.resultCode && header.resultCode !== "0000") {
-      const err = new Error(header.resultMsg || "TourAPI 호출 실패");
-      err.code = header.resultCode;
-      err.status = 502;
-      throw err;
-    }
-    return data;
-  } catch (err) {
-    if (err.response?.status === 401) {
-      const authErr = new Error("한국관광공사 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.");
-      authErr.status = 401;
-      throw authErr;
-    }
+  const api = "KorService2";
+  const { data, httpStatus, durationMs, startedAt } = await fetchJson({
+    api,
+    pathname,
+    params,
+    url,
+    authMessage: "한국관광공사 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.",
+  });
+
+  const header = data?.response?.header;
+  if (header?.resultCode && header.resultCode !== "0000") {
+    const err = new Error(header.resultMsg || "TourAPI 호출 실패");
+    err.code = header.resultCode;
+    err.status = 502;
+    trafficLog.record({ api, pathname, params, status: "error", httpStatus, resultCode: header.resultCode, message: err.message, durationMs, startedAt });
     throw err;
   }
+
+  trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: header?.resultCode || "0000", durationMs, startedAt });
+  return data;
 }
 
 function buildWithTourUrl(pathname, params = {}) {
@@ -119,27 +156,30 @@ function buildWithTourUrl(pathname, params = {}) {
 
 async function requestWithTourApi(pathname, params = {}) {
   const url = buildWithTourUrl(pathname, params);
-  try {
-    const { data } = await http.get(url);
-    const header = data?.response?.header;
-    if (header?.resultCode && header.resultCode !== "0000") {
-      if (header.resultCode === "03") {
-        return { response: { body: { items: { item: [] }, totalCount: 0 } } };
-      }
-      const err = new Error(header.resultMsg || "무장애 TourAPI 호출 실패");
-      err.code = header.resultCode;
-      err.status = 502;
-      throw err;
+  const api = "KorWithService2";
+  const { data, httpStatus, durationMs, startedAt } = await fetchJson({
+    api,
+    pathname,
+    params,
+    url,
+    authMessage: "한국관광공사 무장애 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.",
+  });
+
+  const header = data?.response?.header;
+  if (header?.resultCode && header.resultCode !== "0000") {
+    if (header.resultCode === "03") {
+      trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: "03", message: "결과 없음", durationMs, startedAt });
+      return { response: { body: { items: { item: [] }, totalCount: 0 } } };
     }
-    return data;
-  } catch (err) {
-    if (err.response?.status === 401) {
-      const authErr = new Error("한국관광공사 무장애 TourAPI 인증 실패: 서비스 키를 확인해주세요.");
-      authErr.status = 401;
-      throw authErr;
-    }
+    const err = new Error(header.resultMsg || "무장애 TourAPI 호출 실패");
+    err.code = header.resultCode;
+    err.status = 502;
+    trafficLog.record({ api, pathname, params, status: "error", httpStatus, resultCode: header.resultCode, message: err.message, durationMs, startedAt });
     throw err;
   }
+
+  trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: header?.resultCode || "0000", durationMs, startedAt });
+  return data;
 }
 
 function buildPetTourUrl(pathname, params = {}) {
@@ -171,27 +211,30 @@ function buildPetTourUrl(pathname, params = {}) {
 
 async function requestPetTourApi(pathname, params = {}) {
   const url = buildPetTourUrl(pathname, params);
-  try {
-    const { data } = await http.get(url);
-    const header = data?.response?.header;
-    if (header?.resultCode && header.resultCode !== "0000") {
-      if (header.resultCode === "03") {
-        return { response: { body: { items: { item: [] }, totalCount: 0 } } };
-      }
-      const err = new Error(header.resultMsg || "반려동물 TourAPI 호출 실패");
-      err.code = header.resultCode;
-      err.status = 502;
-      throw err;
+  const api = "KorPetTourService2";
+  const { data, httpStatus, durationMs, startedAt } = await fetchJson({
+    api,
+    pathname,
+    params,
+    url,
+    authMessage: "한국관광공사 반려동물 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.",
+  });
+
+  const header = data?.response?.header;
+  if (header?.resultCode && header.resultCode !== "0000") {
+    if (header.resultCode === "03") {
+      trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: "03", message: "결과 없음", durationMs, startedAt });
+      return { response: { body: { items: { item: [] }, totalCount: 0 } } };
     }
-    return data;
-  } catch (err) {
-    if (err.response?.status === 401) {
-      const authErr = new Error("한국관광공사 반려동물 TourAPI 인증 실패: 서비스 키를 확인해주세요.");
-      authErr.status = 401;
-      throw authErr;
-    }
+    const err = new Error(header.resultMsg || "반려동물 TourAPI 호출 실패");
+    err.code = header.resultCode;
+    err.status = 502;
+    trafficLog.record({ api, pathname, params, status: "error", httpStatus, resultCode: header.resultCode, message: err.message, durationMs, startedAt });
     throw err;
   }
+
+  trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: header?.resultCode || "0000", durationMs, startedAt });
+  return data;
 }
 
 function getItems(data) {
@@ -764,19 +807,27 @@ exports.getPhotosByKeyword = async (keyword, limit = 10) => {
   url.searchParams.append("numOfRows", String(limit));
   url.searchParams.append("pageNo", "1");
 
+    const _startedAt = Date.now();
+  const _params = { keyword: keyword.trim(), numOfRows: limit, pageNo: 1 };
   try {
     const { data } = await http.get(url.toString());
     const header = data?.response?.header;
     if (header?.resultCode && header.resultCode !== "0000") {
-      if (header.resultCode === "03") return [];
+      if (header.resultCode === "03") {
+        trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "ok", resultCode: "03", message: "결과 없음", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+        return [];
+      }
       const err = new Error(header.resultMsg || "관광사진 API 호출 실패");
       err.code = header.resultCode;
       err.status = 502;
+      trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "error", resultCode: header.resultCode, message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
       throw err;
     }
 
     const item = data?.response?.body?.items?.item;
     const rawItems = !item ? [] : Array.isArray(item) ? item : [item];
+
+    trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "ok", resultCode: header?.resultCode || "0000", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
 
     return rawItems.map((img) => ({
       thumbnail: img.galWebImageUrl || img.galThumbnailImage || null,
@@ -785,6 +836,7 @@ exports.getPhotosByKeyword = async (keyword, limit = 10) => {
     }));
   } catch (err) {
     if (err.status) throw err;
+    trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "error", message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
     console.error("[PhotoGallery API 오류]", err.message);
     return [];
   }

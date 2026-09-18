@@ -40,6 +40,7 @@ const reactionRoutes     = require('./routes/reactions');
 const bookmarkRoutes     = require('./routes/bookmarks');
 const reportRoutes       = require('./routes/reports');
 const adminRoutes        = require('./routes/admin');
+const tourTrafficRoutes  = require('./routes/tourTraffic');
 const tourRoutes          = require('./routes/tourRoutes');
 const durunubiRoutes      = require('./routes/durunubi');
 const regionRoutes        = require('./routes/regions');
@@ -61,6 +62,8 @@ app.use('/api/reviews',       reviewRoutes);
 app.use('/api/reactions',     reactionRoutes);
 app.use('/api/bookmarks',     bookmarkRoutes);
 app.use('/api/reports',       reportRoutes);
+// 트래픽 로그는 /api/admin 보다 먼저 등록 (관리자 미들웨어 중복 적용 방지)
+app.use('/api/admin/tour-traffic', tourTrafficRoutes);
 app.use('/api/admin',         adminRoutes);
 // app.use('/api/notifications', notificationRoutes);
 

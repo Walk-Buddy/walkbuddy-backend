@@ -1,4 +1,5 @@
 const axios = require('axios');
+const trafficLog = require('./tourTrafficLog');
 
 const BASE_URL = 'https://apis.data.go.kr/B551011/Odii';
 const DEFAULT_MOBILE_OS = 'ETC';
@@ -54,15 +55,51 @@ async function requestOdiiApi(pathname, params = {}) {
     return null;
   }
 
+  const api = 'Odii';
+  const startedAt = Date.now();
+
   try {
     const { data } = await http.get(url);
     const header = data?.response?.header;
     if (header?.resultCode && header.resultCode !== '0000') {
+      trafficLog.record({
+        api,
+        pathname,
+        params,
+        status: 'error',
+        httpStatus: 200,
+        resultCode: header.resultCode,
+        message: header.resultMsg || 'Odii API 오류',
+        durationMs: Date.now() - startedAt,
+        startedAt,
+      });
       return null;
     }
+
+    // 실시간 OpenAPI 트래픽 로그 기록 (공사 서버 호출 증빙)
+    trafficLog.record({
+      api,
+      pathname,
+      params,
+      status: 'ok',
+      httpStatus: 200,
+      resultCode: header?.resultCode || '0000',
+      durationMs: Date.now() - startedAt,
+      startedAt,
+    });
     return data;
   } catch (err) {
     // Odii API 장애나 타임아웃 시 AI Fallback으로 넘어가도록 null 반환
+    trafficLog.record({
+      api,
+      pathname,
+      params,
+      status: 'error',
+      httpStatus: err.response?.status ?? null,
+      message: err.message,
+      durationMs: Date.now() - startedAt,
+      startedAt,
+    });
     return null;
   }
 }

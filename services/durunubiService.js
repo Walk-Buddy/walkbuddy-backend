@@ -13,6 +13,7 @@
  */
 
 const axios = require('axios');
+const trafficLog = require('./tourTrafficLog');
 const { resolveRegion } = require('../constants/spotCategoryRules');
 const { getDurunubiCourseSpotMappings } = require('../constants/durunubiSpotMappings');
 
@@ -31,8 +32,14 @@ const http = axios.create({
 // ──────────────────────────────────────────────────────────
 
 function getServiceKey() {
-  const key = process.env.DURUNUBI_SERVICE_KEY || process.env.TOURAPI_SERVICE_KEY || '';
-  if (!key) throw new Error('DURUNUBI_SERVICE_KEY 환경변수가 설정되지 않았습니다.');
+  // 모든 공공데이터포털 OpenAPI는 "같은" 인증키를 쓴다 → TOURAPI_SERVICE_KEY 를 표준으로 한다.
+  const key =
+    process.env.TOURAPI_SERVICE_KEY ||
+    process.env.DURUNUBI_SERVICE_KEY ||
+    '';
+  if (!key) {
+    throw new Error('TOURAPI_SERVICE_KEY(또는 DURUNUBI_SERVICE_KEY) 환경변수가 설정되지 않았습니다.');
+  }
   return key;
 }
 
@@ -67,17 +74,23 @@ function buildUrl(pathname, params = {}) {
 /** 두루누비 API 공통 호출 함수 */
 async function requestDurunubi(pathname, params = {}) {
   const url = buildUrl(pathname, params);
+  const api = 'Durunubi';
+  const startedAt = Date.now();
+  let data;
+
   try {
-    const { data } = await http.get(url);
-    const header = data?.response?.header;
-    if (header?.resultCode && header.resultCode !== '0000') {
-      const err = new Error(header.resultMsg || '두루누비 API 호출 실패');
-      err.code = header.resultCode;
-      err.status = 502;
-      throw err;
-    }
-    return data;
+    ({ data } = await http.get(url));
   } catch (err) {
+    trafficLog.record({
+      api,
+      pathname,
+      params,
+      status: 'error',
+      httpStatus: err.response?.status ?? null,
+      message: err.message,
+      durationMs: Date.now() - startedAt,
+      startedAt,
+    });
     if (err.response?.status === 401) {
       const authErr = new Error(
         '두루누비 API 인증 실패: 공공데이터포털에서 일반 인증키(Decoding)를 확인해주세요.'
@@ -87,6 +100,19 @@ async function requestDurunubi(pathname, params = {}) {
     }
     throw err;
   }
+
+  const durationMs = Date.now() - startedAt;
+  const header = data?.response?.header;
+  if (header?.resultCode && header.resultCode !== '0000') {
+    const err = new Error(header.resultMsg || '두루누비 API 호출 실패');
+    err.code = header.resultCode;
+    err.status = 502;
+    trafficLog.record({ api, pathname, params, status: 'error', httpStatus: 200, resultCode: header.resultCode, message: err.message, durationMs, startedAt });
+    throw err;
+  }
+
+  trafficLog.record({ api, pathname, params, status: 'ok', httpStatus: 200, resultCode: header?.resultCode || '0000', durationMs, startedAt });
+  return data;
 }
 
 /** 응답에서 item 배열을 꺼냅니다. item이 단일 객체여도 배열로 감쌉니다. */

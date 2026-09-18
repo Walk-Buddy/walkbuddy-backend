@@ -10,6 +10,7 @@ const {
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const tourApiService = require('./tourApiService');
+const trafficLog = require('./tourTrafficLog');
 
 const TOUR_API_BASE_URL = 'https://apis.data.go.kr/B551011/KorService2';
 const TOUR_API_MATCH_RADIUS = Number(process.env.TOUR_API_MATCH_RADIUS || 300);
@@ -72,23 +73,55 @@ async function fetchTourLocationCandidates({ lng, lat, radius }) {
     const serviceKey = getTourApiServiceKey();
     if (!serviceKey) return [];
 
-    const response = await axios.get(`${TOUR_API_BASE_URL}/locationBasedList2`, {
-        params: {
-            serviceKey,
-            MobileOS: process.env.TOUR_API_MOBILE_OS || 'ETC',
-            MobileApp: process.env.TOUR_API_MOBILE_APP || 'WalkBuddy',
-            _type: 'json',
-            arrange: 'E',
-            mapX: lng,
-            mapY: lat,
-            radius,
-            numOfRows: 20,
-            pageNo: 1,
-        },
-    });
+    const api = 'KorService2';
+    const pathname = 'locationBasedList2';
+    const params = {
+        MobileOS: process.env.TOUR_API_MOBILE_OS || 'ETC',
+        MobileApp: process.env.TOUR_API_MOBILE_APP || 'WalkBuddy',
+        _type: 'json',
+        arrange: 'E',
+        mapX: lng,
+        mapY: lat,
+        radius,
+        numOfRows: 20,
+        pageNo: 1,
+    };
+    const startedAt = Date.now();
 
-    const item = response.data?.response?.body?.items?.item;
-    return normalizeTourApiItems(item);
+    try {
+        const response = await axios.get(`${TOUR_API_BASE_URL}/${pathname}`, {
+            params: { serviceKey, ...params },
+        });
+
+        const header = response.data?.response?.header;
+        const item = response.data?.response?.body?.items?.item;
+
+        // 실시간 OpenAPI 트래픽 로그 기록 (공사 서버 호출 증빙)
+        trafficLog.record({
+            api,
+            pathname,
+            params,
+            status: 'ok',
+            httpStatus: response.status,
+            resultCode: header?.resultCode || '0000',
+            durationMs: Date.now() - startedAt,
+            startedAt,
+        });
+
+        return normalizeTourApiItems(item);
+    } catch (err) {
+        trafficLog.record({
+            api,
+            pathname,
+            params,
+            status: 'error',
+            httpStatus: err.response?.status ?? null,
+            message: err.message,
+            durationMs: Date.now() - startedAt,
+            startedAt,
+        });
+        throw err;
+    }
 }
 
 async function findTourApiMatchByContentId(contentId) {
@@ -100,19 +133,52 @@ async function fetchTourOverview(contentId) {
     const serviceKey = getTourApiServiceKey();
     if (!serviceKey || !contentId) return null;
 
-    const response = await axios.get(`${TOUR_API_BASE_URL}/detailCommon2`, {
-        params: {
-            serviceKey,
-            MobileOS: process.env.TOUR_API_MOBILE_OS || 'ETC',
-            MobileApp: process.env.TOUR_API_MOBILE_APP || 'WalkBuddy',
-            _type: 'json',
-            contentId,
-        },
-    });
+    const api = 'KorService2';
+    const pathname = 'detailCommon2';
+    const params = { _type: 'json', contentId };
+    const startedAt = Date.now();
 
-    const item = response.data?.response?.body?.items?.item;
-    const detail = normalizeTourApiItems(item)[0];
-    return cleanTourOverview(detail?.overview || '');
+    try {
+        const response = await axios.get(`${TOUR_API_BASE_URL}/${pathname}`, {
+            params: {
+                serviceKey,
+                MobileOS: process.env.TOUR_API_MOBILE_OS || 'ETC',
+                MobileApp: process.env.TOUR_API_MOBILE_APP || 'WalkBuddy',
+                _type: 'json',
+                contentId,
+            },
+        });
+
+        const header = response.data?.response?.header;
+        const item = response.data?.response?.body?.items?.item;
+        const detail = normalizeTourApiItems(item)[0];
+
+        // 실시간 OpenAPI 트래픽 로그 기록 (공사 서버 호출 증빙)
+        trafficLog.record({
+            api,
+            pathname,
+            params,
+            status: 'ok',
+            httpStatus: response.status,
+            resultCode: header?.resultCode || '0000',
+            durationMs: Date.now() - startedAt,
+            startedAt,
+        });
+
+        return cleanTourOverview(detail?.overview || '');
+    } catch (err) {
+        trafficLog.record({
+            api,
+            pathname,
+            params,
+            status: 'error',
+            httpStatus: err.response?.status ?? null,
+            message: err.message,
+            durationMs: Date.now() - startedAt,
+            startedAt,
+        });
+        throw err;
+    }
 }
 
 // 관광공사 응답에서 세부 태그 자동 도출
