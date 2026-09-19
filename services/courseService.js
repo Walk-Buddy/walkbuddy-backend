@@ -1,5 +1,7 @@
 const pool = require('../config/db');
 const { extractRegionFromAddress, inferRegionFromLocation } = require('../constants/spotCategoryRules');
+const { parseDescriptionSections } = require('../utils/courseDescription');
+const courseTagService = require('./courseTagService');
 
 const WALK_SPEED_MPS = 1.1; // 도보 평균 4km/h
 const COURSE_NEARBY_SPOT_RADIUS = Number(process.env.COURSE_NEARBY_SPOT_RADIUS || 500);
@@ -307,86 +309,8 @@ function normalizeDifficulty(value) {
   return normalized;
 }
 
-// 두루누비 description 문자열을 파싱하는 함수
-// 예: "@@summary\n- ..." 형태를 { summary: [...] } 형태로 변환합니다.
-
-function parseDescriptionSections(description){
-  const sections={
-    summary: [],
-    content: null,
-    tour_info:[],
-    traveler_info:[],
-    stamp_location: null,
-    region: null,
-    cycle:null,
-
-  };
-
-  //description이 없으면 빈 sections 반환
-  if(!description) return sections;
-  
-  const blocks = description
-  .split(/\n(?=@@)/)
-  .map((block)=>block.trim())
-  .filter(Boolean);
-
-  for(const block of blocks)
-  {
-    const [firstLine, ...bodyLines]=block.split('\n');
-    const key=firstLine.replace(/^@@/,'').trim();
-    const body=bodyLines.join('\n').trim();
-
-    if(key==='summary'){
-      sections.summary = parseListLines(body);
-    }
-    if(key==='content'){
-      sections.content=body||null;
-    }
-     if (key === 'tour_info') {
-      sections.tour_info = parseListLines(body);
-    }
-    if(key==='traveler_info'){
-      const{list,stampLocation}=parseTravelerInfo(body);
-      sections.traveler_info=list;
-      sections.stamp_location=stampLocation;
-    }
-    if(key==='region'){
-      sections.region=body||null;
-    }
-    if(key==='cycle'){
-      sections.cycle=body||null;
-    }
-  }
-  
-  return sections;
-}
-
-function parseListLines(text){
-  if(!text) return [];
-  return text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => line.replace(/^[-*]\s*/, '').trim())
-    .filter(Boolean);
-} 
-
-function parseTravelerInfo(text){
-  if(!text) {
-    return{list:[],stampLocation:null};
-  }
-
-  const stampMatch=text.match(/\*\s*[^\n]*스탬프함 위치\n([\s\S]*)/);
-
-  const travelerText=stampMatch
-  ?text.slice(0,stampMatch.index).trim()
-  : text.trim();
-
-  return{
-    list:parseListLines(travelerText),
-    stampLocation:stampMatch? stampMatch[1].trim():null,
-  };
-}
+// 두루누비 description 섹션 파싱은 utils/courseDescription.js 로 이전됨
+// (courseService · backfill 스크립트가 공용으로 사용)
 
 function buildCourseDetailDescription(course) {
   if (course.data_source !== '한국관광공사_두루누비') {
@@ -488,7 +412,21 @@ exports.createCourse = async (userId, body) => {
     // waypoints: 장소 목록 독립적으로 저장
     await insertWaypoints(course.course_id, waypoints, client);
 
-    await insertTags(tag_ids, course.course_id, userId, client);
+        await insertTags(tag_ids, course.course_id, userId, client);
+
+    // 사용자가 태그를 명시하지 않은 경우, 카테고리·설명·경유지 스팟 태그로 자동 보강
+    if (!Array.isArray(tag_ids) || tag_ids.length === 0) {
+      try {
+        await courseTagService.autoTagCourse({
+          courseId: course.course_id,
+          category: category || null,
+          description: description || null,
+          userId,
+        }, client);
+      } catch (tagErr) {
+        console.warn('[createCourse] 자동 태깅 실패(무시):', tagErr.message);
+      }
+    }
 
     // 경로 근처 스팟 자동 감지 (반경 50m)
     const existingSpotIds = waypoints.filter((w) => w.type === 'spot').map((w) => w.spot_id);

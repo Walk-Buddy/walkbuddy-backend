@@ -3,6 +3,7 @@ require('dotenv').config();
 const axios = require('axios');
 const pool = require('../config/db');
 const spotService = require('../services/spotService');
+const courseTagService = require('../services/courseTagService');
 const {
   extractRegionFromAddress,
   inferSpotCategoriesWithFallback,
@@ -656,13 +657,28 @@ async function main() {
       // 경유지(Waypoints) 및 스팟 연결 저장
       await insertCourseWaypoints(client, course.course_id, courseWaypointsList);
 
-      // 코스 태깅
+      // 코스 기본 태깅 (관광코스)
       await client.query(
         `INSERT INTO taggings (tag_id, target_id, target_type, user_id)
          VALUES ($1, $2, 'course', $3)
          ON CONFLICT DO NOTHING`,
         [tagId, course.course_id, ownerId]
       );
+
+      // 코스 태그 최대 연결: 카테고리·설명·경유지 스팟 태그를 코스 태그로 승격
+      try {
+        const derivedTags = await courseTagService.autoTagCourse({
+          courseId: course.course_id,
+          category: '관광코스',
+          description,
+          userId: ownerId,
+        }, client);
+        if (derivedTags.length > 0) {
+          console.log(`  🏷️  코스 자동 태그: ${derivedTags.join(', ')}`);
+        }
+      } catch (tagErr) {
+        console.warn(`  ⚠️  코스 자동 태그 실패(무시): ${tagErr.message}`);
+      }
 
       const registeredSpots = courseWaypointsList.filter((w) => w.spotId).length;
       console.log(`✅ [코스 적재 완료] ID: ${course.course_id} (연결된 스팟: ${registeredSpots}개)`);

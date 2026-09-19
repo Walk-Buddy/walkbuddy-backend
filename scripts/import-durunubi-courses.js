@@ -3,6 +3,7 @@ require('dotenv').config();
 const axios = require('axios');
 const pool = require('../config/db');
 const spotService = require('../services/spotService');
+const courseTagService = require('../services/courseTagService');
 const { getDurunubiCourseSpotMappings } = require('../constants/durunubiSpotMappings');
 
 const BASE_URL = 'http://apis.data.go.kr/B551011/Durunubi';
@@ -567,7 +568,7 @@ async function importCourse(client, item, ownerId, tagId) {
     [tagId, course.course_id, ownerId]
   );
 
-  return { status: 'imported', name, courseId: course.course_id, pointCount: points.length, points };
+    return { status: 'imported', name, courseId: course.course_id, pointCount: points.length, points, description };
 }
 
 async function main() {
@@ -627,11 +628,26 @@ async function main() {
             }
           }
 
-          await client.query('BEGIN');
+                    await client.query('BEGIN');
           await insertWaypoints(client, result.courseId, result.points, spotResult.waypointSpots);
           await client.query('COMMIT');
           if (spotResult.waypointSpots.length > 0) {
             console.log(`  - 코스 경유지 연결: 스팟 ${spotResult.waypointSpots.length}개`);
+          }
+
+          // 코스 태그 최대 연결: 카테고리·설명·경유지 스팟 태그를 코스 태그로 승격
+          try {
+            const derivedTags = await courseTagService.autoTagCourse({
+              courseId: result.courseId,
+              category: '둘레길',
+              description: result.description || null,
+              userId: ownerId,
+            }, client);
+            if (derivedTags.length > 0) {
+              console.log(`  - 코스 자동 태그: ${derivedTags.join(', ')}`);
+            }
+          } catch (tagErr) {
+            console.warn(`  - 코스 자동 태그 실패(무시): ${tagErr.message}`);
           }
         } else {
           summary.skipped += 1;
