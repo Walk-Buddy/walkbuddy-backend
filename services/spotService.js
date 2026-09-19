@@ -262,17 +262,17 @@ function extractTourTags({ overview, barrierFreeInfo, petTourInfo }) {
     if (barrierFreeInfo?.has_barrier_free_info && barrierFreeInfo.details) {
         tags.add('열린관광');
         const d = barrierFreeInfo.details;
-        if (d.physical?.wheelchair) tags.add('휠체어접근');
-        if (d.physical?.route) tags.add('무단차통로');
-        if (d.physical?.restroom) tags.add('장애인화장실');
-        if (d.physical?.parking) tags.add('장애인주차');
+        if (d.physical?.wheelchair) { tags.add('휠체어접근'); tags.add('휠체어 대여'); }
+        if (d.physical?.route) { tags.add('무단차통로'); tags.add('주출입구 진입로'); }
+        if (d.physical?.restroom) { tags.add('장애인화장실'); tags.add('장애인 화장실'); }
+        if (d.physical?.parking) { tags.add('장애인주차'); tags.add('장애인 주차구역'); }
         if (d.physical?.elevator) tags.add('엘리베이터');
-        if (d.infant?.stroller) tags.add('유모차대여');
+        if (d.infant?.stroller) { tags.add('유모차대여'); tags.add('유모차 대여'); }
         if (d.infant?.lactation_room) tags.add('수유실');
-        if (d.visual?.braile_block || d.visual?.braile_promotion) tags.add('점자안내');
-        if (d.visual?.help_dog) tags.add('도우미견가능');
+        if (d.visual?.braile_block || d.visual?.braile_promotion) { tags.add('점자안내'); tags.add('점자 안내'); }
+        if (d.visual?.help_dog) { tags.add('도우미견가능'); tags.add('안내견 동반'); }
         if (d.visual?.audio_guide) tags.add('음성해설');
-        if (d.hearing?.sign_language || d.hearing?.video_guide) tags.add('수어안내');
+        if (d.hearing?.sign_language || d.hearing?.video_guide) { tags.add('수어안내'); tags.add('수어 안내'); }
     }
 
     // 3. 반려동물 동반 (KorPetTourService2) 세부 태그
@@ -790,6 +790,32 @@ exports.getSpots = async (query) => {
 // 스팟 상세 조회
 // ──────────────────────────────────────────────────────────────────────
 exports.getSpotById = async (spotId) => {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(spotId).trim());
+    if (!isUuid) {
+        if (/^\d+$/.test(String(spotId).trim())) {
+            const tourDetail = await tourApiService.getSpotDetail(spotId);
+            return {
+                spot_id: String(spotId),
+                content_id: String(spotId),
+                name: tourDetail.title,
+                address: tourDetail.address,
+                x: tourDetail.x,
+                y: tourDetail.y,
+                source: 'tour',
+                overview: tourDetail.overview,
+                tel: tourDetail.tel,
+                homepage: tourDetail.homepage,
+                first_image: tourDetail.images?.[0]?.image_url || null,
+                images: tourDetail.images?.map(i => i.image_url) || [],
+                top_tags: [],
+                courses: [],
+            };
+        }
+        const err = new Error('스팟을 찾을 수 없습니다.');
+        err.status = 404;
+        throw err;
+    }
+
     const spotResult = await pool.query(
         `SELECT
             s.spot_id, s.name, s.address, s.categories, s.kakao_category_name,

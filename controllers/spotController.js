@@ -61,6 +61,15 @@ exports.getAiContents = async (req, res, next) => {
 exports.getSpotPhotos = async (req, res, next) => {
     try {
         const { spot_id } = req.params;
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(spot_id).trim());
+
+        if (!isUuid) {
+            if (/^\d+$/.test(String(spot_id).trim())) {
+                const result = await tourApiService.getSpotPhotos(spot_id, null);
+                return res.json({ success: true, spot_id, spot_name: '', ...result });
+            }
+            return res.status(404).json({ success: false, message: '스팟을 찾을 수 없습니다.' });
+        }
 
         // DB에서 스팟 이름과 tour_api_content_id 조회
         // tour_api_content_id는 spots 테이블 컬럼이 없어서 content_tour로 연결된 경우를 고려,
