@@ -7,7 +7,9 @@
 //  [사진 확보 소스 체인]
 //   1) TourAPI 키워드 검색(searchKeyword2) → firstimage
 //   2) TourAPI 좌표 주변 검색(locationBasedList2) → 반경 내 관광지 firstimage
-//   3) 후기 사진(spot_reviews.photos) 폴백은 DB 조회 시 이미 처리되므로 제외
+//   3) 한국관광공사 관광사진갤러리(PhotoGalleryService1) → 공모전 고화질 사진
+//   4) 카카오 이미지 검색 API(Kakao Search Image) → 실시간 포털/웹 실사진 폴백
+//   5) 후기 사진(spot_reviews.photos) 폴백은 DB 조회 시 앱단에서 자동 처리
 //
 //  [오매칭 방지]
 //   - 좌표 주변 검색으로 얻은 사진은 원본 스팟 좌표와의 거리(km)를 계산해
@@ -21,8 +23,11 @@
 //   node scripts/backfill-spot-first-image.js --max-km 5
 // ============================================================
 require('dotenv').config();
+const axios = require('axios');
 const pool = require('../config/db');
 const tourApiService = require('../services/tourApiService');
+
+const KAKAO_KEY = process.env.KAKAO_REST_API_KEY;
 
 // ── CLI 인자 파싱 ────────────────────────────────────────────
 const args = process.argv.slice(2);
@@ -110,6 +115,53 @@ async function findByLocation(spot) {
   }
 }
 
+// 소스 3: 한국관광공사 관광사진갤러리(PhotoGalleryService1) 키워드 검색
+async function findByPhotoGallery(spot) {
+  try {
+    const photos = await tourApiService.getPhotosByKeyword(spot.name, 3);
+    if (photos && photos.length > 0 && (photos[0].original || photos[0].thumbnail)) {
+      return {
+        url: photos[0].original || photos[0].thumbnail,
+        match: 'photogallery',
+      };
+    }
+    return null;
+  } catch (e) {
+    return { error: `gallery: ${e.message}` };
+  }
+}
+
+// 소스 4: 카카오 이미지 검색(Kakao Search Image API) 폴백
+async function findByKakaoImage(spot) {
+  if (!KAKAO_KEY) return null;
+  try {
+    const query = spot.region && !spot.name.includes(spot.region)
+      ? `${spot.region} ${spot.name}`
+      : spot.name;
+
+    const res = await axios.get('https://dapi.kakao.com/v2/search/image', {
+      headers: { Authorization: `KakaoAK ${KAKAO_KEY}` },
+      params: {
+        query,
+        size: 3,
+        sort: 'accuracy',
+      },
+      timeout: 5000,
+    });
+
+    const docs = res.data?.documents || [];
+    if (docs.length > 0 && docs[0].image_url) {
+      return {
+        url: docs[0].image_url,
+        match: 'kakao-image',
+      };
+    }
+    return null;
+  } catch (e) {
+    return { error: `kakao: ${e.message}` };
+  }
+}
+
 async function main() {
   const where = ['first_image IS NULL'];
   const params = [];
@@ -140,7 +192,7 @@ async function main() {
     const spot = spots[i];
     process.stdout.write(`[${i + 1}/${spots.length}] ${spot.name} ... `);
 
-    // 소스 1 → 소스 2
+    // 소스 1: TourAPI 키워드 검색
     let result = await findByKeyword(spot);
     if (result && result.error) {
       console.log(`ERR ${result.error}`);
@@ -148,7 +200,24 @@ async function main() {
       await sleep(SLEEP_MS);
       continue;
     }
+    // 소스 2: TourAPI 좌표 주변 검색
     if (!result) result = await findByLocation(spot);
+    if (result && result.error) {
+      console.log(`ERR ${result.error}`);
+      errored++;
+      await sleep(SLEEP_MS);
+      continue;
+    }
+    // 소스 3: 한국관광공사 관광사진갤러리(PhotoGalleryService1) 검색
+    if (!result) result = await findByPhotoGallery(spot);
+    if (result && result.error) {
+      console.log(`ERR ${result.error}`);
+      errored++;
+      await sleep(SLEEP_MS);
+      continue;
+    }
+    // 소스 4: 카카오 이미지 검색 API (최종 폴백)
+    if (!result) result = await findByKakaoImage(spot);
     if (result && result.error) {
       console.log(`ERR ${result.error}`);
       errored++;
