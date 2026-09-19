@@ -727,7 +727,7 @@ exports.createSpot = async (body) => {
         err.status = 400; throw err;
     }
 
-            // 좌표(스팟 자체 위치) 기반 권역 추론 → 춘천이면 근처 권역, 아니면 주소 키워드 폴백
+                    // 좌표(스팟 자체 위치) 기반 권역 추론 → 춘천이면 근처 권역, 아니면 주소 키워드 폴백
     // (이용자 실시간 GPS 아님 → LBS 사업자 미신고 요건 유지)
     const regionInfo = inferRegionFromLocation({
         lat,
@@ -796,7 +796,7 @@ exports.saveKakaoSpot = async (body, userId) => {
         err.status = 400; throw err;
     }
 
-            // 좌표(스팟 자체 위치) 기반 권역 추론 → 춘천이면 근처 권역, 아니면 주소 키워드 폴백
+                    // 좌표(스팟 자체 위치) 기반 권역 추론 → 춘천이면 근처 권역, 아니면 주소 키워드 폴백
     // (이용자 실시간 GPS 아님 → LBS 사업자 미신고 요건 유지)
     const regionInfo = inferRegionFromLocation({
         lat,

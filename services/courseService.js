@@ -460,10 +460,10 @@ exports.createCourse = async (userId, body) => {
       totalDistance = stats.totalDistance;
       estimatedDuration = body.estimated_duration
         ? Math.ceil(body.estimated_duration)
-        : stats.estimatedDuration;
+                : stats.estimatedDuration;
     }
 
-            // region, sub_region 결정 (입력값 우선, 없으면 '코스 시작 좌표' 기반으로 추론)
+    // region, sub_region 결정 (입력값 우선, 없으면 '코스 시작 좌표' 기반으로 추론)
     // NOTE: 이용자 실시간 GPS가 아니라 코스 시작 지점 좌표만 사용 → LBS 미신고 요건 유지
     let determinedRegion = body.region || null;
     let determinedSubRegion = body.sub_region || null;
@@ -533,9 +533,9 @@ exports.createCourseFromWalk = async (userId, body) => {
     // 사용자가 지도에서 직접 선택한 경유지(waypoints)만 허용
     // GPS 실제 이동 궤적(coordinates, actual_route)은 수신하지 않음
     validateWaypoints(body.waypoints, { minLength: 2 });
-    const routeWaypoints = body.waypoints;
+        const routeWaypoints = body.waypoints;
 
-        const wkt = await buildLineString(routeWaypoints, client);
+    const wkt = await buildLineString(routeWaypoints, client);
     const stats = await calcStats(wkt, client);
 
     // region, sub_region 결정 (입력값 우선, 없으면 '코스 시작 좌표' 기반으로 추론)
@@ -1183,8 +1183,8 @@ exports.updateCourse = async (userId, courseId, body) => {
     // 미전달된 필드는 기존 코스 값 유지 (부분 수정 지원)
     const nextName = name !== undefined ? name.trim() : course.name;
     const nextDescription = description !== undefined ? description : course.description;
-    const nextCategory = category !== undefined ? category : course.category;
-        let nextRegion = region !== undefined ? region : course.region;
+        const nextCategory = category !== undefined ? category : course.category;
+    let nextRegion = region !== undefined ? region : course.region;
     let nextSubRegion = sub_region !== undefined ? sub_region : course.sub_region;
     const nextIsPublic = is_public !== undefined ? (is_public === true || is_public === 'true') : course.is_public;
     // 경로 변경 시 새 시작 좌표로 권역을 보정하기 위한 값 (좌표 = 코스 시작 지점, 실시간 GPS 아님)
@@ -1196,8 +1196,8 @@ exports.updateCourse = async (userId, courseId, body) => {
     let paramIdx = 7; // $1=name $2=description $3=category $4=region $5=sub_region $6=is_public 이후
 
     if (route) {
-      const coordinates = route.coordinates ?? route;
-            const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
+            const coordinates = route.coordinates ?? route;
+      const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
       const wkt = await buildLineString(routeWaypoints, client);
       const stats = await calcStats(wkt, client);
       startCoordinate = await fetchStartCoordinate(client, wkt);
@@ -1211,8 +1211,8 @@ exports.updateCourse = async (userId, courseId, body) => {
         await client.query(`DELETE FROM course_waypoints WHERE course_id=$1`, [courseId]);
         await insertWaypoints(courseId, waypoints, client);
       }
-    } else if (waypoints) {
-            validateWaypoints(waypoints, { minLength: 2 });
+        } else if (waypoints) {
+      validateWaypoints(waypoints, { minLength: 2 });
       const wkt = await buildLineString(waypoints, client);
       const { totalDistance, estimatedDuration } = await calcStats(wkt, client);
       startCoordinate = await fetchStartCoordinate(client, wkt);
@@ -1224,9 +1224,9 @@ exports.updateCourse = async (userId, courseId, body) => {
       // 경유지 교체
       await client.query(`DELETE FROM course_waypoints WHERE course_id=$1`, [courseId]);
       await insertWaypoints(courseId, waypoints, client);
-    }
+        }
 
-        // 경로가 바뀌었고 지역이 명시되지 않았다면 새 시작 좌표 기준으로 권역 자동 보정
+    // 경로가 바뀌었고 지역이 명시되지 않았다면 새 시작 좌표 기준으로 권역 자동 보정
     if (startCoordinate && region === undefined) {
       const inferred = inferRegionFromLocation({
         lat: startCoordinate.lat,
