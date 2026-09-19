@@ -91,3 +91,44 @@ exports.getSpotPhotos = async (req, res, next) => {
         return res.json({ success: true, spot_id, spot_name: name, ...result });
     } catch (err) { next(err); }
 };
+
+// 스팟 개요 AI 5~6줄 요약 (Gemini)
+exports.summarizeOverview = async (req, res, next) => {
+    try {
+        const { spot_id, text, name } = req.body;
+        let overviewText = text;
+        let spotName = name || '';
+
+        // text가 없는 경우 spot_id를 통해 조회 시도
+        if (!overviewText && spot_id) {
+            const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(spot_id).trim());
+            if (isUuid) {
+                const spot = await spotService.getSpotById(spot_id);
+                overviewText = spot.content_tour || spot.content_place || spot.overview || '';
+                spotName = spotName || spot.name || '';
+            } else if (/^\d+$/.test(String(spot_id).trim())) {
+                const tourDetail = await tourApiService.getSpotDetail(spot_id);
+                overviewText = tourDetail.overview || '';
+                spotName = spotName || tourDetail.title || '';
+            }
+        }
+
+        if (!overviewText || !overviewText.trim()) {
+            return res.json({
+                success: true,
+                ai_overview: '',
+                message: '요약할 개요 텍스트가 없습니다.'
+            });
+        }
+
+        const aiOverview = await aiContentService.summarizeOverview(overviewText, spotName, spot_id);
+
+        return res.json({
+            success: true,
+            spot_id: spot_id || null,
+            ai_overview: aiOverview
+        });
+    } catch (err) {
+        next(err);
+    }
+};
