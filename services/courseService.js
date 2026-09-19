@@ -1,5 +1,5 @@
 const pool = require('../config/db');
-const { extractRegionFromAddress } = require('../constants/spotCategoryRules');
+const { extractRegionFromAddress, inferRegionFromLocation } = require('../constants/spotCategoryRules');
 
 const WALK_SPEED_MPS = 1.1; // 도보 평균 4km/h
 const COURSE_NEARBY_SPOT_RADIUS = Number(process.env.COURSE_NEARBY_SPOT_RADIUS || 500);
@@ -184,6 +184,28 @@ const calcStats = async (wkt, client) => {
   const totalDistance = Math.round(+rows[0].dist);
   const estimatedDuration = Math.ceil(totalDistance / WALK_SPEED_MPS); // 초 단위
   return { totalDistance, estimatedDuration };
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 내부 헬퍼: LINESTRING WKT의 시작 좌표 추출 (권역 추론용)
+// ※ 이용자 실시간 GPS가 아니라 '코스 시작 지점' 좌표만 사용 → LBS 미신고 요건 유지
+// ──────────────────────────────────────────────────────────────────────
+const fetchStartCoordinate = async (client, wkt) => {
+  try {
+    const { rows } = await client.query(
+      `SELECT ST_Y(ST_StartPoint($1::geography::geometry)) AS lat,
+              ST_X(ST_StartPoint($1::geography::geometry)) AS lng`,
+      [wkt]
+    );
+    if (!rows.length) return null;
+    const lat = Number(rows[0].lat);
+    const lng = Number(rows[0].lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng };
+  } catch (err) {
+    console.warn('[fetchStartCoordinate] 시작 좌표 추출 실패, 주소 기반 추론으로 폴백:', err.message);
+    return null;
+  }
 };
 
 // ──────────────────────────────────────────────────────────────────────
@@ -441,11 +463,17 @@ exports.createCourse = async (userId, body) => {
         : stats.estimatedDuration;
     }
 
-    // region, sub_region 결정 (입력값 우선, 없으면 name/description에서 추론)
+            // region, sub_region 결정 (입력값 우선, 없으면 '코스 시작 좌표' 기반으로 추론)
+    // NOTE: 이용자 실시간 GPS가 아니라 코스 시작 지점 좌표만 사용 → LBS 미신고 요건 유지
     let determinedRegion = body.region || null;
     let determinedSubRegion = body.sub_region || null;
     if (!determinedRegion) {
-      const inferred = extractRegionFromAddress(`${name} ${description || ''}`);
+      const start = await fetchStartCoordinate(client, wkt);
+      const inferred = inferRegionFromLocation({
+        lat: start?.lat,
+        lng: start?.lng,
+        address: `${name} ${description || ''}`,
+      });
       determinedRegion = inferred.region;
       determinedSubRegion = determinedSubRegion || inferred.sub_region;
     }
@@ -507,13 +535,20 @@ exports.createCourseFromWalk = async (userId, body) => {
     validateWaypoints(body.waypoints, { minLength: 2 });
     const routeWaypoints = body.waypoints;
 
-    const wkt = await buildLineString(routeWaypoints, client);
+        const wkt = await buildLineString(routeWaypoints, client);
     const stats = await calcStats(wkt, client);
 
+    // region, sub_region 결정 (입력값 우선, 없으면 '코스 시작 좌표' 기반으로 추론)
+    // NOTE: 이용자 실시간 GPS가 아니라 코스 시작 지점 좌표만 사용 → LBS 미신고 요건 유지
     let determinedRegion = body.region || null;
     let determinedSubRegion = body.sub_region || null;
     if (!determinedRegion) {
-      const inferred = extractRegionFromAddress(`${name} ${description || ''}`);
+      const start = await fetchStartCoordinate(client, wkt);
+      const inferred = inferRegionFromLocation({
+        lat: start?.lat,
+        lng: start?.lng,
+        address: `${name} ${description || ''}`,
+      });
       determinedRegion = inferred.region;
       determinedSubRegion = determinedSubRegion || inferred.sub_region;
     }
@@ -1149,9 +1184,11 @@ exports.updateCourse = async (userId, courseId, body) => {
     const nextName = name !== undefined ? name.trim() : course.name;
     const nextDescription = description !== undefined ? description : course.description;
     const nextCategory = category !== undefined ? category : course.category;
-    const nextRegion = region !== undefined ? region : course.region;
-    const nextSubRegion = sub_region !== undefined ? sub_region : course.sub_region;
+        let nextRegion = region !== undefined ? region : course.region;
+    let nextSubRegion = sub_region !== undefined ? sub_region : course.sub_region;
     const nextIsPublic = is_public !== undefined ? (is_public === true || is_public === 'true') : course.is_public;
+    // 경로 변경 시 새 시작 좌표로 권역을 보정하기 위한 값 (좌표 = 코스 시작 지점, 실시간 GPS 아님)
+    let startCoordinate = null;
 
     // 경로 변경 시 route_geometry 재계산
     let extraSets = '';
@@ -1160,9 +1197,10 @@ exports.updateCourse = async (userId, courseId, body) => {
 
     if (route) {
       const coordinates = route.coordinates ?? route;
-      const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
+            const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
       const wkt = await buildLineString(routeWaypoints, client);
       const stats = await calcStats(wkt, client);
+      startCoordinate = await fetchStartCoordinate(client, wkt);
       const duration = body.estimated_duration ? Math.ceil(body.estimated_duration) : stats.estimatedDuration;
       extraSets = `, route_geometry=$${paramIdx}::geography, total_distance=$${paramIdx+1}, estimated_duration=$${paramIdx+2}`;
       extraParams = [wkt, stats.totalDistance, duration];
@@ -1174,9 +1212,10 @@ exports.updateCourse = async (userId, courseId, body) => {
         await insertWaypoints(courseId, waypoints, client);
       }
     } else if (waypoints) {
-      validateWaypoints(waypoints, { minLength: 2 });
+            validateWaypoints(waypoints, { minLength: 2 });
       const wkt = await buildLineString(waypoints, client);
       const { totalDistance, estimatedDuration } = await calcStats(wkt, client);
+      startCoordinate = await fetchStartCoordinate(client, wkt);
       const duration = body.estimated_duration ? Math.ceil(body.estimated_duration) : estimatedDuration;
       extraSets = `, route_geometry=$${paramIdx}::geography, total_distance=$${paramIdx+1}, estimated_duration=$${paramIdx+2}`;
       extraParams = [wkt, totalDistance, duration];
@@ -1185,6 +1224,19 @@ exports.updateCourse = async (userId, courseId, body) => {
       // 경유지 교체
       await client.query(`DELETE FROM course_waypoints WHERE course_id=$1`, [courseId]);
       await insertWaypoints(courseId, waypoints, client);
+    }
+
+        // 경로가 바뀌었고 지역이 명시되지 않았다면 새 시작 좌표 기준으로 권역 자동 보정
+    if (startCoordinate && region === undefined) {
+      const inferred = inferRegionFromLocation({
+        lat: startCoordinate.lat,
+        lng: startCoordinate.lng,
+        address: `${nextName} ${nextDescription || ''}`,
+      });
+      nextRegion = inferred.region || nextRegion;
+      if (sub_region === undefined) {
+        nextSubRegion = inferred.sub_region || nextSubRegion;
+      }
     }
 
     const { rows: [updated] } = await client.query(

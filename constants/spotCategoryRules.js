@@ -487,6 +487,22 @@ const CHUNCHEON_AREAS = [
   '강촌·남산권',
 ];
 
+// ── 춘천 권역 대표 좌표 (프론트엔드 권역 필터와 동일한 기준) ──────────
+// 프론트(app)는 권역별 대표 좌표로 '내 위치 → 권역'을 온디바이스에서 계산한다.
+// 서버는 '코스/스팟 자체의 좌표'만 동일 기준으로 분류할 뿐, 이용자의
+// 실시간 GPS(개인위치정보)는 절대 수신·저장하지 않는다. (LBS 사업자 미신고 요건 유지)
+const CHUNCHEON_AREA_CENTERS = [
+  { name: '의암호·공지천권', lat: 37.8746, lng: 127.7088 },
+  { name: '소양강·신북권', lat: 37.9200, lng: 127.7400 },
+  { name: '도심·명동권', lat: 37.8800, lng: 127.7260 },
+  { name: '동면·구봉산권', lat: 37.9050, lng: 127.8400 },
+  { name: '강촌·남산권', lat: 37.8100, lng: 127.6400 },
+];
+
+// 춘천시 중심 좌표 및 권역 분류 반경 (프론트 RegionGeometry 춘천시 = 20.0km와 동일)
+const CHUNCHEON_CITY_CENTER = { lat: 37.8813, lng: 127.7298 };
+const CHUNCHEON_CITY_RADIUS_M = 20000;
+
 // ── 지원 지역 전체 구조 (클라이언트 전달용) ──────────────────────────
 const SUPPORTED_REGION_LIST = [
   {
@@ -566,11 +582,74 @@ function extractRegionFromAddress(addressOrText = '') {
     }
   }
 
-  if (text.includes('서울')) {
+      if (text.includes('서울')) {
     return { region: '서울', sub_region: null };
   }
 
   return { region: '서울', sub_region: null };
+}
+
+// ── 좌표 기반 권역 추론 ─────────────────────────────────────────────
+// 두 좌표 사이의 거리(m)를 Haversine 방식으로 계산합니다.
+function haversineMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function toFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * 좌표가 춘천시 권역 내에 있으면 가장 가까운 권역명을 반환합니다.
+ * 춘천시 밖이면 null을 반환합니다.
+ */
+function resolveChuncheonArea(lat, lng) {
+  const flat = toFiniteNumber(lat);
+  const flng = toFiniteNumber(lng);
+  if (flat === null || flng === null) return null;
+
+  const distanceFromCity = haversineMeters(
+    flat,
+    flng,
+    CHUNCHEON_CITY_CENTER.lat,
+    CHUNCHEON_CITY_CENTER.lng
+  );
+  if (distanceFromCity > CHUNCHEON_CITY_RADIUS_M) return null;
+
+  let nearest = null;
+  let nearestDistance = Infinity;
+  for (const area of CHUNCHEON_AREA_CENTERS) {
+    const d = haversineMeters(flat, flng, area.lat, area.lng);
+    if (d < nearestDistance) {
+      nearestDistance = d;
+      nearest = area.name;
+    }
+  }
+  return nearest;
+}
+
+/**
+ * 좌표(+주소)로 region / sub_region을 추론합니다.
+ *   1) 좌표가 춘천시 권역 내면 → region='춘천', sub_region=가장 가까운 권역
+ *   2) 아니면 기존 주소 키워드 기반 추출(extractRegionFromAddress)로 폴백
+ *
+ * NOTE: 입력 좌표는 '스팟/코스 자체의 좌표'이며, 이용자의 실시간 GPS가 아니다.
+ */
+function inferRegionFromLocation({ lat, lng, address = '' } = {}) {
+  const area = resolveChuncheonArea(lat, lng);
+  if (area) {
+    return { region: '춘천', sub_region: area };
+  }
+  return extractRegionFromAddress(address);
 }
 
 module.exports = {
@@ -578,9 +657,14 @@ module.exports = {
   TARGET_REGIONS,
   SEOUL_DISTRICTS,
   CHUNCHEON_AREAS,
+  CHUNCHEON_AREA_CENTERS,
+  CHUNCHEON_CITY_CENTER,
+  CHUNCHEON_CITY_RADIUS_M,
   SUPPORTED_REGION_LIST,
   resolveRegion,
   extractRegionFromAddress,
+  resolveChuncheonArea,
+  inferRegionFromLocation,
   SPOT_CATEGORY_SEARCH_RULES,
   getLastCategory,
   getFallbackCategory,

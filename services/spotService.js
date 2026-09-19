@@ -5,6 +5,7 @@ const {
     SPOT_CATEGORY_SEARCH_RULES,
     inferSpotCategoriesWithFallback,
     extractRegionFromAddress,
+    inferRegionFromLocation,
     resolveRegion,
 } = require('../constants/spotCategoryRules');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
@@ -726,7 +727,13 @@ exports.createSpot = async (body) => {
         err.status = 400; throw err;
     }
 
-    const regionInfo = extractRegionFromAddress(`${address || ''} ${name || ''}`);
+            // 좌표(스팟 자체 위치) 기반 권역 추론 → 춘천이면 근처 권역, 아니면 주소 키워드 폴백
+    // (이용자 실시간 GPS 아님 → LBS 사업자 미신고 요건 유지)
+    const regionInfo = inferRegionFromLocation({
+        lat,
+        lng,
+        address: `${address || ''} ${name || ''}`,
+    });
     const determinedRegion = region || regionInfo.region || '서울';
     const determinedSubRegion = sub_region || regionInfo.sub_region || null;
 
@@ -789,7 +796,13 @@ exports.saveKakaoSpot = async (body, userId) => {
         err.status = 400; throw err;
     }
 
-    const regionInfo = extractRegionFromAddress(`${selectedAddress || ''} ${name || ''}`);
+            // 좌표(스팟 자체 위치) 기반 권역 추론 → 춘천이면 근처 권역, 아니면 주소 키워드 폴백
+    // (이용자 실시간 GPS 아님 → LBS 사업자 미신고 요건 유지)
+    const regionInfo = inferRegionFromLocation({
+        lat,
+        lng,
+        address: `${selectedAddress || ''} ${name || ''}`,
+    });
     const determinedRegion = region || regionInfo.region || '서울';
     const determinedSubRegion = sub_region || regionInfo.sub_region || null;
 
