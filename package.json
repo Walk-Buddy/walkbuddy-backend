@@ -13,6 +13,7 @@
     "seed:full": "node scripts/seed-demo-data.js --with-durunubi",
     "generate:durunubi-spot-mappings": "node scripts/generate-durunubi-spot-mappings.js",
     "import:durunubi": "node scripts/import-durunubi-courses.js",
+    "import:street-tourism": "node scripts/import-street-tourism-courses.js",
     "seed:prewalk-course": "node scripts/create-prewalk-course-via-api.js",
     "seed:prewalk-reviews": "node scripts/create-prewalk-course-via-api.js --reviews-only",
     "db:seed": "node db/run-sql.js db/seed.sql"

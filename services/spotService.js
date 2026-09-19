@@ -125,6 +125,57 @@ async function fetchTourLocationCandidates({ lng, lat, radius }) {
     }
 }
 
+async function fetchTourKeywordCandidates(keyword) {
+    const serviceKey = getTourApiServiceKey();
+    if (!serviceKey || !keyword) return [];
+
+    const api = 'KorService2';
+    const pathname = 'searchKeyword2';
+    const params = {
+        MobileOS: process.env.TOUR_API_MOBILE_OS || 'ETC',
+        MobileApp: process.env.TOUR_API_MOBILE_APP || 'WalkBuddy',
+        _type: 'json',
+        keyword: keyword.trim(),
+        numOfRows: 10,
+        pageNo: 1,
+    };
+    const startedAt = Date.now();
+
+    try {
+        const response = await axios.get(`${TOUR_API_BASE_URL}/${pathname}`, {
+            params: { serviceKey, ...params },
+        });
+
+        const header = response.data?.response?.header;
+        const item = response.data?.response?.body?.items?.item;
+
+        trafficLog.record({
+            api,
+            pathname,
+            params,
+            status: 'ok',
+            httpStatus: response.status,
+            resultCode: header?.resultCode || '0000',
+            durationMs: Date.now() - startedAt,
+            startedAt,
+        });
+
+        return normalizeTourApiItems(item);
+    } catch (err) {
+        trafficLog.record({
+            api,
+            pathname,
+            params,
+            status: 'error',
+            httpStatus: err.response?.status ?? null,
+            message: err.message,
+            durationMs: Date.now() - startedAt,
+            startedAt,
+        });
+        return [];
+    }
+}
+
 async function findTourApiMatchByContentId(contentId) {
     if (!contentId) return null;
     return { contentid: String(contentId), title: null, dist: null };
@@ -379,6 +430,18 @@ async function enrichKakaoSpotTourContent(spot, userId) {
             matched = candidates
                 .filter(candidate => isSameTourPlace(spot.name, candidate.title))
                 .sort((a, b) => Number(a.dist || 0) - Number(b.dist || 0))[0];
+        }
+
+        // 3차 폴백: 키워드 검색 기반 매칭 (관광지 위치가 카카오 좌표와 조금 다르거나 반경 밖인 경우)
+        if (!matched) {
+            const kwCandidates = await fetchTourKeywordCandidates(spot.name);
+            matched = kwCandidates
+                .filter(candidate => isSameTourPlace(spot.name, candidate.title))
+                .sort((a, b) => {
+                    const distA = Math.hypot(Number(a.mapx || 0) - lng, Number(a.mapy || 0) - lat);
+                    const distB = Math.hypot(Number(b.mapx || 0) - lng, Number(b.mapy || 0) - lat);
+                    return distA - distB;
+                })[0];
         }
 
         if (!matched?.contentid) {
