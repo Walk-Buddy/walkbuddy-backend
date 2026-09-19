@@ -47,12 +47,27 @@ async function ensureSystemTaggerId(client = pool) {
     return cachedSystemTaggerId;
   }
 
-  const { rows: created } = await client.query(
-    `INSERT INTO users (nickname, social_provider, social_id, role, status)
-     VALUES ('자동태깅', 'seed', 'system-tagger', 'admin', 'active')
-     RETURNING user_id`
+  try {
+    const { rows: created } = await client.query(
+      `INSERT INTO users (nickname, social_provider, social_id, role, status)
+       VALUES ('자동태깅', 'seed', 'system-tagger', 'admin', 'active')
+       ON CONFLICT (nickname) DO NOTHING
+       RETURNING user_id`
+    );
+    if (created.length) {
+      cachedSystemTaggerId = created[0].user_id;
+      return cachedSystemTaggerId;
+    }
+  } catch (err) {
+    console.warn('[ensureSystemTaggerId/course] 시스템 태거 생성 실패, 재조회:', err.message);
+  }
+
+  // nickname 충돌 등으로 생성 실패 → social 기준 재조회
+  const { rows: retry } = await client.query(
+    `SELECT user_id FROM users
+     WHERE social_provider = 'seed' AND social_id = 'system-tagger' LIMIT 1`
   );
-  cachedSystemTaggerId = created[0].user_id;
+  cachedSystemTaggerId = retry[0]?.user_id || null;
   return cachedSystemTaggerId;
 }
 

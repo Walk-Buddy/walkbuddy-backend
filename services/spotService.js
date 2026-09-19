@@ -334,15 +334,33 @@ async function ensureSystemTaggerId() {
         return cachedSystemTaggerId;
     }
 
-    // 3. 없으면 생성 (관리자 계정과 동일한 시드 방식)
-    const { rows: created } = await pool.query(
-        `INSERT INTO users (nickname, social_provider, social_id, role, status)
-         VALUES ('자동태깅', 'seed', 'system-tagger', 'admin', 'active')
-         RETURNING user_id`
-    );
+        // 3. 없으면 생성 (nickname UNIQUE 충돌 방지를 위해 ON CONFLICT 후 재조회 폴백)
+    try {
+        const { rows: created } = await pool.query(
+            `INSERT INTO users (nickname, social_provider, social_id, role, status)
+             VALUES ('자동태깅', 'seed', 'system-tagger', 'admin', 'active')
+             ON CONFLICT (nickname) DO NOTHING
+             RETURNING user_id`
+        );
+        if (created.length) {
+            cachedSystemTaggerId = created[0].user_id;
+            return cachedSystemTaggerId;
+        }
+    } catch (err) {
+        console.warn('[ensureSystemTaggerId] 시스템 태거 생성 실패, 재조회:', err.message);
+    }
 
-    cachedSystemTaggerId = created[0].user_id;
-    return cachedSystemTaggerId;
+    // 3-b. nickname 충돌 등으로 생성이 안 됐다면 social 기준으로 재조회
+    const { rows: retry } = await pool.query(
+        `SELECT user_id FROM users
+         WHERE social_provider = 'seed' AND social_id = 'system-tagger' LIMIT 1`
+    );
+    if (retry.length) {
+        cachedSystemTaggerId = retry[0].user_id;
+        return cachedSystemTaggerId;
+    }
+
+    return null;
 }
 
 // 스팟에 세부 태그 일괄 자동 부착
