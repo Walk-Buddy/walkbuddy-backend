@@ -11,11 +11,22 @@ const {
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const tourApiService = require('./tourApiService');
+const odiiService = require('./odiiService');
 const trafficLog = require('./tourTrafficLog');
 
 const TOUR_API_BASE_URL = 'https://apis.data.go.kr/B551011/KorService2';
 const TOUR_API_MATCH_RADIUS = Number(process.env.TOUR_API_MATCH_RADIUS || 300);
 const TOUR_API_FALLBACK_MATCH_RADIUS = 500;
+
+function sanitizeText(text) {
+    if (!text) return '';
+    return String(text)
+        .replace(/<[^>]*>/g, '')          // HTML 태그 제거
+        .replace(/&[a-zA-Z0-9#]+;/g, ' ') // &nbsp;, &amp; 등 HTML 엔티티 제거
+        .replace(/[\r\t]+/g, ' ')         // 탭/개행 정규화
+        .replace(/\s{2,}/g, ' ')          // 다중 공백 단일화
+        .trim();
+}
 
 function getTourApiServiceKey() {
     return process.env.TOUR_API_SERVICE_KEY || process.env.TOURAPI_SERVICE_KEY;
@@ -185,9 +196,10 @@ async function fetchTourOverview(contentId) {
     const serviceKey = getTourApiServiceKey();
     if (!serviceKey || !contentId) return null;
 
-    const api = 'KorService2';
+        const api = 'KorService2';
     const pathname = 'detailCommon2';
-    const params = { _type: 'json', contentId };
+    // firstImageYN/overviewYN 을 명시해야 대표 이미지(firstimage)까지 함께 내려온다.
+    const params = { _type: 'json', contentId, firstImageYN: 'Y', overviewYN: 'Y' };
     const startedAt = Date.now();
 
     try {
@@ -196,8 +208,10 @@ async function fetchTourOverview(contentId) {
                 serviceKey,
                 MobileOS: process.env.TOUR_API_MOBILE_OS || 'ETC',
                 MobileApp: process.env.TOUR_API_MOBILE_APP || 'WalkBuddy',
-                _type: 'json',
+                                _type: 'json',
                 contentId,
+                firstImageYN: 'Y',
+                overviewYN: 'Y',
             },
         });
 
@@ -217,7 +231,11 @@ async function fetchTourOverview(contentId) {
             startedAt,
         });
 
-        return cleanTourOverview(detail?.overview || '');
+        // overview(개요) + firstImage(대표 이미지 URL) 를 함께 반환한다.
+        return {
+            overview: cleanTourOverview(detail?.overview || ''),
+            firstImage: detail?.firstimage || detail?.firstimage2 || null,
+        };
     } catch (err) {
         trafficLog.record({
             api,
@@ -406,6 +424,13 @@ async function enrichKakaoSpotTourContent(spot, userId) {
     }
 
     try {
+        // Odii 오디오 가이드 검색을 병렬로 함께 시작
+        const odiiPromise = odiiService.findBestOdiiGuide({
+            name: spot.name,
+            x: lng,
+            y: lat,
+        }).catch(() => null);
+
         let matched = await findTourApiMatchByContentId(spot.tour_api_content_id);
         let candidates = [];
 
@@ -444,56 +469,71 @@ async function enrichKakaoSpotTourContent(spot, userId) {
                 })[0];
         }
 
-        if (!matched?.contentid) {
-            result.tour_content_status = 'no_matching_tour_place';
-            return { spot, ...result };
-        }
-
-                const contentId = String(matched.contentid);
-        result.tour_content_match = {
-            content_id: contentId,
-            title: matched.title,
-            distance: matched.dist == null ? null : Number(matched.dist),
-        };
-
-        // 관광공사 대표 이미지(firstimage) — 장소 목록 카드 노출용
-        const tourFirstImage = matched.firstimage || matched.firstimage2 || null;
-
-        // 1. 한국관광공사 전방위 API(개요, 무장애, 반려동물) 병렬 조회
-        const [overviewResult, barrierFreeResult, petTourResult] = await Promise.allSettled([
-            fetchTourOverview(contentId),
-            tourApiService.getBarrierFreeInfo(contentId),
-            tourApiService.getPetTourDetail(contentId),
-        ]);
-
-        const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
-        const barrierFreeInfo = barrierFreeResult.status === 'fulfilled' ? barrierFreeResult.value : null;
-        const petTourInfo = petTourResult.status === 'fulfilled' ? petTourResult.value : null;
-
-        // 2. DB 업데이트 구성 (content_tour, barrier_free_info)
         const updateClauses = [];
         const updateParams = [spot.spot_id];
 
-        if (overview && !spot.content_tour) {
-            updateParams.push(overview);
+        let overview = null;
+        let tourFirstImage = null;
+
+        if (matched?.contentid) {
+            const contentId = String(matched.contentid);
+            result.tour_content_match = {
+                content_id: contentId,
+                title: matched.title,
+                distance: matched.dist == null ? null : Number(matched.dist),
+            };
+
+            // 1. 한국관광공사 전방위 API(개요, 무장애, 반려동물) 병렬 조회
+            const [overviewResult, barrierFreeResult, petTourResult] = await Promise.allSettled([
+                fetchTourOverview(contentId),
+                tourApiService.getBarrierFreeInfo(contentId),
+                tourApiService.getPetTourDetail(contentId),
+            ]);
+
+            const tourDetail = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
+            overview = tourDetail?.overview || null;
+            const barrierFreeInfo = barrierFreeResult.status === 'fulfilled' ? barrierFreeResult.value : null;
+            const petTourInfo = petTourResult.status === 'fulfilled' ? petTourResult.value : null;
+
+            tourFirstImage = matched.firstimage || matched.firstimage2 || tourDetail?.firstImage || null;
+
+            if (barrierFreeInfo?.has_barrier_free_info) {
+                updateParams.push(JSON.stringify(barrierFreeInfo.details));
+                updateClauses.push(`barrier_free_info = $${updateParams.length}`);
+                result.barrier_free_enriched = true;
+            }
+
+            if (petTourInfo?.has_pet_info) {
+                result.pet_tour_enriched = true;
+            }
+
+            if (tourFirstImage && !spot.first_image) {
+                updateParams.push(tourFirstImage);
+                updateClauses.push(`first_image = $${updateParams.length}`);
+            }
+        } else {
+            result.tour_content_status = 'no_matching_tour_place';
+        }
+
+        // Odii 오디오 가이드 결과 수신
+        const odiiGuide = await odiiPromise;
+        const sanitizedOdii = sanitizeText(odiiGuide?.script);
+        const sanitizedOverview = sanitizeText(overview);
+
+        // 둘 다 있으면 병합, 둘 중 하나만 있어도 적재
+        let combinedTourContent = null;
+        if (sanitizedOdii && sanitizedOverview) {
+            combinedTourContent = `[스토리 해설]\n${sanitizedOdii}\n\n[관광 정보 개요]\n${sanitizedOverview}`;
+        } else if (sanitizedOdii) {
+            combinedTourContent = sanitizedOdii;
+        } else if (sanitizedOverview) {
+            combinedTourContent = sanitizedOverview;
+        }
+
+        if (combinedTourContent && !spot.content_tour) {
+            updateParams.push(combinedTourContent);
             updateClauses.push(`content_tour = $${updateParams.length}`);
             result.tour_content_enriched = true;
-        }
-
-        if (barrierFreeInfo?.has_barrier_free_info) {
-            updateParams.push(JSON.stringify(barrierFreeInfo.details));
-            updateClauses.push(`barrier_free_info = $${updateParams.length}`);
-            result.barrier_free_enriched = true;
-        }
-
-                if (petTourInfo?.has_pet_info) {
-            result.pet_tour_enriched = true;
-        }
-
-        // 관광공사 대표 이미지 저장 (아직 없을 때만)
-        if (tourFirstImage && !spot.first_image) {
-            updateParams.push(tourFirstImage);
-            updateClauses.push(`first_image = $${updateParams.length}`);
         }
 
         let updatedSpot = spot;
@@ -560,8 +600,11 @@ exports.getSpots = async (query) => {
     const rawKeyword = Array.isArray(query.keyword ?? query.q) ? (query.keyword ?? query.q)[0] : (query.keyword ?? query.q);
     const keyword = rawKeyword === undefined || rawKeyword === null ? null : String(rawKeyword).trim();
 
-    const offset = (Number(page) - 1) * Number(limit);
-    const whereConditions = ["s.status = 'active'"];
+        const offset = (Number(page) - 1) * Number(limit);
+    // 탐색 기본 목록에서는 사용자가 담은 카카오 장소(source='kakao')를 노출하지 않는다.
+    //   → 카카오 실시간 후보는 '산책로 만들기(장소 추가)' 진입점에서만 사용하고,
+    //     기본 목록은 자체 DB에 저장된 장소(admin 소스)만 노출한다.
+    const whereConditions = ["s.status = 'active'", "s.source <> 'kakao'"];
     const queryValues = [];
 
     // 정렬 매핑
@@ -1017,7 +1060,9 @@ exports.searchSpots = async (query) => {
         savedKakaoPlaceIdSet = new Set(saved.rows.map(r => r.kakao_place_id));
     }
 
-    const whereConditions = ["s.status = 'active'"];
+    // 저장 장소(saved_spots) 중 source='kakao' 는 목록에서 제외한다.
+    //   → 키워드/필터 탐색 결과에도 카카오 실시간 후보는 kakao_candidates 로만 내려보낸다.
+    const whereConditions = ["s.status = 'active'", "s.source <> 'kakao'"];
     const queryValues = [];
     let orderBySql = 's.created_at DESC';
 
