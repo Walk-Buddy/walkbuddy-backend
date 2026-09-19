@@ -1,6 +1,7 @@
 const pool = require('../config/db');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { PutObjectCommand } = require('@aws-sdk/client-s3');
+const s3 = require('../config/s3'); // 기본 자격증명 체인(EC2 IAM Role 등) 사용 — .env에 평문 키 저장 안 함
 const axios = require('axios');
 const odiiService = require('./odiiService');
 
@@ -70,14 +71,6 @@ async function generateContentWithFallback(prompt, modelName = 'gemini-2.5-flash
 
   throw lastError;
 }
-
-const s3 = new S3Client({
-  region: process.env.AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
-});
 
 async function generateTTS(text) {
   const response = await axios.post(

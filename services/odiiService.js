@@ -4,6 +4,7 @@ const trafficLog = require('./tourTrafficLog');
 const BASE_URL = 'https://apis.data.go.kr/B551011/Odii';
 const DEFAULT_MOBILE_OS = 'ETC';
 const DEFAULT_MOBILE_APP = 'WalkBuddy';
+const DEFAULT_LANG_CODE = 'ko'; // Odii 필수 파라미터 (누락 시 resultCode 11)
 
 // ODII_API_KEY 또는 기타 공공데이터 키 fallback
 function getServiceKey() {
@@ -29,10 +30,11 @@ function buildUrl(pathname, params = {}) {
   }
 
   const url = new URL(`${BASE_URL}/${pathname}`);
-  const defaultParams = {
+    const defaultParams = {
     MobileOS: DEFAULT_MOBILE_OS,
     MobileApp: DEFAULT_MOBILE_APP,
     _type: 'json',
+    langCode: DEFAULT_LANG_CODE,
   };
 
   Object.entries({ ...defaultParams, ...params }).forEach(([key, value]) => {
