@@ -1,9 +1,54 @@
 const pool = require('../config/db');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { PutObjectCommand } = require('@aws-sdk/client-s3');
+const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const s3 = require('../config/s3'); // 기본 자격증명 체인(EC2 IAM Role 등) 사용 — .env에 평문 키 저장 안 함
 const axios = require('axios');
 const odiiService = require('./odiiService');
+
+const S3_BUCKET = process.env.S3_BUCKET_NAME;
+// 예: https://<bucket>.s3.<region>.amazonaws.com/tts/<spotId>/place.mp3
+const S3_URL_PATTERN = new RegExp(
+  `^https?://${S3_BUCKET}\\.s3[.-][^/]+\\.amazonaws\\.com/(.+)$`
+);
+
+/** 재생 불가능한(더미/빈값) URL 판정 — 프론트 SpotAudioManager 와 동일 기준 */
+function isValidAudioUrl(url) {
+  return Boolean(url) && !String(url).includes('example.com');
+}
+
+/**
+ * TTS 음성 URL을 앱에서 재생 가능한 형태로 변환한다.
+ * - 자체 S3 버킷(private)에 올린 mp3는 "직접 URL"로 접근 시 403(AccessDenied) → 재생 안 됨.
+ *   → 응답 직전에 1시간짜리 presigned URL로 변환한다. (기존 GET /api/upload/{key} 와 동일 정책)
+ * - Odii(ktcdn.co.kr) 등 외부 공개 URL과 example.com 더미는 그대로 반환한다.
+ */
+async function toPlayableAudioUrl(rawUrl) {
+  if (!rawUrl) return rawUrl;
+  const url = String(rawUrl);
+  if (url.includes('example.com')) return url; // 더미는 그대로
+
+  const match = url.match(S3_URL_PATTERN);
+  if (!match) return url; // 자체 S3가 아니면(Odii 등 공개 URL) 손대지 않음
+
+  const key = match[1];
+  try {
+    const command = new GetObjectCommand({ Bucket: S3_BUCKET, Key: key });
+    return await getSignedUrl(s3, command, { expiresIn: 3600 });
+  } catch (err) {
+    console.warn('[toPlayableAudioUrl] presigned URL 발급 실패:', err.message);
+    return url; // 실패 시 원본 반환 (프론트 폴백)
+  }
+}
+
+/** 콘텐츠 배열의 audio_url을 일괄 재생 가능한 URL로 변환 */
+function signContents(contents) {
+  return Promise.all(
+    contents.map(async (c) =>
+      c && c.audio_url ? { ...c, audio_url: await toPlayableAudioUrl(c.audio_url) } : c
+    )
+  );
+}
 
 /**
  * 다중 Gemini API 키 목록 파싱
@@ -155,7 +200,9 @@ async function getAiContentsByTypes(spotId, contentTypes = ['place', 'history', 
       [spotId, contentType]
     );
 
-    if (cached.length && cached[0].audio_url) {
+            // 캐시 판정: audio_url이 "실제 재생 가능한" 경우에만 재사용한다.
+    //   → example.com 더미나 빈 값은 캐시로 오인하지 않고 실제 TTS를 다시 생성한다.
+    if (cached.length && isValidAudioUrl(cached[0].audio_url)) {
       contents.push(cached[0]);
       continue;
     }
@@ -255,10 +302,12 @@ ${barrierFreeTip ? '4. 해설 끝부분에 보행 환경 편의 정보(경사로
       [spotId, contentType, script, audioUrl]
     );
 
-    contents.push(saved);
+            contents.push(saved);
   }
 
-  return { spot_id: spotId, contents };
+  // 응답 직전: 자체 S3(private) mp3 → presigned URL 로 변환해 앱이 바로 재생할 수 있게 한다.
+  const playableContents = await signContents(contents);
+  return { spot_id: spotId, contents: playableContents };
 }
 
 /**
