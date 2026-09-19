@@ -729,6 +729,7 @@ exports.getSpots = async (query) => {
         y: Number(s.y),
         recommend_pct: s.recommend_pct == null ? null : Number(s.recommend_pct),
         tags: s.tags || [],
+        top_tags: s.tags || [],
     }));
 
     const total = Number(countResult.rows[0]?.total || 0);
@@ -1104,6 +1105,8 @@ exports.searchSpots = async (query) => {
     const savedSpots = savedSpotsResult.rows.map(s => ({
         ...s, x: Number(s.x), y: Number(s.y),
         recommend_pct: s.recommend_pct == null ? null : Number(s.recommend_pct),
+        tags: s.tags || [],
+        top_tags: s.tags || [],
         is_saved: true, has_app_data: true, filter_match: 'matched', result_group: 'saved_spot',
     }));
 
