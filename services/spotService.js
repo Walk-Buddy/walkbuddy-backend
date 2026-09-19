@@ -301,13 +301,65 @@ function extractTourTags({ overview, barrierFreeInfo, petTourInfo }) {
     return Array.from(tags);
 }
 
+// ──────────────────────────────────────────────────────────
+// 자동 태깅용 "시스템 태깅 계정" 보장
+//   taggings.user_id 는 NOT NULL + FK(users) 이므로 자동 태깅은 반드시
+//   실제 user_id 가 필요하다. 관리자 계정이 있으면 그 계정을, 없으면
+//   'system-tagger' 시드 계정을 1회 생성·재사용한다.
+// ──────────────────────────────────────────────────────────
+let cachedSystemTaggerId = null;
+
+async function ensureSystemTaggerId() {
+    if (cachedSystemTaggerId) return cachedSystemTaggerId;
+
+    // 1. 활성 관리자 우선
+    const { rows: admins } = await pool.query(
+        `SELECT user_id FROM users
+         WHERE role = 'admin' AND status = 'active'
+         ORDER BY created_at LIMIT 1`
+    );
+    if (admins.length) {
+        cachedSystemTaggerId = admins[0].user_id;
+        return cachedSystemTaggerId;
+    }
+
+    // 2. 기존 시스템 태거 계정 재사용
+    const { rows: seedUsers } = await pool.query(
+        `SELECT user_id FROM users
+         WHERE social_provider = 'seed' AND social_id = 'system-tagger'
+         LIMIT 1`
+    );
+    if (seedUsers.length) {
+        cachedSystemTaggerId = seedUsers[0].user_id;
+        return cachedSystemTaggerId;
+    }
+
+    // 3. 없으면 생성 (관리자 계정과 동일한 시드 방식)
+    const { rows: created } = await pool.query(
+        `INSERT INTO users (nickname, social_provider, social_id, role, status)
+         VALUES ('자동태깅', 'seed', 'system-tagger', 'admin', 'active')
+         RETURNING user_id`
+    );
+
+    cachedSystemTaggerId = created[0].user_id;
+    return cachedSystemTaggerId;
+}
+
 // 스팟에 세부 태그 일괄 자동 부착
 async function attachTagsToSpot(spotId, tagNames, userId) {
     if (!spotId || !Array.isArray(tagNames) || tagNames.length === 0) return;
     const cleanNames = tagNames.map(t => String(t).trim().replace(/^#/, '')).filter(Boolean);
     if (cleanNames.length === 0) return;
 
-    try {
+        try {
+        // 0. 실제 taggings.user_id 확보 (자동 태깅은 시스템 계정으로 귀속)
+        //    → 기존 userId || null 은 NOT NULL/FK 위반으로 조용히 실패하던 버그
+        const taggerId = userId || await ensureSystemTaggerId();
+        if (!taggerId) {
+            console.error('attachTagsToSpot skipped: no valid user_id for tagging');
+            return;
+        }
+
         // 1. 기존 태그 확인
         const { rows: existingTags } = await pool.query(
             `SELECT tag_id, name FROM tags WHERE name = ANY($1::TEXT[]) AND type = 'spot'`,
@@ -336,7 +388,7 @@ async function attachTagsToSpot(spotId, tagNames, userId) {
                 `INSERT INTO taggings (tag_id, target_id, target_type, user_id)
                  VALUES ($1, $2, 'spot', $3)
                  ON CONFLICT DO NOTHING`,
-                [tag.tag_id, spotId, userId || null]
+                [tag.tag_id, spotId, taggerId]
             );
         }
     } catch (err) {

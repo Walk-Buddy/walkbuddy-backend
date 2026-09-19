@@ -619,6 +619,7 @@ exports.getCourses = async (query, currentUserId) => {
 
   const isCycle = query.is_cycle;
   const isPublic = query.is_public;
+  const courseType = readQueryValue(query.course_type, query.courseType);
 
   const page = parseIntegerParam(query.page, 'page', { defaultValue: 1, min: 1, max: 10000 });
   const limit = parseIntegerParam(query.limit, 'limit', { defaultValue: 20, min: 1, max: 100 });
@@ -735,6 +736,13 @@ exports.getCourses = async (query, currentUserId) => {
   if (minAvgRating !== null) {
     params.push(minAvgRating);
     conditions.push(`rs.avg_rating >= $${params.length}`);
+  }
+
+  // 산책로 종류 필터 (user: 사용자 산책로, official: 공식 코스)
+  if (courseType === 'user') {
+    conditions.push(`(c.data_source IS NULL AND (u.role != 'admin' OR u.role IS NULL))`);
+  } else if (courseType === 'official') {
+    conditions.push(`(c.data_source IS NOT NULL OR u.role = 'admin')`);
   }
 
   // 코스 태그 ID 필터
@@ -877,6 +885,8 @@ exports.getCourses = async (query, currentUserId) => {
 
   const fromSql = `
     FROM courses c
+    LEFT JOIN users u
+      ON u.user_id = c.owner_id
     LEFT JOIN review_stats rs
       ON rs.course_id = c.course_id
     LEFT JOIN course_tag_agg ct
@@ -904,7 +914,11 @@ exports.getCourses = async (query, currentUserId) => {
       c.is_cycle,
       c.difficulty_level,
       c.is_public,
+      c.data_source,
       c.created_at,
+      u.nickname AS creator_name,
+      u.role AS owner_role,
+      (c.data_source IS NOT NULL OR u.role = 'admin') AS is_official,
       ST_Y(ST_StartPoint(c.route_geometry::geometry)) AS start_lat,
       ST_X(ST_StartPoint(c.route_geometry::geometry)) AS start_lng,
       rs.avg_rating,
@@ -936,6 +950,9 @@ exports.getCourses = async (query, currentUserId) => {
 
       return {
         ...course,
+        is_official: Boolean(course.is_official),
+        data_source: course.data_source || null,
+        creator_name: course.creator_name || (course.is_official ? '한국관광공사' : null),
         is_cycle: Boolean(course.is_cycle),
         difficulty_level: Number(course.difficulty_level || 1),
         start_location: course.start_lat && course.start_lng ? { lat: Number(course.start_lat), lng: Number(course.start_lng) } : null,
@@ -1028,6 +1045,8 @@ exports.getCourseById = async (courseId, userId) => {
          c.region, c.sub_region,
          c.total_distance, c.estimated_duration,
          c.is_public, c.owner_id, c.data_source, c.created_at, c.updated_at,
+         u.nickname AS creator_name, u.role AS owner_role,
+         (c.data_source IS NOT NULL OR u.role = 'admin') AS is_official,
          ST_AsGeoJSON(c.route_geometry)::json AS route,
          ROUND(AVG(cr.rating)::numeric, 1)        AS avg_rating,
          ROUND(AVG(CASE cr.difficulty
@@ -1036,10 +1055,12 @@ exports.getCourseById = async (courseId, userId) => {
            WHEN 'hard'   THEN 3 END)::numeric, 1) AS avg_difficulty,
          COUNT(DISTINCT cr.course_review_id)       AS review_count
        FROM courses c
+       LEFT JOIN users u
+         ON u.user_id = c.owner_id
        LEFT JOIN course_reviews cr
          ON cr.course_id = c.course_id AND cr.status = 'active'
        WHERE c.course_id = $1 AND c.status != 'deleted'
-       GROUP BY c.course_id`,
+       GROUP BY c.course_id, u.nickname, u.role`,
       [courseId]
     );
 
@@ -1125,6 +1146,8 @@ exports.getCourseById = async (courseId, userId) => {
 
     return {
       ...course,
+      is_official: Boolean(course.is_official),
+      creator_name: course.creator_name || (course.is_official ? '한국관광공사' : null),
       ...buildCourseDetailDescription(course),
       waypoints: spots,
       spots,
