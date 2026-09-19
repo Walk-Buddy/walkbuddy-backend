@@ -19,9 +19,21 @@ jobs:
           username: ${{ secrets.CONTEST_SERVER_USER }}
           key: ${{ secrets.CONTEST_SERVER_SSH_KEY }}
           port: ${{ secrets.CONTEST_SERVER_PORT || 22 }}
+          # 비로그인 셸에서도 nvm으로 설치한 node/npm/pm2를 찾을 수 있도록 PATH를 보강한다.
+          envs: PATH
+          script_stop: true
           script: |
+            set -e
+
+            # 0. node/npm/pm2 PATH 보강 (nvm 등)
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+            export PATH="$PATH:$HOME/.nvm/versions/node/$(ls "$HOME/.nvm/versions/node" 2>/dev/null | sort -V | tail -1)/bin"
+            export PATH="$PATH:/usr/local/bin:/usr/bin:$HOME/.local/bin"
+
             echo "🚀 [Start] Deploying latest code on contest server..."
-            
+            echo "🔧 node=$(command -v node || echo none) npm=$(command -v npm || echo none) pm2=$(command -v pm2 || echo none)"
+
             # 1. 서버 내 프로젝트 폴더로 이동
             TARGET_DIR="${{ secrets.CONTEST_SERVER_PATH }}"
             if [ -n "$TARGET_DIR" ]; then
@@ -29,22 +41,34 @@ jobs:
             else
               cd ~/swu-backend-contest || cd ~/swu-backend || cd ~/walkbuddy-backend || { echo "❌ Project directory not found!"; exit 1; }
             fi
-            
+
             echo "📁 Working directory: $(pwd)"
-            
+            AFTER="$(git rev-parse --short HEAD)"
+
             # 2. 최신 코드 pull
             git checkout contest
             git pull origin contest
-            
-            # 3. 신규 패키지 있을 경우 설치
-            npm install
-            
-            # 4. PM2 무중단 재시작 (PM2가 등록된 앱 재시작)
+            AFTER="$(git rev-parse --short HEAD)"
+            echo "✅ Code updated to $AFTER"
+
+            # 3. 신규 패키지 설치 (있으면)
+            if command -v npm &> /dev/null; then
+              npm install --omit=dev || npm install
+            else
+              echo "⚠️ npm not found, skipping install"
+            fi
+
+            # 4. PM2 재시작 (PATH 보강 후)
             if command -v pm2 &> /dev/null; then
               pm2 reload all || pm2 restart all
               echo "✅ PM2 reload completed"
             else
               echo "⚠️ PM2 not found, please check server process manager"
             fi
-            
+
+            # 5. 배포 검증
+            echo "🔎 Verifying local git commit: $(git rev-parse --short HEAD)"
+            sleep 2
+            curl -fsS "http://127.0.0.1:${PORT:-4000}/health" || echo "⚠️ /health check failed"
+
             echo "🎉 [Finish] Deployment finished successfully!"
