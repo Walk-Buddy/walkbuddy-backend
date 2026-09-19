@@ -194,35 +194,24 @@ async function main() {
 
     // 소스 1: TourAPI 키워드 검색
     let result = await findByKeyword(spot);
-    if (result && result.error) {
-      console.log(`ERR ${result.error}`);
-      errored++;
-      await sleep(SLEEP_MS);
-      continue;
-    }
+    if (result && result.error) result = null;
+
     // 소스 2: TourAPI 좌표 주변 검색
-    if (!result) result = await findByLocation(spot);
-    if (result && result.error) {
-      console.log(`ERR ${result.error}`);
-      errored++;
-      await sleep(SLEEP_MS);
-      continue;
+    if (!result) {
+      result = await findByLocation(spot);
+      if (result && result.error) result = null;
     }
+
     // 소스 3: 한국관광공사 관광사진갤러리(PhotoGalleryService1) 검색
-    if (!result) result = await findByPhotoGallery(spot);
-    if (result && result.error) {
-      console.log(`ERR ${result.error}`);
-      errored++;
-      await sleep(SLEEP_MS);
-      continue;
+    if (!result) {
+      result = await findByPhotoGallery(spot);
+      if (result && result.error) result = null;
     }
+
     // 소스 4: 카카오 이미지 검색 API (최종 폴백)
-    if (!result) result = await findByKakaoImage(spot);
-    if (result && result.error) {
-      console.log(`ERR ${result.error}`);
-      errored++;
-      await sleep(SLEEP_MS);
-      continue;
+    if (!result) {
+      result = await findByKakaoImage(spot);
+      if (result && result.error) result = null;
     }
 
     if (!result || !result.url) {
