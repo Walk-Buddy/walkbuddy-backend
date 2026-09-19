@@ -449,12 +449,15 @@ async function enrichKakaoSpotTourContent(spot, userId) {
             return { spot, ...result };
         }
 
-        const contentId = String(matched.contentid);
+                const contentId = String(matched.contentid);
         result.tour_content_match = {
             content_id: contentId,
             title: matched.title,
             distance: matched.dist == null ? null : Number(matched.dist),
         };
+
+        // 관광공사 대표 이미지(firstimage) — 장소 목록 카드 노출용
+        const tourFirstImage = matched.firstimage || matched.firstimage2 || null;
 
         // 1. 한국관광공사 전방위 API(개요, 무장애, 반려동물) 병렬 조회
         const [overviewResult, barrierFreeResult, petTourResult] = await Promise.allSettled([
@@ -483,8 +486,14 @@ async function enrichKakaoSpotTourContent(spot, userId) {
             result.barrier_free_enriched = true;
         }
 
-        if (petTourInfo?.has_pet_info) {
+                if (petTourInfo?.has_pet_info) {
             result.pet_tour_enriched = true;
+        }
+
+        // 관광공사 대표 이미지 저장 (아직 없을 때만)
+        if (tourFirstImage && !spot.first_image) {
+            updateParams.push(tourFirstImage);
+            updateClauses.push(`first_image = $${updateParams.length}`);
         }
 
         let updatedSpot = spot;
@@ -494,7 +503,7 @@ async function enrichKakaoSpotTourContent(spot, userId) {
                  SET ${updateClauses.join(', ')}
                  WHERE spot_id = $1
                  RETURNING spot_id, kakao_place_id, name, address, categories, kakao_category_name,
-                           recommend_pct, content_tour, barrier_free_info,
+                           recommend_pct, content_tour, barrier_free_info, first_image,
                            ST_X(location::GEOMETRY) AS x,
                            ST_Y(location::GEOMETRY) AS y`,
                 updateParams
@@ -678,10 +687,22 @@ exports.getSpots = async (query) => {
     queryValues.push(Number(limit)); const limitIdx = queryValues.length;
     queryValues.push(offset);        const offsetIdx = queryValues.length;
 
-    const spotsResult = await pool.query(
+        const spotsResult = await pool.query(
         `SELECT
             s.spot_id, s.name, s.address, s.categories, s.region, s.sub_region, s.recommend_pct,
             s.barrier_free_info, s.is_night_tour,
+            s.first_image,
+            -- 후기 사진 폴백: 이 장소의 후기 중 사진이 있는 가장 최근 후기의 첫 사진 key
+            (
+                SELECT sr.photos[1]
+                FROM spot_reviews sr
+                WHERE sr.spot_id = s.spot_id
+                  AND sr.status = 'active'
+                  AND sr.photos IS NOT NULL
+                  AND array_length(sr.photos, 1) > 0
+                ORDER BY sr.created_at DESC
+                LIMIT 1
+            ) AS review_photo_url,
             ST_X(s.location::GEOMETRY) AS x,
             ST_Y(s.location::GEOMETRY) AS y,
             s.content_place IS NOT NULL AS has_content_place,
@@ -731,8 +752,9 @@ exports.getSpotById = async (spotId) => {
         `SELECT
             s.spot_id, s.name, s.address, s.categories, s.kakao_category_name,
             s.region, s.sub_region,
-            s.recommend_pct, s.source, s.content_place, s.content_history, s.content_tour,
+                        s.recommend_pct, s.source, s.content_place, s.content_history, s.content_tour,
             s.barrier_free_info, s.is_night_tour,
+            s.first_image,
             ST_X(s.location::GEOMETRY) AS x,
             ST_Y(s.location::GEOMETRY) AS y,
             COALESCE(
@@ -1052,10 +1074,22 @@ exports.searchSpots = async (query) => {
         whereConditions.push(`s.recommend_pct >= $${queryValues.length}`);
     }
 
-    const savedSpotsResult = await pool.query(
+        const savedSpotsResult = await pool.query(
         `SELECT s.spot_id, s.kakao_place_id, s.name, s.address, s.categories, s.kakao_category_name,
                 s.region, s.sub_region,
                 s.recommend_pct,
+                s.first_image,
+                -- 후기 사진 폴백: 사진이 있는 가장 최근 후기의 첫 사진 key
+                (
+                    SELECT sr.photos[1]
+                    FROM spot_reviews sr
+                    WHERE sr.spot_id = s.spot_id
+                      AND sr.status = 'active'
+                      AND sr.photos IS NOT NULL
+                      AND array_length(sr.photos, 1) > 0
+                    ORDER BY sr.created_at DESC
+                    LIMIT 1
+                ) AS review_photo_url,
                 ST_X(s.location::GEOMETRY) AS x, ST_Y(s.location::GEOMETRY) AS y,
                 COALESCE(json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
                 FILTER (WHERE t.tag_id IS NOT NULL), '[]') AS tags
