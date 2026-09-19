@@ -2652,17 +2652,14 @@ const swaggerDefinition = {
     '/api/tour/spots': {
       get: {
         tags: ['관광공사 TourAPI (실시간)'],
-        summary: '실시간 지역/테마/위치별 관광지 목록 조회',
-        description: '한국관광공사 TourAPI areaBasedList2 및 locationBasedList2 오퍼레이션을 실시간 호출하여 인기순/거리순 관광지 목록을 조회합니다. 위치 반경, 카테고리, 태그, 추천도 필터를 적용할 수 있습니다.',
+        summary: '실시간 지역/테마별 관광지 목록 조회',
+        description: '한국관광공사 TourAPI areaBasedList2 오퍼레이션을 실시간 호출하여 지역/테마/카테고리/태그/추천도 기준으로 관광지 목록을 조회합니다. [LBS 사업자 미신고] 이용자의 실시간 위치(GPS) 좌표는 서버로 전송하지 않으며, 거리·반경 계산은 앱(온디바이스)에서만 수행합니다.',
         parameters: [
           { name: 'region', in: 'query', schema: { type: 'string', default: 'chuncheon' }, description: '지역명 (춘천, 서울, 노원구, 강남구 등)' },
           { name: 'sub_region', in: 'query', schema: { type: 'string' }, description: '세부 권역 또는 자치구명' },
           { name: 'category', in: 'query', schema: { type: 'string' }, description: '장소 유형 필터 (예: 카페, 음식점, 공원·광장, 산·등산로, 전시·문화공간 등)' },
           { name: 'tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표 구분 태그 UUID 목록' },
           { name: 'min_recommend_pct', in: 'query', schema: { type: 'integer', minimum: 0, maximum: 100 }, description: '최소 추천도 (0–100)' },
-          { name: 'latitude', in: 'query', schema: { type: 'number' }, description: '사용자 위치 위도 (반경 검색 시)' },
-          { name: 'longitude', in: 'query', schema: { type: 'number' }, description: '사용자 위치 경도 (반경 검색 시)' },
-          { name: 'radius', in: 'query', schema: { type: 'number', default: 3000 }, description: '검색 반경 (미터 단위, 기본 3000m, 최대 20000m)' },
           { name: 'contentTypeId', in: 'query', schema: { type: 'string', enum: ['12', '14', '15', '25', '28', '32', '38', '39'] }, description: '관광타입 (12:관광지, 14:문화시설, 15:축제, 28:레포츠, 38:쇼핑, 39:음식점)' },
           { name: 'cat1', in: 'query', schema: { type: 'string' }, description: '대분류 (A01:자연, A02:인문, A03:레포츠, A04:쇼핑, A05:음식)' },
           { name: 'cat2', in: 'query', schema: { type: 'string' }, description: '중분류 (A0101, A0201, A0206 등)' },

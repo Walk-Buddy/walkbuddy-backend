@@ -548,7 +548,13 @@ function mapCategoryToTourParams(category) {
 }
 
 /**
- * 4. 실시간 지역/테마/위치별 관광 스팟 목록 조회 (areaBasedList2 / locationBasedList2)
+ * 4. 실시간 지역/테마별 관광 스팟 목록 조회 (areaBasedList2 / locationBasedList2)
+ *
+ * [LBS 사업자 미신고 안전]
+ *  - latitude / longitude / radius 는 "이용자의 실시간 단말기 GPS"가 아니라,
+ *    서버 내부 스크립트가 특정 스팟 자체 좌표 주변을 조회할 때만 쓰는 내부 전용 인자다.
+ *  - 외부 HTTP 진입점(controllers/tourController.js#getTourSpots)에서는 화이트리스트로
+ *    차단되어 이용자 좌표가 서버로 유입될 수 없다.
  */
 exports.getTourSpots = async ({
   region,
