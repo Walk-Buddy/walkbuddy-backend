@@ -5,6 +5,11 @@ on:
     branches:
       - contest
   workflow_dispatch: # GitHub 웹 화면에서 수동으로도 'Run workflow'를 누를 수 있게 지원
+    inputs:
+      backfill_first_image:
+        description: '스팟 대표사진(first_image) 백필까지 실행'
+        type: boolean
+        default: false
 
 jobs:
   deploy:
@@ -72,3 +77,43 @@ jobs:
             curl -fsS "http://127.0.0.1:${PORT:-4000}/health" || echo "⚠️ /health check failed"
 
             echo "🎉 [Finish] Deployment finished successfully!"
+
+  # ───────────────────────────────────────────────────────────────
+  # 스팟 대표사진(first_image) 백필 — GitHub 웹 수동 실행 전용
+  #   Actions 탭 → "Deploy Contest Server" → Run workflow
+  #               → backfill_first_image 체크 후 실행
+  # ───────────────────────────────────────────────────────────────
+  backfill-first-image:
+    name: Backfill Spot first_image (manual)
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.backfill_first_image }}
+
+    steps:
+      - name: SSH to Contest Server and run backfill script
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.CONTEST_SERVER_HOST }}
+          username: ${{ secrets.CONTEST_SERVER_USER }}
+          key: ${{ secrets.CONTEST_SERVER_SSH_KEY }}
+          port: ${{ secrets.CONTEST_SERVER_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -e
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+            export PATH="$PATH:$HOME/.nvm/versions/node/$(ls "$HOME/.nvm/versions/node" 2>/dev/null | sort -V | tail -1)/bin"
+            export PATH="$PATH:/usr/local/bin:/usr/bin:$HOME/.local/bin"
+
+            TARGET_DIR="${{ secrets.CONTEST_SERVER_PATH }}"
+            if [ -n "$TARGET_DIR" ]; then
+              eval cd "$TARGET_DIR"
+            else
+              cd ~/swu-backend-contest || cd ~/swu-backend || cd ~/walkbuddy-backend
+            fi
+
+            echo "📁 Working directory: $(pwd)"
+            echo "🖼️  스팟 대표사진(first_image) 백필 시작..."
+            # TourAPI 429(트래픽 초과)를 피하기 위해 요청 간 대기(sleep)를 넉넉히 준다.
+            node scripts/backfill-spot-first-image.js --sleep 500
+            echo "🎉 first_image 백필 완료"

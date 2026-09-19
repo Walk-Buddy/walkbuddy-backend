@@ -71,11 +71,12 @@ exports.getSpotPhotos = async (req, res, next) => {
             return res.status(404).json({ success: false, message: '스팟을 찾을 수 없습니다.' });
         }
 
-        // DB에서 스팟 이름과 tour_api_content_id 조회
-        // tour_api_content_id는 spots 테이블 컬럼이 없어서 content_tour로 연결된 경우를 고려,
-        // 현재는 이름만 사용해 galleryList1 fallback으로 처리
+                // DB에서 스팟 이름(first_image 포함) 조회
+        //  - spots 테이블에는 tour_api_content_id 컬럼이 없다.
+        //  - 대표사진(first_image)이 백필되어 있으면 그 사진을 최우선 반환한다(가장 정확).
+        //  - 없으면 이름 → TourAPI 키워드검색 → contentId → detailImage2 순으로 시도한다.
         const { rows } = await pool.query(
-            `SELECT name FROM spots WHERE spot_id = $1 AND status = 'active'`,
+            `SELECT name, first_image FROM spots WHERE spot_id = $1 AND status = 'active'`,
             [spot_id]
         );
 
@@ -83,10 +84,45 @@ exports.getSpotPhotos = async (req, res, next) => {
             return res.status(404).json({ success: false, message: '스팟을 찾을 수 없습니다.' });
         }
 
-        const { name } = rows[0];
+        const { name, first_image } = rows[0];
 
-        // content_id는 DB 컬럼이 없어 null → getSpotPhotos 내부에서 galleryList1 fallback 실행
-        const result = await tourApiService.getSpotPhotos(null, name);
+        // 1순위: DB에 저장된 대표사진(first_image)
+        if (first_image) {
+            return res.json({
+                success: true,
+                spot_id,
+                spot_name: name,
+                source: "db.first_image",
+                photos: [{ thumbnail: first_image, original: first_image, title: name }],
+            });
+        }
+
+        // 2순위: 이름으로 TourAPI 관광지 키워드 검색 → contentId 확보
+        //        (galleryList1 키워드 사진검색은 스팟명이 정확히 일치해야 해서 대부분 비어 있음)
+        let contentId = null;
+        try {
+            const candidates = await tourApiService.searchTourPlaces({ keyword: name, limit: 5 });
+            const list = candidates.spots || [];
+            const exact = list.find(
+                (s) => s.title && (s.title === name || s.title.includes(name) || name.includes(s.title))
+            );
+            contentId = (exact || list[0])?.content_id || null;
+        } catch (e) {
+            // 키워드 검색 실패는 치명적이지 않으므로 무시하고 다음 폴백으로 진행
+            console.warn('[getSpotPhotos] 키워드 검색 실패:', e.message);
+        }
+
+        // 3순위: contentId가 있으면 detailImage2, 없으면 내부에서 galleryList1 fallback
+        const result = await tourApiService.getSpotPhotos(contentId, name);
+
+        // 대표사진이 비어 있던 스팟이면 확보한 결과를 first_image로 백필(다음 목록 노출 개선)
+        const firstPhoto = result?.photos?.[0];
+        if (firstPhoto?.original) {
+            pool.query(
+                `UPDATE spots SET first_image = $2 WHERE spot_id = $1 AND first_image IS NULL`,
+                [spot_id, firstPhoto.original]
+            ).catch(() => {});
+        }
 
         return res.json({ success: true, spot_id, spot_name: name, ...result });
     } catch (err) { next(err); }
