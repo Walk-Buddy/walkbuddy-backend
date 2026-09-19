@@ -4,7 +4,72 @@ const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const axios = require('axios');
 const odiiService = require('./odiiService');
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+/**
+ * 다중 Gemini API 키 목록 파싱
+ * - GEMINI_API_KEY (단일 또는 콤마로 여러 개 지원)
+ * - GEMINI_API_KEY_2 (예비 키)
+ * - GEMINI_API_KEYS (콤마 구분 다중 키 목록)
+ */
+function getGeminiApiKeys() {
+  const rawKeys = [];
+  if (process.env.GEMINI_API_KEY) {
+    rawKeys.push(...process.env.GEMINI_API_KEY.split(','));
+  }
+  if (process.env.GEMINI_API_KEY_2) {
+    rawKeys.push(process.env.GEMINI_API_KEY_2);
+  }
+  if (process.env.GEMINI_API_KEYS) {
+    rawKeys.push(...process.env.GEMINI_API_KEYS.split(','));
+  }
+
+  const cleanKeys = rawKeys
+    .map((k) => k && k.trim())
+    .filter((k) => Boolean(k) && !k.startsWith('//') && !k.startsWith('#'));
+
+  return [...new Set(cleanKeys)];
+}
+
+/**
+ * 다중 키를 활용한 Gemini 대본 생성
+ * 429(Rate Limit / Quota Exceeded) 또는 호출 실패 시 예비 키로 즉시 자동 전환
+ */
+async function generateContentWithFallback(prompt, modelName = 'gemini-2.5-flash') {
+  const keys = getGeminiApiKeys();
+  if (keys.length === 0) {
+    throw new Error('GEMINI_API_KEY가 설정되지 않았습니다.');
+  }
+
+  let lastError = null;
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const keyLabel = `Gemini 키 #${i + 1}(...${key.slice(-4)})`;
+    try {
+      const client = new GoogleGenerativeAI(key);
+      const model = client.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent(prompt);
+      return result.response.text().trim();
+    } catch (err) {
+      lastError = err;
+      const isQuotaOrRateLimit =
+        err.status === 429 ||
+        err.message?.includes('429') ||
+        err.message?.includes('RESOURCE_EXHAUSTED') ||
+        err.message?.includes('quota') ||
+        err.message?.includes('rate limit');
+
+      if (i < keys.length - 1) {
+        if (isQuotaOrRateLimit) {
+          console.warn(`⚠️ [Gemini] ${keyLabel} 할당량 초과(429). 예비 키 #${i + 2}로 자동 전환하여 재시도합니다.`);
+        } else {
+          console.warn(`⚠️ [Gemini] ${keyLabel} 호출 실패 (${err.message}). 예비 키 #${i + 2}로 재시도합니다.`);
+        }
+        continue;
+      }
+    }
+  }
+
+  throw lastError;
+}
 
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
@@ -179,9 +244,7 @@ ${barrierFreeTip ? '4. 해설 끝부분에 보행 환경 편의 정보(경사로
 5. 문장은 완전한 마침표로 맺어주세요.
     `.trim();
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-    const result = await model.generateContent(prompt);
-    const script = result.response.text().trim();
+    const script = await generateContentWithFallback(prompt, 'gemini-2.5-flash');
 
     // Google Neural2 TTS로 mp3 생성
     const audioBuffer = await generateTTS(script);

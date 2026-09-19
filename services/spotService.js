@@ -8,8 +8,6 @@ const {
     inferRegionFromLocation,
     resolveRegion,
 } = require('../constants/spotCategoryRules');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const tourApiService = require('./tourApiService');
 const odiiService = require('./odiiService');
 const trafficLog = require('./tourTrafficLog');
