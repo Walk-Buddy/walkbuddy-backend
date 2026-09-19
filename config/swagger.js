@@ -1637,11 +1637,51 @@ const swaggerDefinition = {
       get: {
         tags: ['산책 진행'],
         summary: '산책 기록 상세 조회',
-        parameters: [{ name: 'walk_record_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        description: '특정 산책 기록의 상세 정보를 조회합니다. 연동된 코스 정보, 이동 거리, 소요 시간, 완주 여부, 지도 이미지 URL, 시작/종료 일시가 포함됩니다.',
+        parameters: [{ name: 'walk_record_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: '산책 기록 ID' }],
         responses: {
           200: {
-            description: '산책 기록 상세',
-            content: { 'application/json': { schema: { type: 'object', properties: { walk_record_id: { type: 'string', format: 'uuid' }, course: { type: 'object' }, total_distance: { type: 'integer' }, duration: { type: 'integer' }, is_completed: { type: 'boolean' }, map_image_url: { type: 'string', nullable: true } } } } },
+            description: '산책 기록 상세 조회 성공',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    walk_record_id: { type: 'string', format: 'uuid', example: 'd3b07384-d113-460d-9597-88d447a16f27' },
+                    total_distance: { type: 'integer', description: '총 이동 거리 (미터)', example: 2800 },
+                    duration: { type: 'integer', description: '총 소요 시간 (초 또는 분)', example: 1500 },
+                    is_completed: { type: 'boolean', description: '완주 여부', example: true },
+                    map_image_url: { type: 'string', nullable: true, description: '경로 지도 이미지 URL', example: 'https://walkbuddy-uploads.s3.ap-northeast-2.amazonaws.com/walk-map-123.png' },
+                    started_at: { type: 'string', format: 'date-time', description: '산책 시작 일시', example: '2026-09-19T09:00:00.000Z' },
+                    ended_at: { type: 'string', format: 'date-time', nullable: true, description: '산책 종료 일시', example: '2026-09-19T09:45:00.000Z' },
+                    course: {
+                      type: 'object',
+                      description: '연동된 코스 정보 (자유 산책일 경우 각 필드가 null일 수 있음)',
+                      properties: {
+                        course_id: { type: 'string', format: 'uuid', nullable: true, example: 'b1a2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d' },
+                        name: { type: 'string', nullable: true, example: '경춘선 숲길 산책로' },
+                        total_distance: { type: 'integer', nullable: true, example: 3500 },
+                        estimated_duration: { type: 'integer', nullable: true, example: 50 },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { description: '인증 실패 (토큰 누락 또는 유효하지 않음)' },
+          404: {
+            description: '산책 기록을 찾을 수 없음',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    message: { type: 'string', example: '산책 기록을 찾을 수 없습니다.' },
+                  },
+                },
+              },
+            },
           },
         },
       },
