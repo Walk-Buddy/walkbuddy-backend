@@ -1,11 +1,5 @@
 const pool = require('../config/db');
 
-// gps_points: [{ lat, lng }, ...] → WKT LINESTRING
-const buildLineString = (gps_points) => {
-  const points = gps_points.map((p) => `${p.lng} ${p.lat}`);
-  return `SRID=4326;LINESTRING(${points.join(', ')})`;
-};
-
 // ──────────────────────────────────────────────────────────────────────
 // 산책 시작
 // ──────────────────────────────────────────────────────────────────────
@@ -22,9 +16,9 @@ exports.startWalk = async (userId, courseId) => {
 // ──────────────────────────────────────────────────────────────────────
 // 산책 종료
 // ──────────────────────────────────────────────────────────────────────
-exports.endWalk = async (userId, walkRecordId, gps_points) => {
+exports.endWalk = async (userId, walkRecordId, stats = {}) => {
   const { rows } = await pool.query(
-    `SELECT walk_record_id, course_id FROM walk_records
+    `SELECT walk_record_id, course_id, started_at FROM walk_records
      WHERE walk_record_id = $1 AND user_id = $2 AND ended_at IS NULL`,
     [walkRecordId, userId]
   );
@@ -34,30 +28,25 @@ exports.endWalk = async (userId, walkRecordId, gps_points) => {
     throw err;
   }
 
-  const wkt = buildLineString(gps_points);
+  const { total_distance, duration, is_completed, map_image_url } = stats;
 
-  // 완주 여부: 실제 이동거리가 코스 총거리의 95% 이상
   const { rows: [updated] } = await pool.query(
-  `UPDATE walk_records
-   SET actual_route   = $1::geography,
-       ended_at       = NOW(),
-       total_distance = ROUND(ST_Length($1::geography))::int,
-       duration       = ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60)::int,
-       is_completed   = CASE
-         WHEN walk_records.course_id IS NULL THEN true  -- 자유 산책: 종료 = 완료
-         ELSE COALESCE(
-           (
-             SELECT ROUND(ST_Length($1::geography)) >= c.total_distance * 0.95
-             FROM courses c
-             WHERE c.course_id = walk_records.course_id
-           ),
-           false
-         )
-       END
-   WHERE walk_record_id = $2
-   RETURNING walk_record_id, total_distance, duration, is_completed, started_at, ended_at`,
-  [wkt, walkRecordId]
-);
+    `UPDATE walk_records
+     SET ended_at       = NOW(),
+         total_distance = COALESCE($1, total_distance, 0),
+         duration       = COALESCE($2, ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60)::int, 0),
+         is_completed   = COALESCE($3, true),
+         map_image_url  = COALESCE($4, map_image_url)
+     WHERE walk_record_id = $5
+     RETURNING walk_record_id, course_id, total_distance, duration, is_completed, map_image_url, started_at, ended_at`,
+    [
+      total_distance !== undefined ? Math.round(Number(total_distance)) : null,
+      duration !== undefined ? Math.round(Number(duration)) : null,
+      is_completed !== undefined ? Boolean(is_completed) : null,
+      map_image_url !== undefined ? map_image_url : null,
+      walkRecordId
+    ]
+  );
   return updated;
 };
 
@@ -73,6 +62,7 @@ exports.getWalkList = async (userId) => {
        wr.total_distance,
        wr.duration,
        wr.is_completed,
+       wr.map_image_url,
        wr.started_at,
        wr.ended_at,
        cr.course_review_id,
@@ -96,6 +86,7 @@ exports.getWalkList = async (userId) => {
     total_distance: r.total_distance,
     duration: r.duration,
     is_completed: r.is_completed,
+    map_image_url: r.map_image_url,
     started_at: r.started_at,
     ended_at: r.ended_at,
     needs_review: r.needs_review,
@@ -121,9 +112,9 @@ exports.getWalkDetail = async (userId, walkRecordId) => {
        wr.total_distance,
        wr.duration,
        wr.is_completed,
+       wr.map_image_url,
        wr.started_at,
        wr.ended_at,
-       ST_AsGeoJSON(wr.actual_route)::json AS actual_route,
        json_build_object(
          'course_id',          c.course_id,
          'name',               c.name,

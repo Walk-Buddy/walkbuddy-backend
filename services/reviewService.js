@@ -52,6 +52,11 @@ exports.createCourseReview = async (userId, courseId, body) => {
     return review;
   } catch (err) {
     await client.query('ROLLBACK');
+    if (err.code === '23505') {
+      const conflictErr = new Error('이미 후기가 등록된 산책 기록입니다.');
+      conflictErr.status = 409;
+      throw conflictErr;
+    }
     throw err;
   } finally {
     client.release();
@@ -90,8 +95,8 @@ exports.getCourseReviews = async (courseId, query, userId) => {
        cr.is_public, cr.created_at,
        json_build_object(
          'user_id',   u.user_id,
-         'nickname',  u.nickname,
-         'profile_image_url', u.profile_image_url
+         'nickname',  CASE WHEN u.status = 'deleted' THEN '(탈퇴한 사용자)' ELSE u.nickname END,
+         'profile_image_url', CASE WHEN u.status = 'deleted' THEN NULL ELSE u.profile_image_url END
        ) AS user,
        COALESCE(
          json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
@@ -214,6 +219,11 @@ exports.createSpotReview = async (userId, spotId, body, files = []) => {
     return { ...review, linked_course: linked || null };
   } catch (err) {
     await client.query('ROLLBACK');
+    if (err.code === '23505') {
+      const conflictErr = new Error('이미 해당 스팟에 후기가 등록된 산책 기록입니다.');
+      conflictErr.status = 409;
+      throw conflictErr;
+    }
     throw err;
   } finally {
     client.release();
@@ -252,8 +262,8 @@ exports.getSpotReviews = async (spotId, query, userId) => {
        sr.photos, sr.is_public, sr.created_at,
        json_build_object(
          'user_id',  u.user_id,
-         'nickname', u.nickname,
-         'profile_image_url', u.profile_image_url
+         'nickname', CASE WHEN u.status = 'deleted' THEN '(탈퇴한 사용자)' ELSE u.nickname END,
+         'profile_image_url', CASE WHEN u.status = 'deleted' THEN NULL ELSE u.profile_image_url END
        ) AS user,
        COALESCE(
          json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
@@ -275,7 +285,7 @@ exports.getSpotReviews = async (spotId, query, userId) => {
      LEFT JOIN reactions r_dislike ON r_dislike.target_id = sr.spot_review_id AND r_dislike.target_type = 'spot_review' AND r_dislike.reaction = 'dislike'
      LEFT JOIN reactions my_r ON my_r.target_id = sr.spot_review_id AND my_r.target_type = 'spot_review' AND my_r.user_id = ${myReactionParamIdx === 'NULL' ? 'NULL' : '$' + myReactionParamIdx}
      WHERE ${whereClause}
-     GROUP BY sr.spot_review_id, u.user_id
+     GROUP BY sr.spot_review_id, u.user_id, lc.course_id, lc.name
      ORDER BY sr.created_at DESC
      LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}`,
     listParams

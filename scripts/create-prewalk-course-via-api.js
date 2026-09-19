@@ -324,7 +324,7 @@ async function saveSpotIfNeeded(api, spot) {
 }
 
 async function findExistingCourse(api) {
-  const { data } = await api.get('/api/courses/search', {
+  const { data } = await api.get('/api/courses', {
     params: { keyword: COURSE_NAME, sort: 'latest', limit: 10 },
   });
 
@@ -357,13 +357,16 @@ async function getCourseRouteGpsPoints(courseId) {
   }));
 }
 
-async function createCompletedWalk(api, courseId, spots) {
+async function createCompletedWalk(api, courseId) {
   const startResponse = await api.post('/api/walks', { course_id: courseId });
   const walkRecordId = startResponse.data.walk_record_id;
-  const gpsPoints = (await getCourseRouteGpsPoints(courseId)) || buildGpsPoints(spots);
 
+  // GPS 궤적은 서버에 전송하지 않음 (온디바이스 처리)
+  // 산책 종료 시 통계 수치(거리, 시간)만 전송
   const endResponse = await api.patch(`/api/walks/${walkRecordId}/end`, {
-    gps_points: gpsPoints,
+    total_distance: 1500,
+    duration: 30,
+    is_completed: true,
   });
 
   console.log('completed walk:', endResponse.data);
@@ -803,7 +806,7 @@ async function createPrewalkReviews(api) {
 
   for (const activity of REVIEW_ACTIVITIES) {
     const activityApi = createApi(activity.userId);
-    const walkRecordId = await createCompletedWalk(activityApi, course.course_id, spots);
+    const walkRecordId = await createCompletedWalk(activityApi, course.course_id);
 
     const courseReview = await createCourseReview(
       activityApi,

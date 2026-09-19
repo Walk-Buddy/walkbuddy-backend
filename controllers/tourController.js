@@ -1,0 +1,93 @@
+const tourApiService = require("../services/tourApiService");
+
+exports.getFestivals = async (req, res, next) => {
+  try {
+    const result = await tourApiService.getFestivals(req.query);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.getSpotDetail = async (req, res, next) => {
+  try {
+    const result = await tourApiService.getSpotDetail(req.params.content_id);
+    return res.json({ success: true, spot: result });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.getBarrierFreeInfo = async (req, res, next) => {
+  try {
+    const result = await tourApiService.getBarrierFreeInfo(req.params.content_id);
+    return res.json({ success: true, barrier_free: result });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.getBarrierFreeSpots = async (req, res, next) => {
+  try {
+    const result = await tourApiService.getBarrierFreeSpots(req.query);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.searchBarrierFreePlaces = async (req, res, next) => {
+  try {
+    const result = await tourApiService.searchBarrierFreePlaces(req.query);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.getTourSpots = async (req, res, next) => {
+  try {
+    const result = await tourApiService.getTourSpots(req.query);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.searchTourPlaces = async (req, res, next) => {
+  try {
+    const result = await tourApiService.searchTourPlaces(req.query);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── 반려동물 동반여행 API 컨트롤러 ────────────────────────────────────
+
+exports.getPetTourDetail = async (req, res, next) => {
+  try {
+    const result = await tourApiService.getPetTourDetail(req.params.content_id);
+    return res.json({ success: true, pet_tour: result });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.getPetTourSpots = async (req, res, next) => {
+  try {
+    const result = await tourApiService.getPetTourSpots(req.query);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.searchPetTourPlaces = async (req, res, next) => {
+  try {
+    const result = await tourApiService.searchPetTourPlaces(req.query);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+};

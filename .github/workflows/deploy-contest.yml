@@ -1,0 +1,50 @@
+name: Deploy Contest Server
+
+on:
+  push:
+    branches:
+      - contest
+  workflow_dispatch: # GitHub 웹 화면에서 수동으로도 'Run workflow'를 누를 수 있게 지원
+
+jobs:
+  deploy:
+    name: Deploy to Contest Server
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SSH to Contest Server and Deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.CONTEST_SERVER_HOST }}
+          username: ${{ secrets.CONTEST_SERVER_USER }}
+          key: ${{ secrets.CONTEST_SERVER_SSH_KEY }}
+          port: ${{ secrets.CONTEST_SERVER_PORT || 22 }}
+          script: |
+            echo "🚀 [Start] Deploying latest code on contest server..."
+            
+            # 1. 서버 내 프로젝트 폴더로 이동
+            TARGET_DIR="${{ secrets.CONTEST_SERVER_PATH }}"
+            if [ -n "$TARGET_DIR" ]; then
+              eval cd "$TARGET_DIR" || { echo "❌ Directory $TARGET_DIR not found!"; exit 1; }
+            else
+              cd ~/swu-backend-contest || cd ~/swu-backend || cd ~/walkbuddy-backend || { echo "❌ Project directory not found!"; exit 1; }
+            fi
+            
+            echo "📁 Working directory: $(pwd)"
+            
+            # 2. 최신 코드 pull
+            git checkout contest
+            git pull origin contest
+            
+            # 3. 신규 패키지 있을 경우 설치
+            npm install
+            
+            # 4. PM2 무중단 재시작 (PM2가 등록된 앱 재시작)
+            if command -v pm2 &> /dev/null; then
+              pm2 reload all || pm2 restart all
+              echo "✅ PM2 reload completed"
+            else
+              echo "⚠️ PM2 not found, please check server process manager"
+            fi
+            
+            echo "🎉 [Finish] Deployment finished successfully!"

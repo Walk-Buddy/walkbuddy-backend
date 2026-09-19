@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { extractRegionFromAddress, inferRegionFromLocation } = require('../constants/spotCategoryRules');
 
 const WALK_SPEED_MPS = 1.1; // 도보 평균 4km/h
 const COURSE_NEARBY_SPOT_RADIUS = Number(process.env.COURSE_NEARBY_SPOT_RADIUS || 500);
@@ -24,6 +25,60 @@ const fetchSpotCoords = async (spotIds, client) => {
     throw err;
   }
   return map;
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 내부 헬퍼: waypoints 유효성 검증
+// ──────────────────────────────────────────────────────────────────────
+const validateWaypoints = (waypoints, { minLength = 2 } = {}) => {
+  if (!waypoints || !Array.isArray(waypoints) || waypoints.length < minLength) {
+    const err = new Error(`코스를 생성하려면 waypoints(경유지 목록, 최소 ${minLength}개)가 필요합니다.`);
+    err.status = 400;
+    throw err;
+  }
+  for (const [i, w] of waypoints.entries()) {
+    if (!w || typeof w !== 'object') {
+      const err = new Error(`waypoints[${i}]: 올바른 waypoint 객체여야 합니다.`);
+      err.status = 400;
+      throw err;
+    }
+    if (w.type === 'spot') {
+      if (!w.spot_id) {
+        const err = new Error(`waypoints[${i}]: spot 타입은 spot_id가 필수입니다.`);
+        err.status = 400;
+        throw err;
+      }
+    } else if (w.type === 'pin') {
+      if (w.lat == null || w.lng == null) {
+        const err = new Error(`waypoints[${i}]: pin 타입은 lat, lng가 필수입니다.`);
+        err.status = 400;
+        throw err;
+      }
+    } else {
+      const err = new Error(`waypoints[${i}]: type은 'spot' 또는 'pin'이어야 합니다.`);
+      err.status = 400;
+      throw err;
+    }
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 내부 헬퍼: course_waypoints 테이블에 순서대로 저장
+// ──────────────────────────────────────────────────────────────────────
+const insertWaypoints = async (courseId, waypoints, client) => {
+  for (const [i, w] of waypoints.entries()) {
+    if (w.type === 'spot') {
+      await client.query(
+        `INSERT INTO course_waypoints (course_id, seq, type, spot_id) VALUES ($1, $2, 'spot', $3)`,
+        [courseId, i + 1, w.spot_id]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO course_waypoints (course_id, seq, type, lat, lng) VALUES ($1, $2, 'pin', $3, $4)`,
+        [courseId, i + 1, w.lat, w.lng]
+      );
+    }
+  }
 };
 
 // ──────────────────────────────────────────────────────────────────────
@@ -129,6 +184,28 @@ const calcStats = async (wkt, client) => {
   const totalDistance = Math.round(+rows[0].dist);
   const estimatedDuration = Math.ceil(totalDistance / WALK_SPEED_MPS); // 초 단위
   return { totalDistance, estimatedDuration };
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 내부 헬퍼: LINESTRING WKT의 시작 좌표 추출 (권역 추론용)
+// ※ 이용자 실시간 GPS가 아니라 '코스 시작 지점' 좌표만 사용 → LBS 미신고 요건 유지
+// ──────────────────────────────────────────────────────────────────────
+const fetchStartCoordinate = async (client, wkt) => {
+  try {
+    const { rows } = await client.query(
+      `SELECT ST_Y(ST_StartPoint($1::geography::geometry)) AS lat,
+              ST_X(ST_StartPoint($1::geography::geometry)) AS lng`,
+      [wkt]
+    );
+    if (!rows.length) return null;
+    const lat = Number(rows[0].lat);
+    const lng = Number(rows[0].lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng };
+  } catch (err) {
+    console.warn('[fetchStartCoordinate] 시작 좌표 추출 실패, 주소 기반 추론으로 폴백:', err.message);
+    return null;
+  }
 };
 
 // ──────────────────────────────────────────────────────────────────────
@@ -352,19 +429,10 @@ exports.previewCourse = async (waypoints) => {
 exports.createCourse = async (userId, body) => {
   const { name, description, category, is_public = true, tag_ids = [], waypoints = [], route } = body;
 
-  for (const [i, w] of waypoints.entries()) {
-    if (w.type === 'spot' && !w.spot_id) {
-      const err = new Error(`waypoints[${i}]: spot 타입은 spot_id가 필수입니다.`);
-      err.status = 400; throw err;
-    }
-    if (w.type === 'pin' && (w.lat == null || w.lng == null)) {
-      const err = new Error(`waypoints[${i}]: pin 타입은 lat, lng가 필수입니다.`);
-      err.status = 400; throw err;
-    }
-    if (!['spot', 'pin'].includes(w.type)) {
-      const err = new Error(`waypoints[${i}]: type은 'spot' 또는 'pin'이어야 합니다.`);
-      err.status = 400; throw err;
-    }
+  if (!route) {
+    validateWaypoints(waypoints, { minLength: 2 });
+  } else if (waypoints && waypoints.length) {
+    validateWaypoints(waypoints, { minLength: 0 });
   }
 
   const client = await pool.connect();
@@ -378,43 +446,47 @@ exports.createCourse = async (userId, body) => {
     let estimatedDuration;
 
     if (route) {
-    const coordinates = route.coordinates ?? route;
-    const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
-    wkt = await buildLineString(routeWaypoints, client);
-    const stats = await calcStats(wkt, client);
-    totalDistance = stats.totalDistance;
-    estimatedDuration = body.estimated_duration
-      ? Math.ceil(body.estimated_duration)
-      : stats.estimatedDuration;
-  } else {
-    wkt = await buildLineString(waypoints, client);
-    const stats = await calcStats(wkt, client);
-    totalDistance = stats.totalDistance;
-    estimatedDuration = body.estimated_duration
-      ? Math.ceil(body.estimated_duration)
-      : stats.estimatedDuration;
-  }
+      const coordinates = route.coordinates ?? route;
+      const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
+      wkt = await buildLineString(routeWaypoints, client);
+      const stats = await calcStats(wkt, client);
+      totalDistance = stats.totalDistance;
+      estimatedDuration = body.estimated_duration
+        ? Math.ceil(body.estimated_duration)
+        : stats.estimatedDuration;
+    } else {
+      wkt = await buildLineString(waypoints, client);
+      const stats = await calcStats(wkt, client);
+      totalDistance = stats.totalDistance;
+      estimatedDuration = body.estimated_duration
+        ? Math.ceil(body.estimated_duration)
+        : stats.estimatedDuration;
+    }
+
+            // region, sub_region 결정 (입력값 우선, 없으면 '코스 시작 좌표' 기반으로 추론)
+    // NOTE: 이용자 실시간 GPS가 아니라 코스 시작 지점 좌표만 사용 → LBS 미신고 요건 유지
+    let determinedRegion = body.region || null;
+    let determinedSubRegion = body.sub_region || null;
+    if (!determinedRegion) {
+      const start = await fetchStartCoordinate(client, wkt);
+      const inferred = inferRegionFromLocation({
+        lat: start?.lat,
+        lng: start?.lng,
+        address: `${name} ${description || ''}`,
+      });
+      determinedRegion = inferred.region;
+      determinedSubRegion = determinedSubRegion || inferred.sub_region;
+    }
 
     const { rows: [course] } = await client.query(
-      `INSERT INTO courses (owner_id, name, description, category, route_geometry, total_distance, estimated_duration, is_public)
-       VALUES ($1,$2,$3,$4,$5::geography,$6,$7,$8)
-       RETURNING course_id, name, total_distance, estimated_duration, is_public, created_at`,
-      [userId, name, description || null, category || null, wkt, totalDistance, estimatedDuration, is_public]
+      `INSERT INTO courses (owner_id, name, description, category, route_geometry, total_distance, estimated_duration, is_public, region, sub_region)
+       VALUES ($1,$2,$3,$4,$5::geography,$6,$7,$8,$9,$10)
+       RETURNING course_id, name, region, sub_region, total_distance, estimated_duration, is_public, created_at`,
+      [userId, name, description || null, category || null, wkt, totalDistance, estimatedDuration, is_public, determinedRegion || '서울', determinedSubRegion || null]
     );
 
     // waypoints: 장소 목록 독립적으로 저장
-    for (const [i, w] of waypoints.entries()) {
-      if (w.type === 'spot')
-        await client.query(
-          `INSERT INTO course_waypoints (course_id, seq, type, spot_id) VALUES ($1,$2,'spot',$3)`,
-          [course.course_id, i + 1, w.spot_id]
-        );
-      else
-        await client.query(
-          `INSERT INTO course_waypoints (course_id, seq, type, lat, lng) VALUES ($1,$2,'pin',$3,$4)`,
-          [course.course_id, i + 1, w.lat, w.lng]
-        );
-    }
+    await insertWaypoints(course.course_id, waypoints, client);
 
     await insertTags(tag_ids, course.course_id, userId, client);
 
@@ -436,18 +508,17 @@ exports.createCourse = async (userId, body) => {
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 자동 코스 생성 (GPS 기록 기반)
-// walk_records.actual_route → courses INSERT
+// 산책 기록 기반 코스 생성 (waypoints 기반 — GPS 궤적 전송 없음)
 // ──────────────────────────────────────────────────────────────────────
 exports.createCourseFromWalk = async (userId, body) => {
-  const { walk_record_id, name, description, is_public = true, tag_ids = [] } = body;
+  const { walk_record_id, name, description, category, is_public = true, tag_ids = [] } = body;
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     const { rows } = await client.query(
-      `SELECT actual_route, total_distance, duration
+      `SELECT total_distance, duration
        FROM walk_records
        WHERE walk_record_id = $1 AND user_id = $2 AND ended_at IS NOT NULL`,
       [walk_record_id, userId]
@@ -457,33 +528,45 @@ exports.createCourseFromWalk = async (userId, body) => {
       err.status = 404; throw err;
     }
 
-    const { actual_route, total_distance, duration } = rows[0];
+    const { total_distance, duration } = rows[0];
 
-    if (!actual_route) {
-      const err = new Error('GPS 경로 데이터가 없습니다.');
-      err.status = 400; throw err;
-    }
+    // 사용자가 지도에서 직접 선택한 경유지(waypoints)만 허용
+    // GPS 실제 이동 궤적(coordinates, actual_route)은 수신하지 않음
+    validateWaypoints(body.waypoints, { minLength: 2 });
+    const routeWaypoints = body.waypoints;
 
-    // actual_route GeoJSON → waypoints 변환 후 Tmap 경로 생성
-    const { rows: [geoRow] } = await client.query(
-      `SELECT ST_AsGeoJSON($1)::json AS geojson`, [actual_route]
-    );
-    const coordinates = geoRow.geojson.coordinates;
-    const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
-    const wkt = await buildLineString(routeWaypoints, client);
+        const wkt = await buildLineString(routeWaypoints, client);
     const stats = await calcStats(wkt, client);
 
+    // region, sub_region 결정 (입력값 우선, 없으면 '코스 시작 좌표' 기반으로 추론)
+    // NOTE: 이용자 실시간 GPS가 아니라 코스 시작 지점 좌표만 사용 → LBS 미신고 요건 유지
+    let determinedRegion = body.region || null;
+    let determinedSubRegion = body.sub_region || null;
+    if (!determinedRegion) {
+      const start = await fetchStartCoordinate(client, wkt);
+      const inferred = inferRegionFromLocation({
+        lat: start?.lat,
+        lng: start?.lng,
+        address: `${name} ${description || ''}`,
+      });
+      determinedRegion = inferred.region;
+      determinedSubRegion = determinedSubRegion || inferred.sub_region;
+    }
+
     const { rows: [course] } = await client.query(
-      `INSERT INTO courses (owner_id, name, description, route_geometry, total_distance, estimated_duration, is_public)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
-       RETURNING course_id, name, total_distance, estimated_duration, is_public, created_at`,
-      [userId, name, description || null, wkt, stats.totalDistance, duration, is_public]
+      `INSERT INTO courses (owner_id, name, description, category, route_geometry, total_distance, estimated_duration, is_public, region, sub_region)
+       VALUES ($1,$2,$3,$4,$5::geography,$6,$7,$8,$9,$10)
+       RETURNING course_id, name, region, sub_region, total_distance, estimated_duration, is_public, created_at`,
+      [userId, name, description || null, category || null, wkt, stats.totalDistance, duration, is_public, determinedRegion || '서울', determinedSubRegion || null]
     );
+
+    // waypoints 영속화 (course_waypoints 테이블에 순서대로 저장)
+    await insertWaypoints(course.course_id, routeWaypoints, client);
 
     await insertTags(tag_ids, course.course_id, userId, client);
 
     await client.query('COMMIT');
-    return course;
+    return { ...course, waypoints_count: routeWaypoints.length };
   } catch (err) {
     await client.query('ROLLBACK'); throw err;
   } finally { client.release(); }
@@ -492,123 +575,54 @@ exports.createCourseFromWalk = async (userId, body) => {
 // ──────────────────────────────────────────────────────────────────────
 // 코스 목록 조회
 // ──────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────
+// 코스 목록 & 검색 & 필터 통합 조회
+// ──────────────────────────────────────────────────────────────────────
 exports.getCourses = async (query, currentUserId) => {
-  const {
-    lat, lng, radius = 5000,
-    page = 1, limit = 20,
-    sort = 'distance',        // distance | rating | latest
-    is_public,
-  } = query;
-
-  const offset = (page - 1) * limit;
-  const client = await pool.connect();
-  try {
-    const conditions = [`c.status = 'active'`, `c.is_public=TRUE`];
-    const params = [];
-    let idx = 1;
-
-    if (currentUserId) {
-      conditions.push(`(c.owner_id IS NULL OR c.owner_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = $${idx++}))`);
-      params.push(currentUserId);
-    }
-
-    if (is_public !== undefined) {
-      conditions.push(`c.is_public = $${idx++}`);
-      params.push(is_public === 'true');
-    }
-
-    // 위치 기반 반경 필터
-    let distanceSelect = 'NULL::float AS distance';
-    if (lat && lng) {
-      distanceSelect = `ST_Distance(c.route_geometry, ST_Point($${idx},$${idx+1})::geography) AS distance`;
-      conditions.push(`ST_DWithin(c.route_geometry, ST_Point($${idx},$${idx+1})::geography, $${idx+2})`);
-      params.push(+lng, +lat, +radius);
-      idx += 3;
-    }
-
-    const orderMap = {
-      distance: lat && lng ? 'distance ASC' : 'c.created_at DESC',
-      rating:   'avg_rating DESC NULLS LAST',
-      latest:   'c.created_at DESC',
-    };
-    const orderBy = orderMap[sort] || 'c.created_at DESC';
-
-    const sql = `
-      SELECT
-        c.course_id, c.name, c.description, c.category,
-        c.total_distance, c.estimated_duration,
-        c.is_public, c.created_at,
-        ${distanceSelect},
-        ROUND(AVG(cr.rating)::numeric, 1)          AS avg_rating,
-        ROUND(AVG(CASE cr.difficulty
-          WHEN 'easy'   THEN 1
-          WHEN 'normal' THEN 2
-          WHEN 'hard'   THEN 3 END)::numeric, 1)   AS avg_difficulty,
-        COUNT(DISTINCT cr.course_review_id)         AS review_count,
-        COALESCE(
-          json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
-          FILTER (WHERE t.tag_id IS NOT NULL), '[]'
-        ) AS tags
-      FROM courses c
-      LEFT JOIN course_reviews cr
-        ON cr.course_id = c.course_id AND cr.status = 'active'
-      LEFT JOIN taggings tg
-        ON tg.target_id = c.course_id AND tg.target_type = 'course'
-      LEFT JOIN tags t
-        ON t.tag_id = tg.tag_id AND t.is_active = TRUE
-      WHERE ${conditions.join(' AND ')}
-      GROUP BY c.course_id
-      ORDER BY ${orderBy}
-      LIMIT $${idx} OFFSET $${idx+1}
-    `;
-    params.push(+limit, +offset);
-
-    const countSql = `
-      SELECT COUNT(DISTINCT c.course_id) AS total
-      FROM courses c
-      WHERE ${conditions.join(' AND ')}
-    `;
-
-    const [{ rows }, { rows: countRows }] = await Promise.all([
-      client.query(sql, params),
-      client.query(countSql, params.slice(0, -2)), // limit/offset 제외
-    ]);
-
-    return {
-      total: +countRows[0].total,
-      page: +page,
-      courses: rows,
-    };
-  } finally { client.release(); }
-};
-
-// ──────────────────────────────────────────────────────────────────────
-// 코스 검색
-// 기준 좌표 반경, 거리/시간, 후기 기반 난이도·평점, 코스 태그, 포함 스팟 태그로 필터링
-// ──────────────────────────────────────────────────────────────────────
-exports.searchCourses = async (query, currentUserId) => {
   const keyword = readQueryValue(query.keyword, query.q);
   const normalizedKeyword = isMissing(keyword) ? null : String(keyword).trim();
-  const lng = parseNumberParam(readQueryValue(query.x, query.lng), 'x');
-  const lat = parseNumberParam(readQueryValue(query.y, query.lat), 'y');
-  const radius = parseNumberParam(query.radius, 'radius', { min: 1 });
-  const minTotalDistance = parseNumberParam(query.min_total_distance, 'min_total_distance', { min: 0 });
-  const maxTotalDistance = parseNumberParam(query.max_total_distance, 'max_total_distance', { min: 0 });
-  const minEstimatedDuration = parseNumberParam(query.min_estimated_duration, 'min_estimated_duration', { min: 0 });
-  const maxEstimatedDuration = parseNumberParam(query.max_estimated_duration, 'max_estimated_duration', { min: 0 });
-  const minAvgRating = parseNumberParam(query.min_avg_rating, 'min_avg_rating', { min: 0, max: 5 });
-  const difficulty = normalizeDifficulty(query.difficulty);
+  const region = readQueryValue(query.region);
+  const normalizedRegion = isMissing(region) ? null : String(region).trim();
+  const subRegion = readQueryValue(query.sub_region);
+  const normalizedSubRegion = isMissing(subRegion) ? null : String(subRegion).trim();
+  const category = readQueryValue(query.category);
+  const normalizedCategory = isMissing(category) ? null : String(category).trim();
+
+  const minTotalDistance = parseNumberParam(query.min_total_distance ?? query.min_distance, 'min_total_distance', { min: 0 });
+  const maxTotalDistance = parseNumberParam(query.max_total_distance ?? query.max_distance, 'max_total_distance', { min: 0 });
+  const minEstimatedDuration = parseNumberParam(query.min_estimated_duration ?? query.min_duration, 'min_estimated_duration', { min: 0 });
+  const maxEstimatedDuration = parseNumberParam(query.max_estimated_duration ?? query.max_duration, 'max_estimated_duration', { min: 0 });
+  const minAvgRating = parseNumberParam(query.min_avg_rating ?? query.min_rating, 'min_avg_rating', { min: 0, max: 5 });
+
+  // 난이도 (easy/normal/hard 또는 1/2/3)
+  let difficulty = null;
+  if (query.difficulty) {
+    difficulty = normalizeDifficulty(query.difficulty);
+  } else if (query.difficulty_level && query.difficulty_level !== 'all' && query.difficulty_level !== '0') {
+    const level = Number(query.difficulty_level);
+    if (level === 1) difficulty = 'easy';
+    else if (level === 2) difficulty = 'normal';
+    else if (level === 3) difficulty = 'hard';
+  }
+
+  // 태그 ID 및 태그명 필터
   const courseTagIds = parseUuidList(query.course_tag_ids ?? query.tag_ids, 'course_tag_ids');
   const spotTagIds = parseUuidList(query.spot_tag_ids, 'spot_tag_ids');
+  const targetTagNames = query.tag_name || query.tag_names;
+  let tagNameList = [];
+  if (targetTagNames) {
+    tagNameList = (Array.isArray(targetTagNames) ? targetTagNames.join(',') : targetTagNames)
+      .split(',')
+      .map((t) => t.trim().replace(/^#/, ''))
+      .filter(Boolean);
+  }
+
+  const isCycle = query.is_cycle;
+  const isPublic = query.is_public;
+
   const page = parseIntegerParam(query.page, 'page', { defaultValue: 1, min: 1, max: 10000 });
   const limit = parseIntegerParam(query.limit, 'limit', { defaultValue: 20, min: 1, max: 100 });
   const offset = (page - 1) * limit;
-
-  if ((lng === null) !== (lat === null)) {
-    throw createBadRequest('x and y must be provided together');
-  }
-
-  const hasLocation = lng !== null && lat !== null;
 
   if (maxTotalDistance !== null && minTotalDistance !== null && maxTotalDistance < minTotalDistance) {
     throw createBadRequest('max_total_distance must be greater than or equal to min_total_distance');
@@ -619,52 +633,111 @@ exports.searchCourses = async (query, currentUserId) => {
   }
 
   const params = [];
-  const conditions = [`c.status = 'active'`, `c.is_public = TRUE`];
+  const conditions = [`c.status = 'active'`];
+
+  if (isPublic !== undefined) {
+    params.push(isPublic === 'true' || isPublic === true);
+    conditions.push(`c.is_public = $${params.length}`);
+  } else {
+    conditions.push(`c.is_public = TRUE`);
+  }
 
   if (currentUserId) {
     params.push(currentUserId);
     conditions.push(`(c.owner_id IS NULL OR c.owner_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = $${params.length}))`);
   }
 
+  // 지역 필터
+  if (normalizedRegion && !['전국', '전체', 'all'].includes(normalizedRegion.toLowerCase())) {
+    const regLower = normalizedRegion.toLowerCase();
+    if (['서울', 'seoul', '서울특별시'].includes(regLower) || normalizedRegion === '서울' || normalizedRegion === '서울특별시') {
+      params.push('서울');
+      conditions.push(`c.region = $${params.length}`);
+    } else if (
+      ['춘천', 'chuncheon', '춘천시', '강원', '강원도', '강원특별자치도', 'gangwon'].includes(regLower) ||
+      ['춘천', '춘천시', '강원', '강원도', '강원특별자치도'].includes(normalizedRegion)
+    ) {
+      params.push('춘천');
+      conditions.push(`c.region = $${params.length}`);
+    } else {
+      params.push(`%${normalizedRegion}%`);
+      conditions.push(`(
+        c.sub_region ILIKE $${params.length}
+        OR c.region ILIKE $${params.length}
+        OR c.name ILIKE $${params.length}
+        OR c.description ILIKE $${params.length}
+      )`);
+    }
+  }
+
+  // 세부 권역 필터
+  if (normalizedSubRegion && !['전체', 'all'].includes(normalizedSubRegion.toLowerCase()) && normalizedSubRegion !== '전체') {
+    params.push(`%${normalizedSubRegion}%`);
+    conditions.push(`(
+      c.sub_region ILIKE $${params.length}
+      OR c.name ILIKE $${params.length}
+      OR c.description ILIKE $${params.length}
+    )`);
+  }
+
+  // 카테고리 필터
+  if (normalizedCategory) {
+    params.push(`%${normalizedCategory}%`);
+    conditions.push(`c.category ILIKE $${params.length}`);
+  }
+
+  // 키워드 검색
   if (normalizedKeyword) {
     params.push(`%${normalizedKeyword}%`);
     conditions.push(`(
       c.name ILIKE $${params.length}
       OR c.description ILIKE $${params.length}
       OR c.category ILIKE $${params.length}
+      OR c.sub_region ILIKE $${params.length}
     )`);
   }
 
+  // 순환 여부 필터
+  if (isCycle !== undefined && isCycle !== null && isCycle !== '' && isCycle !== 'all' && isCycle !== 'ALL') {
+    const isCycleStr = String(isCycle).trim().toLowerCase();
+    if (isCycleStr === 'true' || isCycleStr === '1') {
+      conditions.push(`c.is_cycle = TRUE`);
+    } else if (isCycleStr === 'false' || isCycleStr === '0') {
+      conditions.push(`c.is_cycle = FALSE`);
+    }
+  }
+
+  // 거리 / 소요시간 필터
   if (minTotalDistance !== null) {
     params.push(minTotalDistance);
     conditions.push(`c.total_distance >= $${params.length}`);
   }
-
   if (maxTotalDistance !== null) {
     params.push(maxTotalDistance);
     conditions.push(`c.total_distance <= $${params.length}`);
   }
-
   if (minEstimatedDuration !== null) {
     params.push(minEstimatedDuration);
     conditions.push(`c.estimated_duration >= $${params.length}`);
   }
-
   if (maxEstimatedDuration !== null) {
     params.push(maxEstimatedDuration);
     conditions.push(`c.estimated_duration <= $${params.length}`);
   }
 
-  if (difficulty !== null) {
+  // 난이도 필터
+  if (difficulty) {
     params.push(difficulty);
     conditions.push(`rs.difficulty = $${params.length}`);
   }
 
+  // 평점 필터
   if (minAvgRating !== null) {
     params.push(minAvgRating);
     conditions.push(`rs.avg_rating >= $${params.length}`);
   }
 
+  // 코스 태그 ID 필터
   if (courseTagIds.length > 0) {
     params.push(courseTagIds);
     const tagIdsParamIndex = params.length;
@@ -687,13 +760,31 @@ exports.searchCourses = async (query, currentUserId) => {
     `);
   }
 
+  // 코스 태그명 필터
+  if (tagNameList.length > 0) {
+    params.push(tagNameList);
+    const tagNamesParamIndex = params.length;
+    params.push(tagNameList.length);
+    const tagCountParamIndex = params.length;
+
+    conditions.push(`
+      c.course_id IN (
+        SELECT tg.target_id
+        FROM taggings tg
+        JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'course' AND t.is_active = TRUE
+        WHERE tg.target_type = 'course' AND t.name = ANY($${tagNamesParamIndex}::TEXT[])
+        GROUP BY tg.target_id HAVING COUNT(DISTINCT t.name) >= $${tagCountParamIndex}
+      )
+    `);
+  }
+
+  // 스팟 태그 ID 필터
   if (spotTagIds.length > 0) {
     params.push(spotTagIds);
     const tagIdsParamIndex = params.length;
     params.push(spotTagIds.length);
     const tagCountParamIndex = params.length;
 
-    // 장소 태그는 코스에 포함된 스팟들의 태그 합집합이 선택 태그를 모두 포함하는지로 판단합니다.
     conditions.push(`
       c.course_id IN (
         SELECT cw.course_id
@@ -713,46 +804,19 @@ exports.searchCourses = async (query, currentUserId) => {
     `);
   }
 
-  const listOnlyParams = [];
-  let distanceSelectSql = 'NULL::double precision AS distance';
-
-  if (hasLocation) {
-    let lngParamIndex;
-    let latParamIndex;
-
-    if (radius !== null) {
-      params.push(lng);
-      lngParamIndex = params.length;
-      params.push(lat);
-      latParamIndex = params.length;
-
-      const referencePointSql = `ST_Point($${lngParamIndex}, $${latParamIndex})::geography`;
-      distanceSelectSql = `ST_Distance(c.route_geometry, ${referencePointSql}) AS distance`;
-
-      params.push(radius);
-      const radiusParamIndex = params.length;
-      conditions.push(`ST_DWithin(c.route_geometry, ${referencePointSql}, $${radiusParamIndex})`);
-    } else {
-      listOnlyParams.push(lng);
-      lngParamIndex = params.length + listOnlyParams.length;
-      listOnlyParams.push(lat);
-      latParamIndex = params.length + listOnlyParams.length;
-
-      const referencePointSql = `ST_Point($${lngParamIndex}, $${latParamIndex})::geography`;
-      distanceSelectSql = `ST_Distance(c.route_geometry, ${referencePointSql}) AS distance`;
-    }
-  }
-
-  const sort = readQueryValue(query.sort) || (hasLocation ? 'distance' : 'latest');
+  // 정렬 매핑
   const orderMap = {
-    distance: hasLocation ? 'distance ASC' : 'c.created_at DESC',
-    rating: hasLocation ? 'rs.avg_rating DESC NULLS LAST, distance ASC' : 'rs.avg_rating DESC NULLS LAST, c.created_at DESC',
+    rating: 'rs.avg_rating DESC NULLS LAST, c.created_at DESC',
+    length: 'c.total_distance ASC, c.created_at DESC',
+    distance_asc: 'c.total_distance ASC, c.created_at DESC',
+    distance_desc: 'c.total_distance DESC, c.created_at DESC',
+    duration: 'c.estimated_duration ASC, c.created_at DESC',
+    duration_asc: 'c.estimated_duration ASC, c.created_at DESC',
+    duration_desc: 'c.estimated_duration DESC, c.created_at DESC',
     latest: 'c.created_at DESC',
-    length: hasLocation ? 'c.total_distance ASC, distance ASC' : 'c.total_distance ASC',
-    duration: hasLocation ? 'c.estimated_duration ASC, distance ASC' : 'c.estimated_duration ASC',
   };
-
-  const orderBySql = orderMap[sort] || orderMap.distance;
+  const sort = readQueryValue(query.sort);
+  const orderBySql = orderMap[sort] || 'c.created_at DESC';
 
   const baseSql = `
     WITH review_source AS (
@@ -822,9 +886,9 @@ exports.searchCourses = async (query, currentUserId) => {
     WHERE ${conditions.join(' AND ')}
   `;
 
-  const listParams = [...params, ...listOnlyParams, limit, offset];
-  const limitParamIndex = params.length + listOnlyParams.length + 1;
-  const offsetParamIndex = params.length + listOnlyParams.length + 2;
+  const listParams = [...params, limit, offset];
+  const limitParamIndex = params.length + 1;
+  const offsetParamIndex = params.length + 2;
 
   const listSql = `
     ${baseSql}
@@ -833,11 +897,16 @@ exports.searchCourses = async (query, currentUserId) => {
       c.name,
       c.description,
       c.category,
+      c.region,
+      c.sub_region,
       c.total_distance,
       c.estimated_duration,
+      c.is_cycle,
+      c.difficulty_level,
       c.is_public,
       c.created_at,
-      ${distanceSelectSql},
+      ST_Y(ST_StartPoint(c.route_geometry::geometry)) AS start_lat,
+      ST_X(ST_StartPoint(c.route_geometry::geometry)) AS start_lng,
       rs.avg_rating,
       rs.avg_difficulty_score,
       rs.difficulty,
@@ -867,7 +936,9 @@ exports.searchCourses = async (query, currentUserId) => {
 
       return {
         ...course,
-        distance: course.distance === null ? null : Number(course.distance),
+        is_cycle: Boolean(course.is_cycle),
+        difficulty_level: Number(course.difficulty_level || 1),
+        start_location: course.start_lat && course.start_lng ? { lat: Number(course.start_lat), lng: Number(course.start_lng) } : null,
         avg_rating: course.avg_rating === null ? null : Number(course.avg_rating),
         avg_difficulty_score: course.avg_difficulty_score === null
           ? null
@@ -879,13 +950,19 @@ exports.searchCourses = async (query, currentUserId) => {
       };
     });
 
+    const totalCount = Number(countRows[0]?.total || 0);
+
     return {
       success: true,
+      total: totalCount,
+      total_count: totalCount,
+      page,
+      limit,
       filters: {
         keyword: normalizedKeyword || null,
-        x: lng,
-        y: lat,
-        radius,
+        region: normalizedRegion || null,
+        sub_region: normalizedSubRegion || null,
+        category: normalizedCategory || null,
         min_total_distance: minTotalDistance,
         max_total_distance: maxTotalDistance,
         min_estimated_duration: minEstimatedDuration,
@@ -894,13 +971,13 @@ exports.searchCourses = async (query, currentUserId) => {
         min_avg_rating: minAvgRating,
         course_tag_ids: courseTagIds,
         spot_tag_ids: spotTagIds,
+        sort: sort || 'latest',
       },
-      total_count: Number(countRows[0].total),
-      page,
-      limit,
       courses,
     };
-  } finally { client.release(); }
+  } finally {
+    client.release();
+  }
 };
 
 // ──────────────────────────────────────────────────────────────────────
@@ -922,7 +999,7 @@ exports.getMyCourses = async (userId, query) => {
   const client = await pool.connect();
   try {
     const { rows } = await client.query(
-      `SELECT course_id, name, description, category, total_distance, estimated_duration,
+      `SELECT course_id, name, description, category, region, sub_region, total_distance, estimated_duration,
               is_public, status, created_at, updated_at
        FROM courses
        WHERE ${where}
@@ -948,6 +1025,7 @@ exports.getCourseById = async (courseId, userId) => {
     const { rows: [course] } = await client.query(
       `SELECT
          c.course_id, c.name, c.description, c.category,
+         c.region, c.sub_region,
          c.total_distance, c.estimated_duration,
          c.is_public, c.owner_id, c.data_source, c.created_at, c.updated_at,
          ST_AsGeoJSON(c.route_geometry)::json AS route,
@@ -1049,6 +1127,7 @@ exports.getCourseById = async (courseId, userId) => {
       ...course,
       ...buildCourseDetailDescription(course),
       waypoints: spots,
+      spots,
       nearby_spots: nearbySpots.map((spot) => ({
         ...spot,
         x: Number(spot.x),
@@ -1083,15 +1162,15 @@ function calcSegmentDuration(from, to) {
 // 코스 수정
 // ──────────────────────────────────────────────────────────────────────
 exports.updateCourse = async (userId, courseId, body) => {
-  const { name, description, category, is_public, tag_ids, waypoints } = body;
+  const { name, description, category, region, sub_region, is_public, tag_ids, waypoints, route } = body;
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // 소유자 확인
+    // 소유자 확인 및 기존 코스 정보 조회
     const { rows: [course] } = await client.query(
-      `SELECT owner_id FROM courses WHERE course_id=$1 AND status != 'deleted'`,
+      `SELECT owner_id, name, description, category, region, sub_region, is_public FROM courses WHERE course_id=$1 AND status != 'deleted'`,
       [courseId]
     );
     if (!course) {
@@ -1101,48 +1180,81 @@ exports.updateCourse = async (userId, courseId, body) => {
       const err = new Error('수정 권한이 없습니다.'); err.status = 403; throw err;
     }
 
-    // 경유지 변경 시 route_geometry 재계산
+    // 미전달된 필드는 기존 코스 값 유지 (부분 수정 지원)
+    const nextName = name !== undefined ? name.trim() : course.name;
+    const nextDescription = description !== undefined ? description : course.description;
+    const nextCategory = category !== undefined ? category : course.category;
+        let nextRegion = region !== undefined ? region : course.region;
+    let nextSubRegion = sub_region !== undefined ? sub_region : course.sub_region;
+    const nextIsPublic = is_public !== undefined ? (is_public === true || is_public === 'true') : course.is_public;
+    // 경로 변경 시 새 시작 좌표로 권역을 보정하기 위한 값 (좌표 = 코스 시작 지점, 실시간 GPS 아님)
+    let startCoordinate = null;
+
+    // 경로 변경 시 route_geometry 재계산
     let extraSets = '';
     let extraParams = [];
-    let paramIdx = 5; // $1=name $2=description $3=category $4=is_public 이후
+    let paramIdx = 7; // $1=name $2=description $3=category $4=region $5=sub_region $6=is_public 이후
 
-    if (waypoints) {
+    if (route) {
+      const coordinates = route.coordinates ?? route;
+            const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
+      const wkt = await buildLineString(routeWaypoints, client);
+      const stats = await calcStats(wkt, client);
+      startCoordinate = await fetchStartCoordinate(client, wkt);
+      const duration = body.estimated_duration ? Math.ceil(body.estimated_duration) : stats.estimatedDuration;
+      extraSets = `, route_geometry=$${paramIdx}::geography, total_distance=$${paramIdx+1}, estimated_duration=$${paramIdx+2}`;
+      extraParams = [wkt, stats.totalDistance, duration];
+      paramIdx += 3;
+
+      if (waypoints && waypoints.length) {
+        validateWaypoints(waypoints, { minLength: 0 });
+        await client.query(`DELETE FROM course_waypoints WHERE course_id=$1`, [courseId]);
+        await insertWaypoints(courseId, waypoints, client);
+      }
+    } else if (waypoints) {
+            validateWaypoints(waypoints, { minLength: 2 });
       const wkt = await buildLineString(waypoints, client);
       const { totalDistance, estimatedDuration } = await calcStats(wkt, client);
+      startCoordinate = await fetchStartCoordinate(client, wkt);
+      const duration = body.estimated_duration ? Math.ceil(body.estimated_duration) : estimatedDuration;
       extraSets = `, route_geometry=$${paramIdx}::geography, total_distance=$${paramIdx+1}, estimated_duration=$${paramIdx+2}`;
-      extraParams = [wkt, totalDistance, estimatedDuration];
+      extraParams = [wkt, totalDistance, duration];
       paramIdx += 3;
 
       // 경유지 교체
       await client.query(`DELETE FROM course_waypoints WHERE course_id=$1`, [courseId]);
-      for (const [i, w] of waypoints.entries()) {
-        if (w.type === 'spot')
-          await client.query(
-            `INSERT INTO course_waypoints (course_id,seq,type,spot_id) VALUES($1,$2,'spot',$3)`,
-            [courseId, i+1, w.spot_id]
-          );
-        else
-          await client.query(
-            `INSERT INTO course_waypoints (course_id,seq,type,lat,lng) VALUES($1,$2,'pin',$3,$4)`,
-            [courseId, i+1, w.lat, w.lng]
-          );
+      await insertWaypoints(courseId, waypoints, client);
+    }
+
+        // 경로가 바뀌었고 지역이 명시되지 않았다면 새 시작 좌표 기준으로 권역 자동 보정
+    if (startCoordinate && region === undefined) {
+      const inferred = inferRegionFromLocation({
+        lat: startCoordinate.lat,
+        lng: startCoordinate.lng,
+        address: `${nextName} ${nextDescription || ''}`,
+      });
+      nextRegion = inferred.region || nextRegion;
+      if (sub_region === undefined) {
+        nextSubRegion = inferred.sub_region || nextSubRegion;
       }
     }
 
     const { rows: [updated] } = await client.query(
       `UPDATE courses
-       SET name=$1, description=$2, category=$3, is_public=$4${extraSets}, updated_at=NOW()
+       SET name=$1, description=$2, category=$3, region=$4, sub_region=$5, is_public=$6${extraSets}, updated_at=NOW()
        WHERE course_id=$${paramIdx}
-       RETURNING course_id, name, total_distance, estimated_duration, updated_at`,
-      [name, description ?? null, category ?? null, is_public ?? true, ...extraParams, courseId]
+       RETURNING course_id, name, description, category, region, sub_region, is_public, total_distance, estimated_duration, updated_at`,
+      [nextName, nextDescription, nextCategory, nextRegion, nextSubRegion, nextIsPublic, ...extraParams, courseId]
     );
 
     // 태그 교체
-    if (tag_ids) {
+    if (tag_ids !== undefined) {
       await client.query(
         `DELETE FROM taggings WHERE target_id=$1 AND target_type='course'`, [courseId]
       );
-      await insertTags(tag_ids, courseId, userId, client);
+      if (Array.isArray(tag_ids) && tag_ids.length) {
+        await insertTags(tag_ids, courseId, userId, client);
+      }
     }
 
     await client.query('COMMIT');

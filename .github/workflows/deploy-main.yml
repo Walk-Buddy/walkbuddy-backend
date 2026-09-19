@@ -1,0 +1,50 @@
+name: Deploy Main Server
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # GitHub 웹 화면에서 수동 실행 지원
+
+jobs:
+  deploy:
+    name: Deploy to Main Server
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SSH to Main Server and Deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.MAIN_SERVER_HOST }}
+          username: ${{ secrets.MAIN_SERVER_USER }}
+          key: ${{ secrets.MAIN_SERVER_SSH_KEY }}
+          port: ${{ secrets.MAIN_SERVER_PORT || 22 }}
+          script: |
+            echo "🚀 [Start] Deploying latest code on main server..."
+            
+            # 1. 서버 내 프로젝트 폴더로 이동
+            TARGET_DIR="${{ secrets.MAIN_SERVER_PATH }}"
+            if [ -n "$TARGET_DIR" ]; then
+              eval cd "$TARGET_DIR" || { echo "❌ Directory $TARGET_DIR not found!"; exit 1; }
+            else
+              cd ~/walkbuddy-backend || cd ~/swu-backend || { echo "❌ Project directory not found!"; exit 1; }
+            fi
+            
+            echo "📁 Working directory: $(pwd)"
+            
+            # 2. 최신 코드 pull
+            git checkout main
+            git pull origin main
+            
+            # 3. 신규 패키지 있을 경우 설치
+            npm install
+            
+            # 4. PM2 무중단 재시작
+            if command -v pm2 &> /dev/null; then
+              pm2 reload all || pm2 restart all
+              echo "✅ PM2 reload completed"
+            else
+              echo "⚠️ PM2 not found, please check server process manager"
+            fi
+            
+            echo "🎉 [Finish] Main server deployment finished successfully!"
