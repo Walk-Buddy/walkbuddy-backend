@@ -169,29 +169,86 @@ async function searchByKeyword(keyword, numOfRows = 5) {
 }
 
 /**
+ * 스팟 이름과 Odii 스토리 제목의 유사도 판정.
+ * 정규화(공백·특수문자 제거) 후 다음 중 하나면 "같은 장소"로 본다.
+ *   - 한쪽이 다른 쪽을 포함
+ *   - 핵심어(2글자 이상)가 겹침
+ * Odii 위치검색은 반경 내 여러 장소를 주므로, 이 검증 없이 첫 결과를 쓰면
+ * 엉뚱한 음성(경교장 자리에 이화장, 서울적십자병원 자리에 새문안로)이 매칭된다.
+ */
+function normalizeForMatch(s) {
+  return String(s || '')
+    .replace(/\(.*?\)/g, '')        // 괄호 부가설명 제거
+    .replace(/[\s\-_·.,]/g, '')      // 공백/구두점 제거
+    .replace(/[^\w가-힣]/g, '')
+    .toLowerCase();
+}
+
+function isSamePlace(spotName, storyTitle) {
+  const a = normalizeForMatch(spotName);
+  const b = normalizeForMatch(storyTitle);
+  if (!a || !b) return false;
+
+  // 한쪽이 다른 쪽을 포함 (예: "경교장" ⊂ "경교장", "서울적십자병원" ⊂ "서울적십자병원")
+  if (a.includes(b) || b.includes(a)) return true;
+
+  // 공통 부분이 2글자 이상 연속으로 겹치면 동일 장소로 인정
+  // (예: "뚝섬한강공원"vs"뚝섬", "경복궁"vs"경복궁야간개장")
+  for (let len = Math.min(a.length, b.length); len >= 2; len--) {
+    for (let i = 0; i + len <= a.length; i++) {
+      const sub = a.slice(i, i + len);
+      if (b.includes(sub)) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * 3. 스팟 정보({ name, x, y })로 최적의 Odii 오디오 가이드 단건 조회
+ *
+ * 우선순위(이름 정확도 검증 필수):
+ *   1) 이름 키워드 검색 → 이름이 일치하는 결과만 채택
+ *   2) 위치 기반 검색(반경 300m) → 이름이 일치하는 결과만 채택
+ *   3) 끝까지 이름이 일치하는 게 없으면 null (→ 호출부가 AI TTS로 폴백)
+ * 엉뚱한 장소의 음성을 들려주는 것보다 AI TTS 폴백이 낫다.
  */
 async function findBestOdiiGuide({ name, x, y }) {
   try {
-    // 1단계: 위치 기반 검색 (스팟 반경 300m 이내)
-    if (x && y) {
-      const locationResults = await searchByLocation({ mapX: x, mapY: y, radius: 300 });
-      if (locationResults.length > 0) {
-        return locationResults[0];
-      }
-    }
+    const candidates = [];
 
-    // 2단계: 스팟 이름 키워드 검색
+    // 1단계: 스팟 이름 키워드 검색 (가장 정확)
     if (name) {
-      // 불필요한 수식어 제거 후 핵심 단어로 검색 시도 (예: "뚝섬한강공원" -> "뚝섬")
       const keyword = name.split(' ')[0].trim();
-      const keywordResults = await searchByKeyword(keyword);
-      if (keywordResults.length > 0) {
-        return keywordResults[0];
+      const keywordResults = await searchByKeyword(keyword, 10);
+      for (const item of keywordResults) {
+        if (isSamePlace(name, item.title) || isSamePlace(name, item.script)) {
+          candidates.push(item);
+        }
       }
     }
 
-    return null;
+    // 2단계: 위치 기반 검색 (반경 300m) — 이름 일치하는 것만
+    if (x && y) {
+      const locationResults = await searchByLocation({ mapX: x, mapY: y, radius: 300, numOfRows: 10 });
+      for (const item of locationResults) {
+        if (isSamePlace(name, item.title) || isSamePlace(name, item.script)) {
+          candidates.push(item);
+        }
+      }
+    }
+
+    if (candidates.length === 0) {
+      return null; // 이름이 맞는 Odii 가이드가 없음 → AI TTS 폴백
+    }
+
+    // 중복 제거(오디오 URL 기준) 후 첫 후보 반환
+    const seen = new Set();
+    const unique = candidates.filter((c) => {
+      if (seen.has(c.audio_url)) return false;
+      seen.add(c.audio_url);
+      return true;
+    });
+    return unique[0];
   } catch (err) {
     return null;
   }

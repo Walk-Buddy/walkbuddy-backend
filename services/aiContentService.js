@@ -117,11 +117,57 @@ async function generateContentWithFallback(prompt, modelName = 'gemini-2.5-flash
   throw lastError;
 }
 
+/**
+ * TTS 낭독용 텍스트 정제.
+ * TTS 엔진은 '*', '#', '·' 같은 기호를 "별표", "샵", "가운데점" 처럼 그대로 읽어버린다.
+ * 마크다운/목록/특수문자·이모지를 제거해 자연스러운 문장만 읽도록 만든다.
+ * (대본 DB 저장은 원문을 유지하고, 오직 합성 단계에서만 정제한다.)
+ */
+function sanitizeForTTS(text) {
+  if (!text) return '';
+  let t = String(text);
+
+      // 1) 마크다운 강조/제목 기호(*, #, `, ~, ^, _, |, <, >) 제거.
+      //    1-a) 기호가 공백으로 감싸인 경우("* 경교장 *")는 공백까지 흡수 → "경교장" (조사 결합)
+      t = t.replace(/[ \t]+[*#`~^_|<>]+[ \t]+/g, '');
+      //    1-b) 단어에 밀착된 기호("**정말**", "최고*의*")는 기호만 제거 → "정말", "최고의"
+      t = t.replace(/[*#`~^_|<>]+/g, '');
+
+  // 2) 줄머리 불릿/기호 제거 ("- 항목", "• 항목", "1. 항목" 등)
+  t = t.replace(/^[ \t]*[-•▪◦‣※·]+[ \t]*/gm, '');
+
+    // 3) 본문 중 남은 장식 기호(★☆ 등) 제거 — 1번과 동일 전략
+    //    3-a) 공백으로 감싸인 경우는 공백까지 흡수
+    t = t.replace(/[ \t]+[★☆]+[ \t]+/g, ' ');
+    //    3-b) 단어에 밀착된 경우는 기호만 제거
+    t = t.replace(/[★☆]+/g, '');
+    // 본문 한가운데의 불릿/가운데점(단어 사이 구분용)은 공백으로
+    t = t.replace(/[•▪◦‣※·]+/g, ' ');
+
+  // 4) 이모지 및 픽토그램 제거
+  t = t.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]\u{FE0F}?/gu, ' ');
+
+  // 5) 대괄호/중괄호/슬래시 등 낭독이 어색한 기호는 공백화
+  t = t.replace(/[\[\]{}]/g, ' ');
+  t = t.replace(/[\\/]+/g, ' ');
+  //   쉼표/마침표/물음표/느낌표/콜론/줄임표는 자연스러운 끊어읽기용으로 유지
+
+    // 6) 연속 공백/개행 정리
+    t = t.replace(/[ \t]+/g, ' ');                      // 연속 공백 → 1칸
+    t = t.replace(/\n{2,}/g, '\n');                     // 빈 줄 정리
+    t = t.replace(/\s+([,.?!:])/g, '$1');               // 문장부호 앞 공백 제거
+    t = t.replace(/\(\s+/g, '(').replace(/\s+\)/g, ')'); // 괄호 안쪽 공백 정리
+    t = t.replace(/^[ \t]+/gm, '').replace(/[ \t]+$/gm, ''); // 줄 앞뒤 공백 제거
+
+    return t.trim();
+}
+
 async function generateTTS(text) {
+  const spoken = sanitizeForTTS(text);
   const response = await axios.post(
     `https://texttospeech.googleapis.com/v1/text:synthesize?key=${process.env.GOOGLE_TTS_API_KEY}`,
     {
-      input: { text },
+      input: { text: spoken },
       voice: { languageCode: 'ko-KR', name: 'ko-KR-Neural2-A' },
       audioConfig: {
         audioEncoding: 'MP3',
@@ -282,6 +328,7 @@ ${contentType === 'tour'    ? '   - 주변 관광 연계 포인트, 볼거리와
 ${isCrossReferenced ? '   - 제공된 참고 정보를 바탕으로 위 테마 관점에 맞추어 자연스럽게 재구성하세요.' : ''}
 ${barrierFreeTip ? '4. 해설 끝부분에 보행 환경 편의 정보(경사로, 턱 유무 등)를 자연스럽게 한 문장 덧붙여주세요.' : ''}
 5. 문장은 완전한 마침표로 맺어주세요.
+6. 특수문자·이모지·마크다운 기호(*, #, -, •, ·, ※, [ ], ★ 등)를 절대 쓰지 마세요. 오직 순수 한글 문장과 마침표/쉼표/물음표/느낌표만 사용하세요. (음성으로 읽히므로 기호를 읽어버립니다)
     `.trim();
 
     const script = await generateContentWithFallback(prompt, 'gemini-2.5-flash');
@@ -335,7 +382,76 @@ async function prewarmCourseAudio(courseId) {
   };
 }
 
+// ── 개요 요약 메모리 캐시 ──────────────────────────────────────────
+const overviewSummaryCache = new Map();
+const MAX_CACHE_SIZE = 500;
+
+function getOverviewCacheKey(spotId, text) {
+  if (spotId) return `spot:${spotId}`;
+  return `text:${text.slice(0, 80)}_${text.length}`;
+}
+
+/**
+ * 관광지 개요 텍스트를 Gemini를 활용해 5~6줄로 친절하게 요약/정리
+ */
+async function summarizeOverview(text, spotName = '', spotId = null) {
+  if (!text || !text.trim()) {
+    return '';
+  }
+
+  const cleanText = text.replace(/<[^>]*>?/gm, '').trim();
+  const cacheKey = getOverviewCacheKey(spotId, cleanText);
+
+  if (overviewSummaryCache.has(cacheKey)) {
+    return overviewSummaryCache.get(cacheKey);
+  }
+
+  // 문장이 이미 5줄 미만으로 아주 짧으면 그대로 반환
+  const lines = cleanText.split('\n').map(l => l.trim()).filter(Boolean);
+  if (cleanText.length <= 160 && lines.length <= 3) {
+    overviewSummaryCache.set(cacheKey, cleanText);
+    return cleanText;
+  }
+
+  const prompt = `당신은 친절한 여행 전문 도슨트이자 인공지능 가이드입니다.
+아래는 관광지 '${spotName || '이 장소'}'에 대한 원본 소개 개요입니다.
+
+[원본 개요]
+${cleanText}
+
+[지침]
+1. 원본의 핵심 매력, 역사/문화적 가치, 방문 팁을 관광객이 읽기 쉽고 친절한 문체로 5~6줄(5~6문장) 분량으로 요약·정리해 주세요.
+2. 각 줄은 하나의 완결된 문장으로 작성하고, 줄바꿈으로 구분해 총 5~6줄로 구성해 주세요.
+3. 불릿 기호(-, *, 1. 등), 마크다운 강조(**), 제목, '요약:', 'AI 요약:' 같은 부가 수식어 없이 순수 요약 본문 5~6줄만 즉시 출력해 주세요.
+4. 부드럽고 친절한 어조(~합니다, ~해요 등)로 작성해 주세요.`;
+
+  try {
+    const summary = await generateContentWithFallback(prompt, 'gemini-2.5-flash');
+    if (summary && summary.trim().length > 0) {
+      const formatted = summary.trim();
+      if (overviewSummaryCache.size >= MAX_CACHE_SIZE) {
+        const firstKey = overviewSummaryCache.keys().next().value;
+        overviewSummaryCache.delete(firstKey);
+      }
+      overviewSummaryCache.set(cacheKey, formatted);
+      return formatted;
+    }
+  } catch (err) {
+    console.warn(`⚠️ [Gemini] 개요 요약 실패 (${err.message}). 기본 텍스트 폴백 적용`);
+  }
+
+  // 폴백: 문장 단위로 분할하여 앞 5~6문장 추출
+  const sentences = cleanText
+    .split(/(?<=[.?!])\s+/)
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  const fallback = (sentences.length > 0 ? sentences.slice(0, 5).join('\n') : cleanText.slice(0, 250));
+  return fallback;
+}
+
 exports.getAiContents = async (spotId) => getAiContentsByTypes(spotId);
 exports.getAiContentsByTypes = getAiContentsByTypes;
 exports.prewarmCourseAudio = prewarmCourseAudio;
+exports.summarizeOverview = summarizeOverview;
 
