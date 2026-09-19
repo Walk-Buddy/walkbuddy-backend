@@ -13,7 +13,14 @@ const DEFAULT_MOBILE_APP = 'WalkBuddy';
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_WAYPOINTS = 1200;
 
-const serviceKey = process.env.DURUNUBI_SERVICE_KEY;
+// 두루누비는 별도 키가 아니라 공공데이터포털(한국관광공사) 공용 인증키를 사용한다.
+// DURUNUBI_SERVICE_KEY가 없어도 TourAPI 키로 자동 폴백한다.
+const serviceKey =
+  process.env.DURUNUBI_SERVICE_KEY ||
+  process.env.TOURAPI_SERVICE_KEY ||
+  process.env.TOUR_API_SERVICE_KEY ||
+  process.env.TOUR_API_KEY ||
+  '';
 const mobileOS = process.env.DURUNUBI_MOBILE_OS || DEFAULT_MOBILE_OS;
 const mobileApp = process.env.DURUNUBI_MOBILE_APP || DEFAULT_MOBILE_APP;
 const brdDiv = process.env.DURUNUBI_BRD_DIV || '';
@@ -41,7 +48,10 @@ function toNumber(value) {
 
 function requireEnv() {
   if (!serviceKey) {
-    throw new Error('DURUNUBI_SERVICE_KEY가 .env에 없습니다.');
+    throw new Error(
+      'DURUNUBI_SERVICE_KEY(또는 TOURAPI_SERVICE_KEY)가 .env에 없습니다. ' +
+      '두루누비는 TourAPI와 동일한 공공데이터포털 인증키를 사용합니다.'
+    );
   }
 }
 
