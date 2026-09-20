@@ -167,52 +167,79 @@ function resolveCourseRegion(item) {
 
 // ──────────────────────────────────────────────────────────
 // 3. 지오코딩 및 카카오 스팟 후보 탐색
+//
+//   ⚠️ 오매칭 방지: 키워드 검색(전국 대상)은 동명이소/유명 장소를
+//   엉뚱한 지역에서 반환할 수 있다. (예: 춘천 코스의 '봉황대' →
+//   경남 의령의 '봉황대') 따라서 지역 경계 박스(bbox)로 좌표를
+//   반드시 검증하고, bbox 밖 결과는 버린다.
 // ──────────────────────────────────────────────────────────
 const placeCache = new Map();
+
+// 지역별 좌표 경계 박스 (남/북 위도, 서/동 경도) + 여유 마진
+//  - 서울: 대략 lat 37.42~37.70, lng 126.76~127.20
+//  - 춘천: 대략 lat 37.60~38.15, lng 127.45~128.05
+const REGION_BBOX = {
+  서울: { minLat: 37.40, maxLat: 37.72, minLng: 126.74, maxLng: 127.24 },
+  춘천: { minLat: 37.55, maxLat: 38.20, minLng: 127.35, maxLng: 128.12 },
+};
+
+function isWithinRegion(lat, lng, region) {
+  const bbox = REGION_BBOX[region];
+  if (!bbox) return true; // 정의되지 않은 지역은 검증 생략
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  return (
+    lat >= bbox.minLat &&
+    lat <= bbox.maxLat &&
+    lng >= bbox.minLng &&
+    lng <= bbox.maxLng
+  );
+}
 
 async function searchKakaoPlace(spotName, region, subRegion, addr) {
   if (!kakaoKey) return null;
   const cacheKey = `${region}:${subRegion || ''}:${spotName || ''}:${addr || ''}`;
   if (placeCache.has(cacheKey)) return placeCache.get(cacheKey);
 
+  // 후보 쿼리 목록 (지역+권역 우선 → 지역 → 원본명)
   const queries = [];
   if (spotName) {
     if (subRegion) queries.push(`${region} ${subRegion} ${spotName}`);
     queries.push(`${region} ${spotName}`);
+    queries.push(`${subRegion ? region + ' ' + subRegion + ' ' : ''}${spotName}`);
     queries.push(spotName);
   }
-  if (addr) queries.push(addr);
 
-  // 1. 키워드 검색
+  // 1. 키워드 검색 — bbox 안에 들어오는 첫 결과만 채택
   for (const q of queries) {
     try {
       const res = await axios.get('https://dapi.kakao.com/v2/local/search/keyword.json', {
         headers: { Authorization: `KakaoAK ${kakaoKey}` },
-        params: { query: q.trim(), size: 3 },
+        params: { query: q.trim(), size: 5 },
         timeout: 5000,
       });
       const docs = res.data?.documents || [];
-      if (docs.length > 0) {
-        const doc = docs[0];
-        const categories = inferSpotCategoriesWithFallback(doc.category_name, doc.place_name);
-        const result = {
-          kakao_place_id: String(doc.id),
-          name: doc.place_name,
-          kakao_category_name: doc.category_name || null,
-          categories: categories.length > 0 ? categories : ['자연·힐링'],
-          address: doc.road_address_name || doc.address_name || null,
-          x: Number(doc.x),
-          y: Number(doc.y),
-          region,
-          sub_region: subRegion,
-        };
-        placeCache.set(cacheKey, result);
-        return result;
-      }
+      // bbox 안에 있는 결과 중 가장 신뢰도 높은(첫) 항목 선택
+      const doc = docs.find((d) => isWithinRegion(Number(d.y), Number(d.x), region));
+      if (!doc) continue; // 이 쿼리는 지역 밖 결과뿐 → 다음 쿼리로
+
+      const categories = inferSpotCategoriesWithFallback(doc.category_name, doc.place_name);
+      const result = {
+        kakao_place_id: String(doc.id),
+        name: doc.place_name,
+        kakao_category_name: doc.category_name || null,
+        categories: categories.length > 0 ? categories : ['자연·힐링'],
+        address: doc.road_address_name || doc.address_name || null,
+        x: Number(doc.x),
+        y: Number(doc.y),
+        region,
+        sub_region: subRegion,
+      };
+      placeCache.set(cacheKey, result);
+      return result;
     } catch (_) {}
   }
 
-  // 2. 주소 검색 (폴백)
+  // 2. 주소 검색 (폴백) — 주소 결과도 bbox 검증
   if (addr) {
     try {
       const res = await axios.get('https://dapi.kakao.com/v2/local/search/address.json', {
@@ -221,7 +248,7 @@ async function searchKakaoPlace(spotName, region, subRegion, addr) {
         timeout: 5000,
       });
       const doc = res.data?.documents?.[0];
-      if (doc?.x && doc?.y) {
+      if (doc?.x && doc?.y && isWithinRegion(Number(doc.y), Number(doc.x), region)) {
         const result = {
           kakao_place_id: null,
           name: spotName || addr,
@@ -239,6 +266,7 @@ async function searchKakaoPlace(spotName, region, subRegion, addr) {
     } catch (_) {}
   }
 
+  // 지역 안에서 끝내 찾지 못하면 null → 엉뚱한 스팟 저장 방지
   placeCache.set(cacheKey, null);
   return null;
 }
@@ -375,11 +403,17 @@ async function ensureAdminUser(client) {
 }
 
 async function ensureCourseTag(client) {
+  // 프론트 정본(ServerTags.DEFAULT_COURSE_TAGS_BY_GROUP)과 일치하도록
+  // group_name='추천·종류', is_review_tag=FALSE 를 명시한다.
+  // (기존 코드의 '추천·테마'는 프론트 정본과 불일치 → 필터에서 숨겨지는 원인)
   const { rows } = await client.query(
-    `INSERT INTO tags (name, type, group_name, is_active)
-     VALUES ($1, 'course', '추천·테마', TRUE)
+    `INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
+     VALUES ($1, 'course', '추천·종류', TRUE, FALSE)
      ON CONFLICT (name, type)
-     DO UPDATE SET is_active = TRUE
+     DO UPDATE SET
+       group_name    = EXCLUDED.group_name,
+       is_active     = TRUE,
+       is_review_tag = EXCLUDED.is_review_tag
      RETURNING tag_id`,
     [COURSE_TAG_NAME]
   );
@@ -669,6 +703,7 @@ async function main() {
       try {
         const derivedTags = await courseTagService.autoTagCourse({
           courseId: course.course_id,
+          courseName,           // ← 코스명 전달: '봄내길' 등 명칭 기반 태그 도출에 필요
           category: '관광코스',
           description,
           userId: ownerId,

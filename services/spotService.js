@@ -118,7 +118,7 @@ async function fetchTourLocationCandidates({ lng, lat, radius }) {
             startedAt,
         });
 
-        return normalizeTourApiItems(item);
+                return normalizeTourApiItems(item);
     } catch (err) {
         trafficLog.record({
             api,
@@ -130,7 +130,10 @@ async function fetchTourLocationCandidates({ lng, lat, radius }) {
             durationMs: Date.now() - startedAt,
             startedAt,
         });
-        throw err;
+        // 429(rate limit) 등 일시적 오류 시 throw 하지 않고 빈 배열 반환.
+        // → 매칭 실패로 처리되어 다음 폴백(키워드/기존 contentId)으로 진행되게 하여
+        //   enrich 전체가 죽는 것을 방지한다.
+        return [];
     }
 }
 
@@ -550,8 +553,12 @@ async function enrichKakaoSpotTourContent(spot, userId) {
         const updateClauses = [];
         const updateParams = [spot.spot_id];
 
-        let overview = null;
+                let overview = null;
         let tourFirstImage = null;
+        // extractTourTags 는 if 블록 밖에서 호출되므로, 반드시 바깥 스코프에서 선언해야 한다.
+        // (블록 안 const 로 선언하면 매칭 실패 시 ReferenceError → enrich 전체 실패)
+        let barrierFreeInfo = null;
+        let petTourInfo = null;
 
         if (matched?.contentid) {
             const contentId = String(matched.contentid);
@@ -570,8 +577,8 @@ async function enrichKakaoSpotTourContent(spot, userId) {
 
             const tourDetail = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
             overview = tourDetail?.overview || null;
-            const barrierFreeInfo = barrierFreeResult.status === 'fulfilled' ? barrierFreeResult.value : null;
-            const petTourInfo = petTourResult.status === 'fulfilled' ? petTourResult.value : null;
+            barrierFreeInfo = barrierFreeResult.status === 'fulfilled' ? barrierFreeResult.value : null;
+            petTourInfo = petTourResult.status === 'fulfilled' ? petTourResult.value : null;
 
             tourFirstImage = matched.firstimage || matched.firstimage2 || tourDetail?.firstImage || null;
 
@@ -682,11 +689,19 @@ exports.getSpots = async (query) => {
     const rawKeyword = Array.isArray(query.keyword ?? query.q) ? (query.keyword ?? query.q)[0] : (query.keyword ?? query.q);
     const keyword = rawKeyword === undefined || rawKeyword === null ? null : String(rawKeyword).trim();
 
-        const offset = (Number(page) - 1) * Number(limit);
+                const offset = (Number(page) - 1) * Number(limit);
     // 탐색 기본 목록에서는 단순 un-enriched 카카오 임시 핀(투어/무장애 정보 및 태그가 없는 장소)을 제외한다.
+    // 단, 공식 코스 경유지로 연결된 스팟은 정보가 비어 있어도 노출한다.
+    // (예: 춘천 봄내길 코스의 카카오 스팟 — TourAPI 일일 쿼터 소진 시에도 코스와 함께 보여야 함)
     const whereConditions = ["s.status = 'active'"];
     if (!query.tag_ids && !query.tag_name && !query.tag_names && !query.category && !query.keyword && !query.q) {
-        whereConditions.push("(s.source <> 'kakao' OR s.content_tour IS NOT NULL OR s.barrier_free_info IS NOT NULL OR EXISTS (SELECT 1 FROM taggings tg WHERE tg.target_id = s.spot_id))");
+        whereConditions.push(`(
+            s.source <> 'kakao'
+            OR s.content_tour IS NOT NULL
+            OR s.barrier_free_info IS NOT NULL
+            OR EXISTS (SELECT 1 FROM taggings tg WHERE tg.target_id = s.spot_id)
+            OR EXISTS (SELECT 1 FROM course_waypoints cw WHERE cw.spot_id = s.spot_id)
+        )`);
     }
     const queryValues = [];
 
@@ -1125,6 +1140,11 @@ exports.saveKakaoSpot = async (body, userId) => {
 };
 
 exports.searchKakaoSpotCandidates = searchKakaoSpotCandidates;
+// 백필(재태깅) 스크립트에서 재사용할 수 있도록 노출
+exports.extractTourTags = extractTourTags;
+exports.attachTagsToSpot = attachTagsToSpot;
+exports.ensureSystemTaggerId = ensureSystemTaggerId;
+exports.enrichKakaoSpotTourContent = enrichKakaoSpotTourContent;
 
 // ──────────────────────────────────────────────────────────────────────
 // 스팟 검색 (카카오 + DB 통합)
@@ -1182,10 +1202,17 @@ exports.searchSpots = async (query) => {
         savedKakaoPlaceIdSet = new Set(saved.rows.map(r => r.kakao_place_id));
     }
 
-    // 저장 장소(saved_spots) 중 단순 un-enriched 카카오 임시 핀(투어/무장애 정보 및 태그 없는 경우)만 필터 미지정 시 제외
+        // 저장 장소(saved_spots) 중 단순 un-enriched 카카오 임시 핀(투어/무장애 정보 및 태그 없는 경우)만 필터 미지정 시 제외
+    // 단, 공식 코스 경유지로 연결된 스팟은 정보가 비어 있어도 노출한다.
     const whereConditions = ["s.status = 'active'"];
     if (!tagIdList.length && !category && !keyword) {
-        whereConditions.push("(s.source <> 'kakao' OR s.content_tour IS NOT NULL OR s.barrier_free_info IS NOT NULL OR EXISTS (SELECT 1 FROM taggings tg WHERE tg.target_id = s.spot_id))");
+        whereConditions.push(`(
+            s.source <> 'kakao'
+            OR s.content_tour IS NOT NULL
+            OR s.barrier_free_info IS NOT NULL
+            OR EXISTS (SELECT 1 FROM taggings tg WHERE tg.target_id = s.spot_id)
+            OR EXISTS (SELECT 1 FROM course_waypoints cw WHERE cw.spot_id = s.spot_id)
+        )`);
     }
     const queryValues = [];
     let orderBySql = 's.created_at DESC';
