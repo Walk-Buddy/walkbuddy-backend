@@ -342,7 +342,16 @@ exports.getFestivals = async ({ region, eventStartDate, page = 1, limit = 10 } =
       upcomingOrOngoing.sort((a, b) => (a.event_start_date || "99999999").localeCompare(b.event_start_date || "99999999"));
       past.sort((a, b) => (b.event_end_date || "00000000").localeCompare(a.event_end_date || "00000000"));
 
-      const sortedFestivals = [...upcomingOrOngoing, ...past];
+      let sortedFestivals = [...upcomingOrOngoing, ...past];
+
+      if (eventStartDate && eventStartDate !== today) {
+        sortedFestivals = sortedFestivals.filter((f) => {
+          const s = f.event_start_date;
+          const e = f.event_end_date || s;
+          if (!s && !e) return true;
+          return !(e && e < eventStartDate) && !(s && s > eventStartDate);
+        });
+      }
 
       return {
         total: sortedFestivals.length,
