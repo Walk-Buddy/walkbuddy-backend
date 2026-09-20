@@ -182,6 +182,11 @@ async function deriveCourseTagNames({ courseId, courseName, category, descriptio
     tagNames.add('무장애길');
   }
 
+  // 5) 코스 명칭에 '봄내길' 포함 시 '춘천 봄내길' 태그 부여
+  if (courseName && courseName.includes('봄내길')) {
+    tagNames.add('춘천 봄내길');
+  }
+
   return [...tagNames];
 }
 
