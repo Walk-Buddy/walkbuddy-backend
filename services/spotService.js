@@ -683,10 +683,11 @@ exports.getSpots = async (query) => {
     const keyword = rawKeyword === undefined || rawKeyword === null ? null : String(rawKeyword).trim();
 
         const offset = (Number(page) - 1) * Number(limit);
-    // 탐색 기본 목록에서는 사용자가 담은 카카오 장소(source='kakao')를 노출하지 않는다.
-    //   → 카카오 실시간 후보는 '산책로 만들기(장소 추가)' 진입점에서만 사용하고,
-    //     기본 목록은 자체 DB에 저장된 장소(admin 소스)만 노출한다.
-    const whereConditions = ["s.status = 'active'", "s.source <> 'kakao'"];
+    // 탐색 기본 목록에서는 단순 un-enriched 카카오 임시 핀(투어/무장애 정보 및 태그가 없는 장소)을 제외한다.
+    const whereConditions = ["s.status = 'active'"];
+    if (!query.tag_ids && !query.tag_name && !query.tag_names && !query.category && !query.keyword && !query.q) {
+        whereConditions.push("(s.source <> 'kakao' OR s.content_tour IS NOT NULL OR s.barrier_free_info IS NOT NULL OR EXISTS (SELECT 1 FROM taggings tg WHERE tg.target_id = s.spot_id))");
+    }
     const queryValues = [];
 
     // 정렬 매핑
@@ -1181,9 +1182,11 @@ exports.searchSpots = async (query) => {
         savedKakaoPlaceIdSet = new Set(saved.rows.map(r => r.kakao_place_id));
     }
 
-    // 저장 장소(saved_spots) 중 source='kakao' 는 목록에서 제외한다.
-    //   → 키워드/필터 탐색 결과에도 카카오 실시간 후보는 kakao_candidates 로만 내려보낸다.
-    const whereConditions = ["s.status = 'active'", "s.source <> 'kakao'"];
+    // 저장 장소(saved_spots) 중 단순 un-enriched 카카오 임시 핀(투어/무장애 정보 및 태그 없는 경우)만 필터 미지정 시 제외
+    const whereConditions = ["s.status = 'active'"];
+    if (!tagIdList.length && !category && !keyword) {
+        whereConditions.push("(s.source <> 'kakao' OR s.content_tour IS NOT NULL OR s.barrier_free_info IS NOT NULL OR EXISTS (SELECT 1 FROM taggings tg WHERE tg.target_id = s.spot_id))");
+    }
     const queryValues = [];
     let orderBySql = 's.created_at DESC';
 
@@ -1224,16 +1227,56 @@ exports.searchSpots = async (query) => {
         )`);
     }
 
+    // 태그 ID 검색 — 열린관광 및 반려견동반 선택 시 하위 태그 자동 포함 & 다중 태그 OR 매칭 지원
     if (tagIdList.length > 0) {
         queryValues.push(tagIdList); const tagIdx = queryValues.length;
-        queryValues.push(tagIdList.length); const cntIdx = queryValues.length;
         whereConditions.push(`
             s.spot_id IN (
                 SELECT tg.target_id FROM taggings tg
-                WHERE tg.target_type = 'spot' AND tg.tag_id = ANY($${tagIdx}::UUID[])
-                GROUP BY tg.target_id HAVING COUNT(DISTINCT tg.tag_id) = $${cntIdx}
+                JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+                WHERE tg.target_type = 'spot' AND (
+                    tg.tag_id = ANY($${tagIdx}::UUID[])
+                    OR (
+                        t.group_name = '열린관광' AND EXISTS (
+                            SELECT 1 FROM tags t_p WHERE t_p.name = '열린관광' AND t_p.type = 'spot' AND t_p.tag_id = ANY($${tagIdx}::UUID[])
+                        )
+                    )
+                    OR (
+                        t.group_name = '반려동물' AND EXISTS (
+                            SELECT 1 FROM tags t_p WHERE t_p.name = '반려견동반' AND t_p.type = 'spot' AND t_p.tag_id = ANY($${tagIdx}::UUID[])
+                        )
+                    )
+                )
+                GROUP BY tg.target_id
             )
         `);
+    }
+
+    // 태그 이름(tag_name / tag_names) 검색 지원
+    const searchTargetTagNames = query.tag_name || query.tag_names;
+    if (searchTargetTagNames) {
+        const tagNameList = (Array.isArray(searchTargetTagNames) ? searchTargetTagNames.join(',') : searchTargetTagNames)
+            .split(',')
+            .map(t => t.trim().replace(/^#/, ''))
+            .filter(Boolean);
+
+        if (tagNameList.length > 0) {
+            queryValues.push(tagNameList);
+            const tagIdx = queryValues.length;
+            whereConditions.push(`
+                s.spot_id IN (
+                    SELECT tg.target_id
+                    FROM taggings tg
+                    JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'spot' AND t.is_active = TRUE
+                    WHERE tg.target_type = 'spot' AND (
+                        t.name = ANY($${tagIdx}::TEXT[])
+                        OR ('열린관광' = ANY($${tagIdx}::TEXT[]) AND t.group_name = '열린관광')
+                        OR ('반려견동반' = ANY($${tagIdx}::TEXT[]) AND t.group_name = '반려동물')
+                    )
+                    GROUP BY tg.target_id
+                )
+            `);
+        }
     }
 
     if (minRecommendPct !== null) {
