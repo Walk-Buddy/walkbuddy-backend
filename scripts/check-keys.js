@@ -151,6 +151,55 @@ async function checkGemini() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// 4-1. SWU AI 게이트웨이 (MindLogic Chat Completions)
+// ─────────────────────────────────────────────────────────────
+function getSwuAiKeys() {
+  const raw = [];
+  if (process.env.SWU_AI_API_KEY) raw.push(...process.env.SWU_AI_API_KEY.split(','));
+  if (process.env.SWU_AI_API_KEY_2) raw.push(process.env.SWU_AI_API_KEY_2);
+  if (process.env.SWU_AI_API_KEYS) raw.push(...process.env.SWU_AI_API_KEYS.split(','));
+  return [...new Set(raw.map((k) => k && k.trim()).filter((k) => k && !k.startsWith('#') && !k.startsWith('//')))];
+}
+
+async function checkSwuAi() {
+  const keys = getSwuAiKeys();
+  if (!keys.length) return record('SWU AI 게이트웨이 키', 'SKIP', '키 미설정 (선택 예비 키)');
+  const model = process.env.SWU_AI_MODEL || 'gemini-3.7-flash';
+  for (let i = 0; i < keys.length; i++) {
+    const label = `SWU AI 키#${i + 1} ${MASK(keys[i])}`;
+    try {
+      const res = await withTimeout(
+        axios.post(
+          'https://factchat-cloud.mindlogic.ai/v1/gateway/chat/completions/',
+          {
+            model: model,
+            messages: [{ role: 'user', content: 'ping' }],
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${keys[i]}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        ),
+        20000
+      );
+      if (res.data?.choices?.[0]?.message?.content) {
+        record(label, 'OK', `게이트웨이 호출 성공 (${model})`);
+      } else {
+        record(label, 'WARN', `응답 본문 확인 필요: ${JSON.stringify(res.data).slice(0, 80)}`);
+      }
+    } catch (e) {
+      const st = e.response?.status;
+      const msg = e.response?.data?.error?.message || e.message;
+      if (st === 401) record(label, 'FAIL', '401 Unauthorized (API 키 인증 실패)');
+      else if (st === 429) record(label, 'WARN', '429 Rate Limit / 크레딧 소진 — 폴백 대상');
+      else record(label, 'FAIL', `${st || ''} ${msg.slice(0, 100)}`);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 // 5. Google TTS (Neural2)
 // ─────────────────────────────────────────────────────────────
 async function checkGoogleTts() {
@@ -257,6 +306,7 @@ function checkJwt() {
       ['odii', checkOdiiKey],
       ['kakao', checkKakao],
       ['gemini', checkGemini],
+      ['swu_ai', checkSwuAi],
       ['tts', checkGoogleTts],
       ['tmap', checkTmap],
       ['s3', checkS3],
@@ -280,4 +330,5 @@ function checkJwt() {
     problems.forEach((r) => console.log(`  - [${r.status}] ${r.name}: ${r.detail}`));
   }
   console.log('');
+  process.exit(0);
 })();

@@ -77,45 +77,143 @@ function getGeminiApiKeys() {
 }
 
 /**
- * 다중 키를 활용한 Gemini 대본 생성
+ * 다중 SWU AI (MindLogic Gateway) API 키 목록 파싱
+ * - SWU_AI_API_KEY (단일 또는 콤마로 여러 개 지원)
+ * - SWU_AI_API_KEY_2 (예비 키)
+ * - SWU_AI_API_KEYS (콤마 구분 다중 키 목록)
+ */
+function getSwuAiKeys() {
+  const rawKeys = [];
+  if (process.env.SWU_AI_API_KEY) {
+    rawKeys.push(...process.env.SWU_AI_API_KEY.split(','));
+  }
+  if (process.env.SWU_AI_API_KEY_2) {
+    rawKeys.push(process.env.SWU_AI_API_KEY_2);
+  }
+  if (process.env.SWU_AI_API_KEYS) {
+    rawKeys.push(...process.env.SWU_AI_API_KEYS.split(','));
+  }
+
+  const cleanKeys = rawKeys
+    .map((k) => k && k.trim())
+    .filter((k) => Boolean(k) && !k.startsWith('//') && !k.startsWith('#'));
+
+  return [...new Set(cleanKeys)];
+}
+
+/**
+ * SWU MindLogic Gateway (OpenAI Chat Completions 규격) 호출
+ */
+async function callMindlogicGateway(apiKey, prompt, modelName) {
+  const model = modelName || process.env.SWU_AI_MODEL || 'gemini-3.7-flash';
+  const res = await axios.post(
+    'https://factchat-cloud.mindlogic.ai/v1/gateway/chat/completions/',
+    {
+      model,
+      messages: [{ role: 'user', content: prompt }],
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 30000,
+    }
+  );
+
+  const text = res.data?.choices?.[0]?.message?.content;
+  if (!text) {
+    throw new Error('SWU MindLogic 게이트웨이 응답 본문에 텍스트가 없습니다.');
+  }
+  return text.trim();
+}
+
+/**
+ * 다중 키 및 다중 제공자(Google Gemini -> SWU MindLogic Gateway)를 활용한 대본 생성
  * 429(Rate Limit / Quota Exceeded) 또는 호출 실패 시 예비 키로 즉시 자동 전환
  */
 async function generateContentWithFallback(prompt, modelName = 'gemini-2.5-flash') {
-  const keys = getGeminiApiKeys();
-  if (keys.length === 0) {
-    throw new Error('GEMINI_API_KEY가 설정되지 않았습니다.');
+  const geminiKeys = getGeminiApiKeys();
+  const swuKeys = getSwuApiKeys();
+
+  if (geminiKeys.length === 0 && swuKeys.length === 0) {
+    throw new Error('GEMINI_API_KEY 또는 SWU_AI_API_KEY가 설정되지 않았습니다.');
   }
 
+  const preferSwu = process.env.PREFER_SWU_AI === 'true' || process.env.SWU_AI_FIRST === 'true';
   let lastError = null;
-  for (let i = 0; i < keys.length; i++) {
-    const key = keys[i];
-    const keyLabel = `Gemini 키 #${i + 1}(...${key.slice(-4)})`;
-    try {
-      const client = new GoogleGenerativeAI(key);
-      const model = client.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent(prompt);
-      return result.response.text().trim();
-    } catch (err) {
-      lastError = err;
-      const isQuotaOrRateLimit =
-        err.status === 429 ||
-        err.message?.includes('429') ||
-        err.message?.includes('RESOURCE_EXHAUSTED') ||
-        err.message?.includes('quota') ||
-        err.message?.includes('rate limit');
 
-      if (i < keys.length - 1) {
-        if (isQuotaOrRateLimit) {
-          console.warn(`⚠️ [Gemini] ${keyLabel} 할당량 초과(429). 예비 키 #${i + 2}로 자동 전환하여 재시도합니다.`);
+  // 헬퍼: Google Gemini 시도
+  const tryGemini = async () => {
+    for (let i = 0; i < geminiKeys.length; i++) {
+      const key = geminiKeys[i];
+      const keyLabel = `Gemini 키 #${i + 1}(...${key.slice(-4)})`;
+      try {
+        const client = new GoogleGenerativeAI(key);
+        const model = client.getGenerativeModel({ model: modelName });
+        const result = await model.generateContent(prompt);
+        return result.response.text().trim();
+      } catch (err) {
+        lastError = err;
+        const isQuotaOrRateLimit =
+          err.status === 429 ||
+          err.message?.includes('429') ||
+          err.message?.includes('RESOURCE_EXHAUSTED') ||
+          err.message?.includes('quota') ||
+          err.message?.includes('rate limit');
+
+        if (i < geminiKeys.length - 1) {
+          if (isQuotaOrRateLimit) {
+            console.warn(`⚠️ [Gemini] ${keyLabel} 할당량 초과(429). 예비 키 #${i + 2}로 자동 전환합니다.`);
+          } else {
+            console.warn(`⚠️ [Gemini] ${keyLabel} 호출 실패 (${err.message}). 예비 키 #${i + 2}로 재시도합니다.`);
+          }
         } else {
-          console.warn(`⚠️ [Gemini] ${keyLabel} 호출 실패 (${err.message}). 예비 키 #${i + 2}로 재시도합니다.`);
+          console.warn(`⚠️ [Gemini] 모든 직결 Gemini 키 소진/실패 (${err.message}).`);
         }
-        continue;
       }
+    }
+    return null;
+  };
+
+  // 헬퍼: SWU MindLogic Gateway 시도
+  const trySwu = async () => {
+    for (let j = 0; j < swuKeys.length; j++) {
+      const key = swuKeys[j];
+      const keyLabel = `SWU AI 키 #${j + 1}(...${key.slice(-4)})`;
+      try {
+        const text = await callMindlogicGateway(key, prompt);
+        return text;
+      } catch (err) {
+        lastError = err;
+        const errMsg = err.response?.data?.error?.message || err.message;
+        if (j < swuKeys.length - 1) {
+          console.warn(`⚠️ [SWU AI] ${keyLabel} 호출 실패 (${errMsg}). 예비 SWU AI 키 #${j + 2}로 자동 전환합니다.`);
+        } else {
+          console.warn(`⚠️ [SWU AI] 모든 SWU AI 키 실패 (${errMsg}).`);
+        }
+      }
+    }
+    return null;
+  };
+
+  if (preferSwu) {
+    const swuResult = await trySwu();
+    if (swuResult) return swuResult;
+    console.warn('⚠️ [AI Fallback] SWU AI 키 소진으로 Google Gemini 키로 대체 시도합니다.');
+    const geminiResult = await tryGemini();
+    if (geminiResult) return geminiResult;
+  } else {
+    const geminiResult = await tryGemini();
+    if (geminiResult) return geminiResult;
+    if (swuKeys.length > 0) {
+      console.warn('⚠️ [AI Fallback] Gemini 키 소진으로 학교 SWU AI 게이트웨이로 대체 시도합니다.');
+      const swuResult = await trySwu();
+      if (swuResult) return swuResult;
     }
   }
 
-  throw lastError;
+  throw lastError || new Error('모든 AI 생성 키(Gemini / SWU AI) 호출에 실패했습니다.');
 }
 
 /**

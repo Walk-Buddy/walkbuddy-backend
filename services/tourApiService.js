@@ -809,54 +809,58 @@ exports.getPhotosByKeyword = async (keyword, limit = 10) => {
     throw err;
   }
 
-  const serviceKey = getServiceKey();
-  if (!serviceKey) {
-    throw new Error("TOURAPI_SERVICE_KEY 환경변수가 설정되지 않았습니다.");
-  }
-
-  const url = new URL(`${PHOTO_BASE_URL}/galleryList1`);
-  url.searchParams.append("serviceKey", serviceKey);
-  url.searchParams.append("MobileOS", DEFAULT_MOBILE_OS);
-  url.searchParams.append("MobileApp", DEFAULT_MOBILE_APP);
-  url.searchParams.append("_type", "json");
-  url.searchParams.append("keyword", keyword.trim());
-  url.searchParams.append("numOfRows", String(limit));
-  url.searchParams.append("pageNo", "1");
-
-    const _startedAt = Date.now();
-  const _params = { keyword: keyword.trim(), numOfRows: limit, pageNo: 1 };
-  try {
-    const { data } = await http.get(url.toString());
-    const header = data?.response?.header;
-    if (header?.resultCode && header.resultCode !== "0000") {
-      if (header.resultCode === "03") {
-        trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "ok", resultCode: "03", message: "결과 없음", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
-        return [];
-      }
-      const err = new Error(header.resultMsg || "관광사진 API 호출 실패");
-      err.code = header.resultCode;
-      err.status = 502;
-      trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "error", resultCode: header.resultCode, message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
-      throw err;
+  const cacheKey = `PhotoGalleryService1:galleryList1:${keyword.trim()}:${limit}`;
+  return tourCache.swr(cacheKey, async () => {
+    const serviceKey = getServiceKey();
+    if (!serviceKey) {
+      throw new Error("TOURAPI_SERVICE_KEY 환경변수가 설정되지 않았습니다.");
     }
 
-    const item = data?.response?.body?.items?.item;
-    const rawItems = !item ? [] : Array.isArray(item) ? item : [item];
+    const url = new URL(`${PHOTO_BASE_URL}/galleryList1`);
+    url.searchParams.append("serviceKey", serviceKey);
+    url.searchParams.append("MobileOS", DEFAULT_MOBILE_OS);
+    url.searchParams.append("MobileApp", DEFAULT_MOBILE_APP);
+    url.searchParams.append("_type", "json");
+    url.searchParams.append("keyword", keyword.trim());
+    url.searchParams.append("numOfRows", String(limit));
+    url.searchParams.append("pageNo", "1");
 
-    trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "ok", resultCode: header?.resultCode || "0000", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+    const _startedAt = Date.now();
+    const _params = { keyword: keyword.trim(), numOfRows: limit, pageNo: 1 };
+    try {
+      const { data } = await http.get(url.toString());
+      const header = data?.response?.header;
+      if (header?.resultCode && header.resultCode !== "0000") {
+        if (header.resultCode === "03") {
+          trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "ok", resultCode: "03", message: "결과 없음", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+          return [];
+        }
+        const err = new Error(header.resultMsg || "관광사진 API 호출 실패");
+        err.code = header.resultCode;
+        err.status = 502;
+        trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "error", resultCode: header.resultCode, message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+        throw err;
+      }
 
-    return rawItems.map((img) => ({
-      thumbnail: img.galWebImageUrl || img.galThumbnailImage || null,
-      original: img.galWebImageUrl || null,
-      title: img.galTitle || null,
-    }));
-  } catch (err) {
-    if (err.status) throw err;
-    trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "error", message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
-    console.error("[PhotoGallery API 오류]", err.message);
-    return [];
-  }
+      const item = data?.response?.body?.items?.item;
+      const rawItems = !item ? [] : Array.isArray(item) ? item : [item];
+
+      trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "ok", resultCode: header?.resultCode || "0000", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+
+      return rawItems.map((img) => ({
+        thumbnail: img.galWebImageUrl || img.galThumbnailImage || null,
+        original: img.galWebImageUrl || null,
+        title: img.galTitle || null,
+      }));
+    } catch (err) {
+      if (err.status) throw err;
+      trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "error", message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+      console.error("[PhotoGallery API 오류]", err.message);
+      return [];
+    }
+  });
 };
+
 
 /**
  * 7. 스팟 사진 조회 (혼합 전략)
@@ -925,12 +929,26 @@ exports.getPetTourDetail = async (contentId) => {
     };
   }
 
-  // 표준 11개 스팟 태그에 매핑 가능한 요약 태그 추출
-  const summaryTags = ["#반려견동반"];
-  const facilities = item.relaPosesFclty || "";
+  // 표준 11개 스팟 태그 및 반려동물 세부 태그 추출
+  const summaryTags = ["#반려견동반", "#반려동물"];
+  const petSize = `${item.acmpyPsblCpam || ""} ${item.etcAcmpyInfo || ""} ${item.petTursmInfo || ""}`;
+  const facilities = `${item.relaPosesFclty || ""} ${item.etcAcmpyInfo || ""}`;
+
+  if (/대형견|전\s*견종|전견종|모든\s*견종|제한\s*없음|제한없음/i.test(petSize)) {
+    summaryTags.push("#대형견가능");
+  }
+  if (/소형견|중[,\s·]*소형견|중형견|10kg|15kg|전\s*견종|전견종|모든\s*견종/i.test(petSize)) {
+    summaryTags.push("#소형견동반");
+  }
+  if (/배변|배변봉투|배변시설|수거함/i.test(facilities)) {
+    summaryTags.push("#반려견배변시설");
+  }
+  if (/놀이터|운동장|안전문|펜스/i.test(facilities)) {
+    summaryTags.push("#반려견놀이터");
+  }
   if (facilities.includes("주차") || facilities.includes("주차장")) summaryTags.push("#주차가능");
-  if (facilities.includes("화장실") || facilities.includes("배변")) summaryTags.push("#화장실");
-  if (facilities.includes("쉼터") || facilities.includes("벤치") || facilities.includes("놀이터")) summaryTags.push("#벤치·쉼터");
+  if (facilities.includes("화장실")) summaryTags.push("#화장실");
+  if (facilities.includes("쉼터") || facilities.includes("벤치")) summaryTags.push("#벤치·쉼터");
 
   return {
     content_id: contentId,
@@ -976,7 +994,7 @@ exports.getPetTourSpots = async ({ region, contentTypeId, page = 1, limit = 10 }
   const data = await requestPetTourApi("areaBasedList2", params);
   const rawItems = getItems(data);
 
-  const spots = rawItems.map((item) => ({
+  let spots = rawItems.map((item) => ({
     content_id: item.contentid,
     content_type_id: item.contenttypeid,
     title: item.title,
@@ -990,7 +1008,53 @@ exports.getPetTourSpots = async ({ region, contentTypeId, page = 1, limit = 10 }
     cat3: item.cat3 || null,
     region: target.name,
     is_pet_friendly: true,
+    tags: [
+      { tag_id: "pet", name: "반려견동반" },
+      { tag_id: "pet2", name: "반려동물" },
+    ],
   }));
+
+  // DB 연동 및 추천도/태그 보강
+  if (spots.length > 0) {
+    try {
+      const titles = spots.map((s) => s.title);
+      const dbSpotsResult = await pool.query(
+        `SELECT s.spot_id, s.name, s.recommend_pct,
+                COALESCE(json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
+                FILTER (WHERE t.tag_id IS NOT NULL), '[]') AS tags
+         FROM spots s
+         LEFT JOIN taggings tg ON tg.target_id = s.spot_id AND tg.target_type = 'spot'
+         LEFT JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+         WHERE s.name = ANY($1::TEXT[]) AND s.status = 'active'
+         GROUP BY s.spot_id`,
+        [titles]
+      );
+
+      if (dbSpotsResult.rows.length > 0) {
+        const dbMap = new Map();
+        for (const row of dbSpotsResult.rows) {
+          dbMap.set(row.name, row);
+        }
+
+        spots = spots.map((s) => {
+          const dbSpot = dbMap.get(s.title);
+          if (dbSpot) {
+            const mergedTags = [...(s.tags || []), ...(dbSpot.tags || [])];
+            const uniqueTags = Array.from(new Map(mergedTags.map((t) => [t.name, t])).values());
+            return {
+              ...s,
+              spot_id: dbSpot.spot_id,
+              recommend_pct: dbSpot.recommend_pct == null ? null : Number(dbSpot.recommend_pct),
+              tags: uniqueTags,
+            };
+          }
+          return s;
+        });
+      }
+    } catch (dbErr) {
+      console.error("PetTourSpots DB enrichment error:", dbErr.message);
+    }
+  }
 
   return {
     total: getTotalCount(data),
@@ -1043,6 +1107,10 @@ exports.searchPetTourPlaces = async ({ region, keyword, contentTypeId, page = 1,
     y: item.mapy ? Number(item.mapy) : null,
     region: target ? target.name : "전체",
     is_pet_friendly: true,
+    tags: [
+      { tag_id: "pet", name: "반려견동반" },
+      { tag_id: "pet2", name: "반려동물" },
+    ],
   }));
 
   return {
@@ -1053,3 +1121,4 @@ exports.searchPetTourPlaces = async ({ region, keyword, contentTypeId, page = 1,
     spots,
   };
 };
+

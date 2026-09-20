@@ -279,21 +279,22 @@ function extractTourTags({ overview, barrierFreeInfo, petTourInfo }) {
     if (petTourInfo?.has_pet_info) {
         tags.add('반려견동반');
         const petDetails = petTourInfo.details || {};
-        const sizeStr = String(petDetails.allowed_pet_size || '');
-        if (sizeStr.includes('대형견') || sizeStr.includes('모두') || sizeStr.includes('제한없음')) {
+        const sizeStr = `${petDetails.allowed_pet_size || ''} ${petDetails.etc_info || ''} ${petDetails.pet_tour_info || ''}`;
+        if (/대형견|전\s*견종|전견종|모든\s*견종|제한\s*없음|제한없음/i.test(sizeStr)) {
             tags.add('대형견가능');
-        } else if (sizeStr.includes('소형견') || sizeStr.includes('중형견')) {
+        }
+        if (/소형견|중[,\s·]*소형견|중형견|10kg|15kg|전\s*견종|전견종|모든\s*견종/i.test(sizeStr)) {
             tags.add('소형견동반');
         }
 
-        const facilityStr = String(petDetails.facilities || '');
-        if (facilityStr.includes('배변') || facilityStr.includes('봉투') || facilityStr.includes('수거함')) {
+        const facilityStr = `${petDetails.facilities || ''} ${petDetails.etc_info || ''}`;
+        if (/배변|배변봉투|배변시설|수거함/i.test(facilityStr)) {
             tags.add('반려견배변시설');
         }
-        if (facilityStr.includes('놀이터') || facilityStr.includes('운동장') || facilityStr.includes('펜스')) {
+        if (/놀이터|운동장|안전문|펜스/i.test(facilityStr)) {
             tags.add('반려견놀이터');
         }
-        if (facilityStr.includes('주차')) tags.add('주차가능');
+        if (facilityStr.includes('주차') || facilityStr.includes('주차장')) tags.add('주차가능');
         if (facilityStr.includes('화장실')) tags.add('화장실');
         if (facilityStr.includes('쉼터') || facilityStr.includes('벤치')) tags.add('벤치·쉼터');
     }
@@ -571,7 +572,11 @@ async function enrichKakaoSpotTourContent(spot, userId) {
                 result.barrier_free_enriched = true;
             }
 
-            if (petTourInfo?.has_pet_info) {
+            if (petTourInfo?.has_pet_info && petTourInfo.details) {
+                updateParams.push(JSON.stringify(petTourInfo.details));
+                updateClauses.push(`pet_tour_info = $${updateParams.length}`);
+                result.pet_tour_enriched = true;
+            } else if (petTourInfo?.has_pet_info) {
                 result.pet_tour_enriched = true;
             }
 
@@ -611,7 +616,7 @@ async function enrichKakaoSpotTourContent(spot, userId) {
                  SET ${updateClauses.join(', ')}
                  WHERE spot_id = $1
                  RETURNING spot_id, kakao_place_id, name, address, categories, kakao_category_name,
-                           recommend_pct, content_tour, barrier_free_info, first_image,
+                           recommend_pct, content_tour, barrier_free_info, pet_tour_info, first_image,
                            ST_X(location::GEOMETRY) AS x,
                            ST_Y(location::GEOMETRY) AS y`,
                 updateParams
