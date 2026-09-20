@@ -52,7 +52,8 @@ jobs:
 
             # 2. 최신 코드 pull
             git checkout contest
-            git pull origin contest
+            git fetch origin contest
+            git reset --hard origin/contest
             AFTER="$(git rev-parse --short HEAD)"
             echo "✅ Code updated to $AFTER"
 
