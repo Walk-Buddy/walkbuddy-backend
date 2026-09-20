@@ -3,6 +3,7 @@ const axios = require('axios');
 const {
     SPOT_CATEGORIES,
     SPOT_CATEGORY_SEARCH_RULES,
+    getFallbackCategory,
     inferSpotCategoriesWithFallback,
     extractRegionFromAddress,
     inferRegionFromLocation,
@@ -464,8 +465,12 @@ async function searchKakaoSpotCandidates({ keyword, category, size = 15 }) {
 
     const uniqueKakaoSpotMap = new Map();
     for (const document of allDocuments) {
-        const categories = inferSpotCategoriesWithFallback(document);
-        if (categories.length === 0) continue;
+        let categories = inferSpotCategoriesWithFallback(document);
+        // 키워드 검색 시에는 일상적인 장소(식당, 카페, 편의점, 약국, 정류장, 주차장, 건물 등)도 배제하지 않고 포함
+        if (categories.length === 0) {
+            const fallbackCat = getFallbackCategory(document.category_name || '');
+            categories = fallbackCat ? [fallbackCat] : ['공원·광장'];
+        }
         if (category && !categories.includes(category)) continue;
         uniqueKakaoSpotMap.set(document.id, {
             kakao_place_id: document.id,
@@ -473,8 +478,8 @@ async function searchKakaoSpotCandidates({ keyword, category, size = 15 }) {
             kakao_category_name: document.category_name,
             categories,
             address: getKakaoAddress(document),
-            x: document.x,
-            y: document.y,
+            x: Number(document.x),
+            y: Number(document.y),
             distance: document.distance ? Number(document.distance) : null,
         });
     }
