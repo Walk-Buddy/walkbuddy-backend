@@ -346,6 +346,9 @@ CREATE TABLE spots (
     barrier_free_info   JSONB           NULL,
     -- 무장애 여행정보(열린관광/KorWithService2 연동 데이터)
 
+    pet_tour_info       JSONB           NULL,
+    -- 반려동물 동반여행 정보(한국관광공사 KorPetTourService2 연동 데이터)
+
     is_night_tour       BOOLEAN         NOT NULL DEFAULT FALSE,
     -- 야간명소 여부
 

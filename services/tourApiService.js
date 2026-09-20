@@ -2,6 +2,7 @@ const axios = require("axios");
 const { resolveRegion, TARGET_REGIONS, inferSpotCategories, inferSpotCategoriesWithFallback, extractRegionFromAddress } = require("../constants/spotCategoryRules");
 const pool = require("../config/db");
 const trafficLog = require("./tourTrafficLog");
+const tourCache = require("./tourCache");
 
 const BASE_URL = "https://apis.data.go.kr/B551011/KorService2";
 const WITH_TOUR_BASE_URL = "https://apis.data.go.kr/B551011/KorWithService2"; // 무장애 여행정보 API
@@ -104,27 +105,30 @@ function buildUrl(pathname, params = {}) {
 }
 
 async function requestTourApi(pathname, params = {}) {
-  const url = buildUrl(pathname, params);
-  const api = "KorService2";
-  const { data, httpStatus, durationMs, startedAt } = await fetchJson({
-    api,
-    pathname,
-    params,
-    url,
-    authMessage: "한국관광공사 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.",
+  const cacheKey = `KorService2:${pathname}:${JSON.stringify(params)}`;
+  return tourCache.swr(cacheKey, async () => {
+    const url = buildUrl(pathname, params);
+    const api = "KorService2";
+    const { data, httpStatus, durationMs, startedAt } = await fetchJson({
+      api,
+      pathname,
+      params,
+      url,
+      authMessage: "한국관광공사 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.",
+    });
+
+    const header = data?.response?.header;
+    if (header?.resultCode && header.resultCode !== "0000") {
+      const err = new Error(header.resultMsg || "TourAPI 호출 실패");
+      err.code = header.resultCode;
+      err.status = 502;
+      trafficLog.record({ api, pathname, params, status: "error", httpStatus, resultCode: header.resultCode, message: err.message, durationMs, startedAt });
+      throw err;
+    }
+
+    trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: header?.resultCode || "0000", durationMs, startedAt });
+    return data;
   });
-
-  const header = data?.response?.header;
-  if (header?.resultCode && header.resultCode !== "0000") {
-    const err = new Error(header.resultMsg || "TourAPI 호출 실패");
-    err.code = header.resultCode;
-    err.status = 502;
-    trafficLog.record({ api, pathname, params, status: "error", httpStatus, resultCode: header.resultCode, message: err.message, durationMs, startedAt });
-    throw err;
-  }
-
-  trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: header?.resultCode || "0000", durationMs, startedAt });
-  return data;
 }
 
 function buildWithTourUrl(pathname, params = {}) {
@@ -155,31 +159,34 @@ function buildWithTourUrl(pathname, params = {}) {
 }
 
 async function requestWithTourApi(pathname, params = {}) {
-  const url = buildWithTourUrl(pathname, params);
-  const api = "KorWithService2";
-  const { data, httpStatus, durationMs, startedAt } = await fetchJson({
-    api,
-    pathname,
-    params,
-    url,
-    authMessage: "한국관광공사 무장애 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.",
-  });
+  const cacheKey = `KorWithService2:${pathname}:${JSON.stringify(params)}`;
+  return tourCache.swr(cacheKey, async () => {
+    const url = buildWithTourUrl(pathname, params);
+    const api = "KorWithService2";
+    const { data, httpStatus, durationMs, startedAt } = await fetchJson({
+      api,
+      pathname,
+      params,
+      url,
+      authMessage: "한국관광공사 무장애 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.",
+    });
 
-  const header = data?.response?.header;
-  if (header?.resultCode && header.resultCode !== "0000") {
-    if (header.resultCode === "03") {
-      trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: "03", message: "결과 없음", durationMs, startedAt });
-      return { response: { body: { items: { item: [] }, totalCount: 0 } } };
+    const header = data?.response?.header;
+    if (header?.resultCode && header.resultCode !== "0000") {
+      if (header.resultCode === "03") {
+        trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: "03", message: "결과 없음", durationMs, startedAt });
+        return { response: { body: { items: { item: [] }, totalCount: 0 } } };
+      }
+      const err = new Error(header.resultMsg || "무장애 TourAPI 호출 실패");
+      err.code = header.resultCode;
+      err.status = 502;
+      trafficLog.record({ api, pathname, params, status: "error", httpStatus, resultCode: header.resultCode, message: err.message, durationMs, startedAt });
+      throw err;
     }
-    const err = new Error(header.resultMsg || "무장애 TourAPI 호출 실패");
-    err.code = header.resultCode;
-    err.status = 502;
-    trafficLog.record({ api, pathname, params, status: "error", httpStatus, resultCode: header.resultCode, message: err.message, durationMs, startedAt });
-    throw err;
-  }
 
-  trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: header?.resultCode || "0000", durationMs, startedAt });
-  return data;
+    trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: header?.resultCode || "0000", durationMs, startedAt });
+    return data;
+  });
 }
 
 function buildPetTourUrl(pathname, params = {}) {
@@ -210,31 +217,34 @@ function buildPetTourUrl(pathname, params = {}) {
 }
 
 async function requestPetTourApi(pathname, params = {}) {
-  const url = buildPetTourUrl(pathname, params);
-  const api = "KorPetTourService2";
-  const { data, httpStatus, durationMs, startedAt } = await fetchJson({
-    api,
-    pathname,
-    params,
-    url,
-    authMessage: "한국관광공사 반려동물 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.",
-  });
+  const cacheKey = `KorPetTourService2:${pathname}:${JSON.stringify(params)}`;
+  return tourCache.swr(cacheKey, async () => {
+    const url = buildPetTourUrl(pathname, params);
+    const api = "KorPetTourService2";
+    const { data, httpStatus, durationMs, startedAt } = await fetchJson({
+      api,
+      pathname,
+      params,
+      url,
+      authMessage: "한국관광공사 반려동물 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.",
+    });
 
-  const header = data?.response?.header;
-  if (header?.resultCode && header.resultCode !== "0000") {
-    if (header.resultCode === "03") {
-      trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: "03", message: "결과 없음", durationMs, startedAt });
-      return { response: { body: { items: { item: [] }, totalCount: 0 } } };
+    const header = data?.response?.header;
+    if (header?.resultCode && header.resultCode !== "0000") {
+      if (header.resultCode === "03") {
+        trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: "03", message: "결과 없음", durationMs, startedAt });
+        return { response: { body: { items: { item: [] }, totalCount: 0 } } };
+      }
+      const err = new Error(header.resultMsg || "반려동물 TourAPI 호출 실패");
+      err.code = header.resultCode;
+      err.status = 502;
+      trafficLog.record({ api, pathname, params, status: "error", httpStatus, resultCode: header.resultCode, message: err.message, durationMs, startedAt });
+      throw err;
     }
-    const err = new Error(header.resultMsg || "반려동물 TourAPI 호출 실패");
-    err.code = header.resultCode;
-    err.status = 502;
-    trafficLog.record({ api, pathname, params, status: "error", httpStatus, resultCode: header.resultCode, message: err.message, durationMs, startedAt });
-    throw err;
-  }
 
-  trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: header?.resultCode || "0000", durationMs, startedAt });
-  return data;
+    trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: header?.resultCode || "0000", durationMs, startedAt });
+    return data;
+  });
 }
 
 function getItems(data) {

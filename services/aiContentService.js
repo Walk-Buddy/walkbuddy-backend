@@ -5,6 +5,7 @@ const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const s3 = require('../config/s3'); // 기본 자격증명 체인(EC2 IAM Role 등) 사용 — .env에 평문 키 저장 안 함
 const axios = require('axios');
 const odiiService = require('./odiiService');
+const tourApiService = require('./tourApiService');
 
 const S3_BUCKET = process.env.S3_BUCKET_NAME;
 // 예: https://<bucket>.s3.<region>.amazonaws.com/tts/<spotId>/place.mp3
@@ -205,18 +206,74 @@ function extractBarrierFreeTip(barrierFreeInfo) {
   }
 }
 
-async function getAiContentsByTypes(spotId, contentTypes = ['place', 'history', 'tour']) {
-  const { rows: spotRows } = await pool.query(
-    `SELECT name, address, ST_X(location::geometry) AS x, ST_Y(location::geometry) AS y,
-            content_place, content_history, content_tour, barrier_free_info
-     FROM spots WHERE spot_id = $1 AND status = 'active'`,
-    [spotId]
-  );
-  if (!spotRows.length) {
+async function getAiContentsByTypes(rawSpotId, contentTypes = ['place', 'history', 'tour']) {
+  if (!rawSpotId) {
+    const err = new Error('spot_id는 필수입니다.');
+    err.status = 400; throw err;
+  }
+
+  let spotId = String(rawSpotId).trim();
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(spotId);
+
+  let spot = null;
+  if (isUuid) {
+    const { rows: spotRows } = await pool.query(
+      `SELECT spot_id, name, address, ST_X(location::geometry) AS x, ST_Y(location::geometry) AS y,
+              content_place, content_history, content_tour, barrier_free_info
+       FROM spots WHERE spot_id = $1 AND status = 'active'`,
+      [spotId]
+    );
+    if (spotRows.length) {
+      spot = spotRows[0];
+    }
+  }
+
+  // DB에 없는 경우 또는 숫자 TourAPI contentId인 경우: TourAPI 조회 및 spots 등록 시도
+  if (!spot) {
+    const isNumeric = /^\d+$/.test(spotId);
+    if (isNumeric) {
+      try {
+        const tourDetail = await tourApiService.getSpotDetail(spotId);
+        if (tourDetail) {
+          // 동일 이름으로 이미 등록된 스팟이 있는지 확인
+          const { rows: existingRows } = await pool.query(
+            `SELECT spot_id, name, address, ST_X(location::geometry) AS x, ST_Y(location::geometry) AS y,
+                    content_place, content_history, content_tour, barrier_free_info
+             FROM spots WHERE name = $1 AND status = 'active' LIMIT 1`,
+            [tourDetail.title]
+          );
+
+          if (existingRows.length) {
+            spot = existingRows[0];
+            spotId = spot.spot_id;
+          } else {
+            // spots 테이블에 신규 등록하여 spot_id 확보
+            const posX = tourDetail.x || 126.9780;
+            const posY = tourDetail.y || 37.5665;
+            const overviewText = tourDetail.overview || null;
+            const { rows: newSpotRows } = await pool.query(
+              `INSERT INTO spots (name, address, location, source, content_place, content_tour, categories)
+               VALUES ($1, $2, ST_SetSRID(ST_Point($3, $4), 4326)::geography, 'tour', $5, $5, ARRAY['관광·명소'])
+               RETURNING spot_id, name, address, ST_X(location::geometry) AS x, ST_Y(location::geometry) AS y,
+                         content_place, content_history, content_tour, barrier_free_info`,
+              [tourDetail.title, tourDetail.address, posX, posY, overviewText]
+            );
+            if (newSpotRows.length) {
+              spot = newSpotRows[0];
+              spotId = spot.spot_id;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`[getAiContentsByTypes] TourAPI 연동 실패 (${spotId}):`, err.message);
+      }
+    }
+  }
+
+  if (!spot) {
     const err = new Error('스팟을 찾을 수 없습니다.');
     err.status = 404; throw err;
   }
-  const spot = spotRows[0];
 
   const typeMap = {
     place:   { label: '장소 안내',  source: spot.content_place   },
