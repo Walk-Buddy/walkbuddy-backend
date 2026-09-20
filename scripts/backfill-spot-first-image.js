@@ -224,14 +224,26 @@ async function main() {
     const distLabel = result.dist != null ? ` (${result.dist.toFixed(2)}km)` : '';
     console.log(`✅ ${result.match}${distLabel}`);
 
+    // http 이미지는 https 로 정규화 (일부 CDN 은 https 미지원이므로 실패 시 원본 유지)
+    let finalUrl = result.url;
+    if (/^http:\/\//i.test(finalUrl)) {
+      const httpsUrl = finalUrl.replace(/^http:\/\//i, 'https://');
+      try {
+        await axios.head(httpsUrl, { timeout: 4000 });
+        finalUrl = httpsUrl;
+      } catch (_) {
+        // https 미지원 → http 유지 (앱은 usesCleartextTraffic=true 로 표시 가능)
+      }
+    }
+
     if (!DRY_RUN) {
       await pool.query('UPDATE spots SET first_image = $1 WHERE spot_id = $2', [
-        result.url,
+        finalUrl,
         spot.spot_id,
       ]);
     }
-    filled++;
-    matched.push({ name: spot.name, url: result.url, match: result.match });
+    filled += 1;
+    matched.push({ name: spot.name, url: finalUrl, match: result.match });
     await sleep(SLEEP_MS);
   }
 

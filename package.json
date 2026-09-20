@@ -19,7 +19,9 @@
     "backfill:spot-first-image": "node scripts/backfill-spot-first-image.js",
     "seed:prewalk-course": "node scripts/create-prewalk-course-via-api.js",
     "seed:prewalk-reviews": "node scripts/create-prewalk-course-via-api.js --reviews-only",
-    "db:seed": "node db/run-sql.js db/seed.sql"
+    "seed:demo": "node scripts/seed-demo-engagements.js",
+    "seed:demo:reset": "node scripts/seed-demo-engagements.js --reset",
+    "seed:first-image": "node scripts/backfill-spot-first-image.js --sleep 400"
   },
   "dependencies": {
 
@@ -48,5 +50,4 @@
     "nodemon": "^3.0.1"
   }
 }
-
 

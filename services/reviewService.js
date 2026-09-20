@@ -132,7 +132,7 @@ exports.getCourseReviews = async (courseId, query, userId) => {
 // 스팟 후기 등록
 // ──────────────────────────────────────────────────────────────────────
 exports.createSpotReview = async (userId, spotId, body, files = []) => {
-  const { walk_record_id, description } = body;
+    const { walk_record_id, description, is_public = true } = body;
   const is_recommended = isMissing(body.is_recommended) ? null : body.is_recommended === 'true' || body.is_recommended === true;
   let tag_ids = [];
   if (!isMissing(body.tag_ids)) {
