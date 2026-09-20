@@ -250,29 +250,36 @@ async function fetchTourOverview(contentId) {
 }
 
 // 관광공사 응답에서 세부 태그 자동 도출
-function extractTourTags({ overview, barrierFreeInfo, petTourInfo }) {
+function extractTourTags({ overview, barrierFreeInfo, petTourInfo, odiiGuide }) {
     const tags = new Set();
 
-    // 1. 일반 관광 개요 → 음성해설 태그
-    if (overview) {
-        tags.add('음성해설');
+    // 1. Odii 오디오 가이드 음원/스크립트 연동 시에만 Odii음성해설 태그 부착
+    if (odiiGuide?.audio_url || odiiGuide?.script) {
+        tags.add('Odii음성해설');
     }
 
     // 2. 무장애 편의시설 (KorWithService2) 세부 태그
     if (barrierFreeInfo?.has_barrier_free_info && barrierFreeInfo.details) {
         tags.add('열린관광');
         const d = barrierFreeInfo.details;
-        if (d.physical?.wheelchair) { tags.add('휠체어접근'); tags.add('휠체어 대여'); }
-        if (d.physical?.route) { tags.add('무단차통로'); tags.add('주출입구 진입로'); }
-        if (d.physical?.restroom) { tags.add('장애인화장실'); tags.add('장애인 화장실'); }
-        if (d.physical?.parking) { tags.add('장애인주차'); tags.add('장애인 주차구역'); }
+        if (d.physical?.wheelchair) {
+            const wcStr = String(d.physical.wheelchair);
+            if (/대여|렌탈/.test(wcStr)) {
+                tags.add('휠체어대여');
+            } else {
+                tags.add('휠체어접근');
+            }
+        }
+        if (d.physical?.route && !/(불가|어려움|없음)/.test(d.physical.route)) tags.add('무단차통로');
+        if (d.physical?.restroom && !/(없음|미설치)/.test(d.physical.restroom)) tags.add('장애인화장실');
+        if (d.physical?.parking && !/(없음|불가)/.test(d.physical.parking)) tags.add('장애인주차');
         if (d.physical?.elevator) tags.add('엘리베이터');
-        if (d.infant?.stroller) { tags.add('유모차대여'); tags.add('유모차 대여'); }
-        if (d.infant?.lactation_room) tags.add('수유실');
-        if (d.visual?.braile_block || d.visual?.braile_promotion) { tags.add('점자안내'); tags.add('점자 안내'); }
-        if (d.visual?.help_dog) { tags.add('도우미견가능'); tags.add('안내견 동반'); }
-        if (d.visual?.audio_guide) tags.add('음성해설');
-        if (d.hearing?.sign_language || d.hearing?.video_guide) { tags.add('수어안내'); tags.add('수어 안내'); }
+        if (d.infant?.stroller && !/(불가|없음)/.test(d.infant.stroller)) tags.add('유모차대여');
+        if (d.infant?.lactation_room && !/(없음|미설치)/.test(d.infant.lactation_room)) tags.add('수유실');
+        if (d.visual?.braile_block || d.visual?.braile_promotion) tags.add('점자안내');
+        if (d.visual?.help_dog && !/(불가|금지)/.test(d.visual.help_dog)) tags.add('안내견동반');
+        if (d.visual?.audio_guide && !/(없음|미설치)/.test(d.visual.audio_guide)) tags.add('시각장애인음성안내');
+        if (d.hearing?.sign_language || d.hearing?.video_guide) tags.add('수어안내');
     }
 
     // 3. 반려동물 동반 (KorPetTourService2) 세부 태그
@@ -280,23 +287,25 @@ function extractTourTags({ overview, barrierFreeInfo, petTourInfo }) {
         tags.add('반려견동반');
         const petDetails = petTourInfo.details || {};
         const sizeStr = `${petDetails.allowed_pet_size || ''} ${petDetails.etc_info || ''} ${petDetails.pet_tour_info || ''}`;
-        if (/대형견|전\s*견종|전견종|모든\s*견종|제한\s*없음|제한없음/i.test(sizeStr)) {
-            tags.add('대형견가능');
-        }
-        if (/소형견|중[,\s·]*소형견|중형견|10kg|15kg|전\s*견종|전견종|모든\s*견종/i.test(sizeStr)) {
-            tags.add('소형견동반');
+        if (!/(출입\s*불가|입장\s*금지)/.test(sizeStr)) {
+            if (/대형견|전\s*견종|전견종|모든\s*견종|제한\s*없음|제한없음/i.test(sizeStr)) {
+                tags.add('대형견가능');
+            }
+            if (/소형견|중[,\s·]*소형견|중형견|10kg|15kg|전\s*견종|전견종|모든\s*견종/i.test(sizeStr)) {
+                tags.add('소형견동반');
+            }
         }
 
         const facilityStr = `${petDetails.facilities || ''} ${petDetails.etc_info || ''}`;
-        if (/배변|배변봉투|배변시설|수거함/i.test(facilityStr)) {
+        if (/배변|배변봉투|배변시설|수거함/i.test(facilityStr) && !/(없음|미설치)/.test(facilityStr)) {
             tags.add('반려견배변시설');
         }
-        if (/놀이터|운동장|안전문|펜스/i.test(facilityStr)) {
+        if (/놀이터|운동장|안전문|펜스/i.test(facilityStr) && !/(없음|미설치)/.test(facilityStr)) {
             tags.add('반려견놀이터');
         }
-        if (facilityStr.includes('주차') || facilityStr.includes('주차장')) tags.add('주차가능');
-        if (facilityStr.includes('화장실')) tags.add('화장실');
-        if (facilityStr.includes('쉼터') || facilityStr.includes('벤치')) tags.add('벤치·쉼터');
+        if ((facilityStr.includes('주차') || facilityStr.includes('주차장')) && !/(주차\s*불가|주차장\s*없음)/.test(facilityStr)) tags.add('주차가능');
+        if (facilityStr.includes('화장실') && !/(화장실\s*없음)/.test(facilityStr)) tags.add('화장실');
+        if ((facilityStr.includes('쉼터') || facilityStr.includes('벤치')) && !/(쉼터\s*없음)/.test(facilityStr)) tags.add('벤치·쉼터');
     }
 
     return Array.from(tags);
@@ -627,7 +636,7 @@ async function enrichKakaoSpotTourContent(spot, userId) {
         }
 
         // 3. 세부 기능별 태그 자동 도출 및 일괄 부착
-        const autoTags = extractTourTags({ overview, barrierFreeInfo, petTourInfo });
+        const autoTags = extractTourTags({ overview, barrierFreeInfo, petTourInfo, odiiGuide });
         if (autoTags.length > 0) {
             await attachTagsToSpot(updatedSpot.spot_id, autoTags, userId);
             result.attached_tags = autoTags;
@@ -737,7 +746,7 @@ exports.getSpots = async (query) => {
         whereConditions.push(`(s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length} OR s.sub_region ILIKE $${queryValues.length})`);
     }
 
-    // 태그 ID 목록 검색 (UUID)
+    // 태그 ID 목록 검색 (UUID) — 열린관광 및 반려견동반 선택 시 하위 태그 자동 포함(Group Expansion)
     if (tag_ids) {
         const tagIdList = (Array.isArray(tag_ids) ? tag_ids.join(',') : tag_ids)
             .split(',').map(t => t.trim()).filter(Boolean);
@@ -748,18 +757,30 @@ exports.getSpots = async (query) => {
         }
         if (tagIdList.length > 0) {
             queryValues.push(tagIdList); const tagIdx = queryValues.length;
-            queryValues.push(tagIdList.length); const cntIdx = queryValues.length;
             whereConditions.push(`
                 s.spot_id IN (
                     SELECT tg.target_id FROM taggings tg
-                    WHERE tg.target_type = 'spot' AND tg.tag_id = ANY($${tagIdx}::UUID[])
-                    GROUP BY tg.target_id HAVING COUNT(DISTINCT tg.tag_id) = $${cntIdx}
+                    JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+                    WHERE tg.target_type = 'spot' AND (
+                        tg.tag_id = ANY($${tagIdx}::UUID[])
+                        OR (
+                            t.group_name = '열린관광' AND EXISTS (
+                                SELECT 1 FROM tags t_p WHERE t_p.name = '열린관광' AND t_p.type = 'spot' AND t_p.tag_id = ANY($${tagIdx}::UUID[])
+                            )
+                        )
+                        OR (
+                            t.group_name = '반려동물' AND EXISTS (
+                                SELECT 1 FROM tags t_p WHERE t_p.name = '반려견동반' AND t_p.type = 'spot' AND t_p.tag_id = ANY($${tagIdx}::UUID[])
+                            )
+                        )
+                    )
+                    GROUP BY tg.target_id
                 )
             `);
         }
     }
 
-    // 태그 이름(tag_name / tag_names) 검색 지원
+    // 태그 이름(tag_name / tag_names) 검색 지원 — 열린관광 및 반려견동반 선택 시 하위 태그 자동 포함
     const targetTagNames = tag_name || tag_names;
     if (targetTagNames) {
         const tagNameList = (Array.isArray(targetTagNames) ? targetTagNames.join(',') : targetTagNames)
@@ -770,16 +791,17 @@ exports.getSpots = async (query) => {
         if (tagNameList.length > 0) {
             queryValues.push(tagNameList);
             const tagIdx = queryValues.length;
-            queryValues.push(tagNameList.length);
-            const cntIdx = queryValues.length;
             whereConditions.push(`
                 s.spot_id IN (
                     SELECT tg.target_id
                     FROM taggings tg
                     JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'spot' AND t.is_active = TRUE
-                    WHERE tg.target_type = 'spot' AND t.name = ANY($${tagIdx}::TEXT[])
+                    WHERE tg.target_type = 'spot' AND (
+                        t.name = ANY($${tagIdx}::TEXT[])
+                        OR ('열린관광' = ANY($${tagIdx}::TEXT[]) AND t.group_name = '열린관광')
+                        OR ('반려견동반' = ANY($${tagIdx}::TEXT[]) AND t.group_name = '반려동물')
+                    )
                     GROUP BY tg.target_id
-                    HAVING COUNT(DISTINCT t.name) >= $${cntIdx}
                 )
             `);
         }

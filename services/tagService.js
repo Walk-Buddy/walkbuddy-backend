@@ -21,12 +21,27 @@ function resolveApiTheme(groupName, tagName) {
   return null;
 }
 
-exports.getTags = async () => {
+exports.getTags = async (query = {}) => {
+  const { scope, type } = query;
+
+  const conditions = ['is_active = TRUE'];
+  const params = [];
+
+  if (scope === 'review') {
+    conditions.push('is_review_tag = TRUE');
+  }
+
+  if (type && (type === 'course' || type === 'spot')) {
+    params.push(type);
+    conditions.push(`type = $${params.length}`);
+  }
+
   const { rows } = await pool.query(
-    `SELECT tag_id, name, type, group_name
+    `SELECT tag_id, name, type, group_name, is_review_tag
      FROM tags
-     WHERE is_active = TRUE
-     ORDER BY type ASC, group_name ASC, name ASC`
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY type ASC, group_name ASC, name ASC`,
+    params
   );
 
   // 개별 태그에 api_theme 필드 보강 (방안 B 지원)

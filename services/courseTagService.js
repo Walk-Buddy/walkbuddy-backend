@@ -101,10 +101,13 @@ const SPOT_TO_COURSE_TAG_MAP = {
 // ──────────────────────────────────────────────────────────
 const DESCRIPTION_TAG_RULES = [
   { tag: '힐링', keywords: ['힐링', '조용', '고요', '여유', '쉼', '치유', '명상'] },
-  { tag: '무장애길', keywords: ['무장애', '배리어프리', '휠체어', '경사가 완만', '평지', '데크'] },
-  { tag: '반려동물', keywords: ['반려', '반려견', '애견', '강아지', '반려동물'] },
-  { tag: '아이와함께', keywords: ['아이', '유아', '어린이', '가족', '유모차'] },
-  { tag: '추천산책로', keywords: ['추천', '대표', '명품', '베스트', '인기'] },
+  { tag: '노을·야경', keywords: ['야경', '노을', '일몰', '밤산책', '야간', '달빛', '조명'] },
+  { tag: '자연·풍경', keywords: ['숲길', '바다', '강변', '호수', '피톤치드', '물멍', '자연', '녹음', '계곡'] },
+  { tag: '역사·문화', keywords: ['역사', '문화', '고궁', '한옥', '성곽', '옛길', '유적', '골목'] },
+  // 보행 약자/반려견 안전을 위해 단순 단어가 아닌 명시적 공식 문구만 매칭
+  { tag: '무장애길', keywords: ['무장애길', '무장애나눔길', '무장애탐방로', '열린관광길', '배리어프리길'] },
+  { tag: '반려동물', keywords: ['반려견 동반 산책', '반려동물 동반 산책', '반려견과 함께', '반려동물과 함께', '애견 동반 산책'] },
+  { tag: '아이와함께', keywords: ['유아차 이동 가능', '어린이 생태체험', '가족과 함께 걷기 좋은'] },
 ];
 
 // 코스 카테고리 → 코스 태그 매핑
@@ -112,29 +115,54 @@ const CATEGORY_TAG_MAP = {
   '둘레길': '둘레길',
   '둘레길·트레킹': '둘레길',
   '수변·공원길': '힐링',
-  '도심·골목산책': '추천산책로',
+  '도심·골목산책': '추천코스',
+  '관광코스': '관광코스',
 };
 
 /**
  * 코스 하나의 태그명 집합을 계산한다.
  * @param {object} params
  * @param {string} params.courseId
+ * @param {string|null} params.courseName
  * @param {string|null} params.category
  * @param {string|null} params.description  (raw 또는 파싱 전 텍스트)
  * @param {object} [params.sections]        parseDescriptionSections 결과 (있으면 우선 사용)
+ * @param {string|null} [params.dataSource] 출처
  * @param {string} [client]
  * @returns {Promise<string[]>} 코스 태그명 목록
  */
-async function deriveCourseTagNames({ courseId, category, description, sections }, client = pool) {
+async function deriveCourseTagNames({ courseId, courseName, category, description, sections, dataSource, isOfficial }, client = pool) {
   const tagNames = new Set();
 
-  // 1) 카테고리 기반
+  // 1) 코스 출처 판별 (공식코스 vs 사용자코스)
+  let official = isOfficial;
+  if (official === undefined && courseId) {
+    const { rows: [c] } = await client.query(
+      `SELECT c.data_source, u.role
+       FROM courses c
+       LEFT JOIN users u ON u.user_id = c.owner_id
+       WHERE c.course_id = $1`,
+      [courseId]
+    );
+    official = Boolean(c?.data_source || c?.role === 'admin');
+  } else if (official === undefined) {
+    official = Boolean(dataSource);
+  }
+
+  if (official) {
+    tagNames.add('공식코스');
+  } else {
+    tagNames.add('사용자코스');
+  }
+
+  // 2) 카테고리 기반
   if (category && CATEGORY_TAG_MAP[category]) {
     tagNames.add(CATEGORY_TAG_MAP[category]);
   }
 
-  // 2) 설명 텍스트 기반
+  // 3) 설명 텍스트 기반
   const text = [
+    courseName || '',
     description || '',
     sections?.summary?.join(' ') || '',
     sections?.content || '',
@@ -149,20 +177,9 @@ async function deriveCourseTagNames({ courseId, category, description, sections 
     }
   }
 
-  // 3) 경유지 스팟 태그 승격
-  if (courseId) {
-    const { rows } = await client.query(
-      `SELECT DISTINCT t.name
-       FROM course_waypoints cw
-       JOIN taggings tg ON tg.target_type = 'spot' AND tg.target_id = cw.spot_id
-       JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'spot' AND t.is_active = TRUE
-       WHERE cw.course_id = $1 AND cw.type = 'spot'`,
-      [courseId]
-    );
-    for (const { name } of rows) {
-      const mapped = SPOT_TO_COURSE_TAG_MAP[name];
-      if (mapped) tagNames.add(mapped);
-    }
+  // 4) 코스 명칭에 공인 무장애 명칭 포함 시 공식 무장애길 확정
+  if (courseName && /(무장애|무장애길|무장애나눔길|무장애탐방로|배리어프리)/.test(courseName)) {
+    tagNames.add('무장애길');
   }
 
   return [...tagNames];
@@ -186,17 +203,10 @@ async function attachTagsToCourse(courseId, tagNames, userId, client = pool) {
 
   const attached = [];
   for (const name of cleanNames) {
-    // tags 자동 등록 (코스 태그, 그룹은 기존 알려진 그룹 우선)
-    const groupName = name === '힐링' || name === '추천산책로' || name === '둘레길'
-      ? '추천·테마'
-      : '동반·접근성';
-
+    // tags 조회 및 없으면 안전하게 등록
     const { rows: [tag] } = await client.query(
-      `INSERT INTO tags (name, type, group_name, is_active)
-       VALUES ($1, 'course', $2, TRUE)
-       ON CONFLICT (name, type) DO UPDATE SET is_active = TRUE
-       RETURNING tag_id, name`,
-      [name, groupName]
+      `SELECT tag_id, name FROM tags WHERE name = $1 AND type = 'course' AND is_active = TRUE`,
+      [name]
     );
     if (!tag) continue;
 
@@ -214,8 +224,8 @@ async function attachTagsToCourse(courseId, tagNames, userId, client = pool) {
 /**
  * 코스 하나를 자동 태깅(도출 + 부착)하는 편의 함수.
  */
-async function autoTagCourse({ courseId, category, description, sections, userId }, client = pool) {
-  const tagNames = await deriveCourseTagNames({ courseId, category, description, sections }, client);
+async function autoTagCourse({ courseId, courseName, category, description, sections, dataSource, isOfficial, userId }, client = pool) {
+  const tagNames = await deriveCourseTagNames({ courseId, courseName, category, description, sections, dataSource, isOfficial }, client);
   if (tagNames.length === 0) return [];
   return attachTagsToCourse(courseId, tagNames, userId, client);
 }

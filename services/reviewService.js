@@ -36,7 +36,7 @@ exports.createCourseReview = async (userId, courseId, body) => {
     // 태그 저장
     if (tag_ids.length) {
       const { rows: validTags } = await client.query(
-        `SELECT tag_id FROM tags WHERE tag_id = ANY($1::uuid[]) AND type = 'course' AND is_active = TRUE`,
+        `SELECT tag_id FROM tags WHERE tag_id = ANY($1::uuid[]) AND type = 'course' AND is_active = TRUE AND is_review_tag = TRUE`,
         [tag_ids]
       );
       for (const { tag_id } of validTags) {
@@ -134,8 +134,20 @@ exports.getCourseReviews = async (courseId, query, userId) => {
 exports.createSpotReview = async (userId, spotId, body, files = []) => {
   const { walk_record_id, description } = body;
   const is_recommended = isMissing(body.is_recommended) ? null : body.is_recommended === 'true' || body.is_recommended === true;
-  const is_public = isMissing(body.is_public) ? true : body.is_public === 'true' || body.is_public === true;
-  const tag_ids = isMissing(body.tag_ids) ? [] : [].concat(body.tag_ids);
+  let tag_ids = [];
+  if (!isMissing(body.tag_ids)) {
+    if (Array.isArray(body.tag_ids)) {
+      tag_ids = body.tag_ids;
+    } else if (typeof body.tag_ids === 'string') {
+      try {
+        const parsed = JSON.parse(body.tag_ids);
+        if (Array.isArray(parsed)) tag_ids = parsed;
+        else tag_ids = body.tag_ids.split(',').map(s => s.trim()).filter(Boolean);
+      } catch (_) {
+        tag_ids = body.tag_ids.split(',').map(s => s.trim()).filter(Boolean);
+      }
+    }
+  }
 
   // 업로드된 사진 파일 → S3 key 배열
   const photos = (files || []).map((file) => file.key);
@@ -172,7 +184,7 @@ exports.createSpotReview = async (userId, spotId, body, files = []) => {
     // 태그 저장
     if (tag_ids.length) {
       const { rows: validTags } = await client.query(
-        `SELECT tag_id FROM tags WHERE tag_id = ANY($1::uuid[]) AND type = 'spot' AND is_active = TRUE`,
+        `SELECT tag_id FROM tags WHERE tag_id = ANY($1::uuid[]) AND type = 'spot' AND is_active = TRUE AND is_review_tag = TRUE`,
         [tag_ids]
       );
       for (const { tag_id } of validTags) {

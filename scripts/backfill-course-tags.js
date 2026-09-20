@@ -37,7 +37,7 @@ async function main() {
 
   try {
     const { rows: courses } = await client.query(
-      `SELECT course_id, name, category, description
+      `SELECT course_id, name, category, description, data_source
        FROM courses
        WHERE status = 'active'
        ORDER BY created_at DESC
@@ -53,9 +53,11 @@ async function main() {
         const sections = parseDescriptionSections(course.description);
         const attached = await courseTagService.autoTagCourse({
           courseId: course.course_id,
+          courseName: course.name,
           category: course.category,
           description: course.description,
           sections,
+          dataSource: course.data_source,
         }, client);
 
         if (attached.length > 0) {

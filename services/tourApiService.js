@@ -258,7 +258,7 @@ function getTotalCount(data) {
 }
 
 /**
- * 1. 실시간 축제/행사 조회 (searchFestival1)
+ * 1. 실시간 축제/행사 조회 (searchFestival1 / searchKeyword2)
  * 서울 25개 구 / 춘천시 대상
  */
 exports.getFestivals = async ({ region, eventStartDate, page = 1, limit = 10 } = {}) => {
@@ -266,31 +266,160 @@ exports.getFestivals = async ({ region, eventStartDate, page = 1, limit = 10 } =
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const startDate = eventStartDate || today;
 
-  const data = await requestTourApi("searchFestival2", {
-    areaCode: target.tourApi.areaCode,
-    sigunguCode: target.tourApi.sigunguCode,
-    eventStartDate: startDate,
-    pageNo: page,
-    numOfRows: limit,
-    arrange: "A",
-  });
+  // ── 춘천시 축제 처리 ─────────────────────────────────────────────
+  // 한국관광공사 TourAPI의 searchFestival2는 춘천 축제들의 areacode가 공백으로
+  // 등록되어 있어 areaCode=32&sigunguCode=13 조회 시 누락된다.
+  // 따라서 춘천의 경우 searchKeyword2(keyword="춘천", contentTypeId=15)로
+  // 검색하고 detailIntro2/detailCommon2로 기간·개요·이미지를 보강한다.
+  if (target.code === 'chuncheon') {
+    let kwData;
+    try {
+      kwData = await requestTourApi("searchKeyword2", {
+        keyword: "춘천",
+        contentTypeId: "15",
+        pageNo: page,
+        numOfRows: Math.max(Number(limit) * 2, 20),
+        arrange: "A",
+      });
+    } catch (err) {
+      kwData = null;
+    }
 
-  const rawItems = getItems(data);
-  const festivals = rawItems.map((item) => ({
-    content_id: item.contentid,
-    title: item.title,
-    address: item.addr1 + (item.addr2 ? " " + item.addr2 : ""),
-    event_start_date: item.eventstartdate,
-    event_end_date: item.eventenddate,
-    image_url: item.firstimage || item.firstimage2 || null,
-    tel: item.tel || null,
-    x: item.mapx ? Number(item.mapx) : null,
-    y: item.mapy ? Number(item.mapy) : null,
-    region: target.name,
-  }));
+    const kwItems = getItems(kwData);
+    if (kwItems.length > 0) {
+      const enrichedFestivals = await Promise.all(
+        kwItems.map(async (item) => {
+          let intro = {};
+          let common = {};
+          try {
+            const [introRes, commonRes] = await Promise.all([
+              requestTourApi("detailIntro2", {
+                contentId: item.contentid,
+                contentTypeId: "15",
+              }).catch(() => null),
+              requestTourApi("detailCommon2", {
+                contentId: item.contentid,
+              }).catch(() => null),
+            ]);
+            intro = getItems(introRes)[0] || {};
+            common = getItems(commonRes)[0] || {};
+          } catch (e) {
+            // detail fetch 실패 시 기본 데이터 유지
+          }
+
+          return {
+            content_id: item.contentid,
+            title: item.title,
+            address: item.addr1 + (item.addr2 ? " " + item.addr2 : ""),
+            event_start_date: intro.eventstartdate || item.eventstartdate || null,
+            event_end_date: intro.eventenddate || item.eventenddate || null,
+            image_url: item.firstimage || item.firstimage2 || common.firstimage || null,
+            tel: item.tel || intro.sponsor1tel || common.tel || null,
+            overview: common.overview || null,
+            event_place: intro.eventplace || null,
+            x: item.mapx ? Number(item.mapx) : null,
+            y: item.mapy ? Number(item.mapy) : null,
+            region: target.name,
+            modified_time: item.modifiedtime || null,
+          };
+        })
+      );
+
+      // 날짜 및 최근순 정렬:
+      // 1) 현재 진행 중이거나 다가오는 축제 (event_end_date >= today)를 시작일 오름차순(가장 가까운 예정순)으로 정렬
+      // 2) 지난 축제는 최신순(종료일 내림차순)으로 뒤에 배치
+      const upcomingOrOngoing = [];
+      const past = [];
+
+      for (const f of enrichedFestivals) {
+        if (f.event_end_date && f.event_end_date >= today) {
+          upcomingOrOngoing.push(f);
+        } else {
+          past.push(f);
+        }
+      }
+
+      upcomingOrOngoing.sort((a, b) => (a.event_start_date || "99999999").localeCompare(b.event_start_date || "99999999"));
+      past.sort((a, b) => (b.event_end_date || "00000000").localeCompare(a.event_end_date || "00000000"));
+
+      const sortedFestivals = [...upcomingOrOngoing, ...past];
+
+      return {
+        total: sortedFestivals.length,
+        page: Number(page),
+        limit: Number(limit),
+        region: target.name,
+        festivals: sortedFestivals.slice(0, Number(limit)),
+      };
+    }
+  }
+
+  // ── 서울 및 기타 지역 조회 ───────────────────────────────────────
+  let data;
+  try {
+    data = await requestTourApi("searchFestival2", {
+      areaCode: target.tourApi.areaCode,
+      sigunguCode: target.tourApi.sigunguCode,
+      eventStartDate: startDate,
+      pageNo: page,
+      numOfRows: limit,
+      arrange: "A",
+    });
+  } catch (err) {
+    data = null;
+  }
+
+  let rawItems = getItems(data);
+
+  // 날짜 필터로 인해 결과가 0건인 경우 이전 1년치 기준 또는 기본 날짜로 fallback
+  if (rawItems.length === 0 && !eventStartDate) {
+    const fallbackYear = String(Number(today.slice(0, 4)) - 1);
+    const fallbackStartDate = fallbackYear + today.slice(4);
+    try {
+      const fallbackData = await requestTourApi("searchFestival2", {
+        areaCode: target.tourApi.areaCode,
+        sigunguCode: target.tourApi.sigunguCode,
+        eventStartDate: fallbackStartDate,
+        pageNo: page,
+        numOfRows: limit,
+        arrange: "A",
+      });
+      rawItems = getItems(fallbackData);
+    } catch (e) {
+      // fallback 실패 시 무시
+    }
+  }
+
+  const festivals = await Promise.all(
+    rawItems.map(async (item) => {
+      let overview = null;
+      try {
+        const commonData = await requestTourApi("detailCommon2", {
+          contentId: item.contentid,
+        }).catch(() => null);
+        overview = getItems(commonData)[0]?.overview || null;
+      } catch (e) {
+        // 무시
+      }
+
+      return {
+        content_id: item.contentid,
+        title: item.title,
+        address: item.addr1 + (item.addr2 ? " " + item.addr2 : ""),
+        event_start_date: item.eventstartdate,
+        event_end_date: item.eventenddate,
+        image_url: item.firstimage || item.firstimage2 || null,
+        tel: item.tel || null,
+        overview,
+        x: item.mapx ? Number(item.mapx) : null,
+        y: item.mapy ? Number(item.mapy) : null,
+        region: target.name,
+      };
+    })
+  );
 
   return {
-    total: getTotalCount(data),
+    total: festivals.length,
     page: Number(page),
     limit: Number(limit),
     region: target.name,
