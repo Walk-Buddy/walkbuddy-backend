@@ -375,8 +375,8 @@ CREATE TABLE spots (
     CONSTRAINT chk_spots_status
         CHECK (status IN ('active', 'auto_hidden', 'hidden')),
 
-    CONSTRAINT chk_spots_source
-        CHECK (source IN ('admin', 'kakao')),
+        CONSTRAINT chk_spots_source
+        CHECK (source IN ('admin', 'kakao', 'tour')),
 
     CONSTRAINT chk_spots_recommend_pct
         CHECK (recommend_pct IS NULL OR recommend_pct BETWEEN 0 AND 100)

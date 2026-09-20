@@ -134,7 +134,7 @@ async function callMindlogicGateway(apiKey, prompt, modelName) {
  */
 async function generateContentWithFallback(prompt, modelName = 'gemini-2.5-flash') {
   const geminiKeys = getGeminiApiKeys();
-  const swuKeys = getSwuApiKeys();
+  const swuKeys = getSwuAiKeys();
 
   if (geminiKeys.length === 0 && swuKeys.length === 0) {
     throw new Error('GEMINI_API_KEY 또는 SWU_AI_API_KEY가 설정되지 않았습니다.');
