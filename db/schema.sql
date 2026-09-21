@@ -336,7 +336,7 @@ CREATE TABLE spots (
     -- 관광 안내 해설 텍스트
     -- NULL 이면 해당 스팟은 관광 안내 불가
 
-    first_image         VARCHAR(500)    NULL,
+    first_image         TEXT            NULL,
     -- 장소 목록 카드 노출용 대표 사진 URL
     -- 한국관광공사 TourAPI firstimage 저장
     -- NULL 이면 프론트에서 후기 사진(spot_reviews.photos[1])을 폴백으로 사용

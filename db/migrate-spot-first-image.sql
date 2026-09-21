@@ -8,4 +8,4 @@
 -- ============================================================
 
 ALTER TABLE spots
-ADD COLUMN IF NOT EXISTS first_image VARCHAR(500) NULL;
+ADD COLUMN IF NOT EXISTS first_image TEXT NULL;
