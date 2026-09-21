@@ -45,9 +45,12 @@ jobs:
             echo "📁 Working directory: $(pwd)"
             AFTER="$(git rev-parse --short HEAD)"
 
-            # 2. 최신 코드 pull
+            # 2. 최신 코드 동기화 (서버는 원격 기준으로 강제 동기화)
+            #    - git pull 은 서버 로컬 커밋과 원격 커밋이 divergent 하면 실패하므로
+            #      fetch + reset --hard 로 원격 main 기준으로 맞춘다.
             git checkout main
-            git pull origin main
+            git fetch origin main
+            git reset --hard origin/main
             AFTER="$(git rev-parse --short HEAD)"
             echo "✅ Code updated to $AFTER"
 
@@ -72,3 +75,4 @@ jobs:
             curl -fsS "http://127.0.0.1:${PORT:-3000}/health" || echo "⚠️ /health check failed"
 
             echo "🎉 [Finish] Main server deployment finished successfully!"
+
