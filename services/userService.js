@@ -194,40 +194,110 @@ exports.getStats = async (userId) => {
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 회원 탈퇴 (소프트 딜리트)
+// 회원 탈퇴 (소프트 딜리트 + 개인정보 파기 + 비공개 글/활동 데이터 정리)
 // * @param {string} userId - 탈퇴할 사용자의 UUID
 // ──────────────────────────────────────────────────────────────────────
+exports.deleteAccount = async (userId) => {
+  // 1. DB 커넥션 풀에서 클라이언트(독립 연결선) 하나를 가져옵니다.
+  const client = await pool.connect();
 
-exports.deleteAccount=async(userId)=>{
-    // [1단계] 사용자가 실제로 존재하는지, 이미 탈퇴한 상태는 아닌지 확인
-  const { rows: userRows} = await pool.query(
-    `SELECT user_id, status FROM users WHERE user_id=$1`,
-    [userId]
-  );
+  try {
+    // 2. 트랜잭션 시작 (모든 쿼리를 하나의 작업 묶음으로 처리)
+    await client.query('BEGIN');
 
-    // [2단계] 사용자가 없는 경우 에러 처리
-  if (!userRows.length){
-      const err=new Error(`사용자를 찾을 수 없습니다`);
-      err.status=404;
-      throw err;
-    }
-
-    // [3단계] 이미 탈퇴한 사용자인 경우 에러 처리
-    if(userRows[0].status==='deleted'){
-      const err = new Error(`이미 탈퇴 처리된 계정입니다.`);
-      err.status=400;
-      throw err;
-    }
-
-    // [4단계] DB의 status 상태값을 'deleted'로 수정 (소프트 딜리트)
-    await pool.query(
-      `UPDATE users
-      SET status='deleted',
-      updated_at=NOW()
-      WHERE user_id = $1`,
+    // [단계 1] 사용자 존재 여부 및 계정 상태 확인
+    const { rows: userRows } = await client.query(
+      `SELECT user_id, status FROM users WHERE user_id = $1`,
       [userId]
-    )
+    );
 
-    // [5단계] 작업 완료 결과 반환
-    return {message:'회원 탈퇴가 완료되었습니다.'};
+    if (!userRows.length) {
+      const err = new Error('사용자를 찾을 수 없습니다.');
+      err.status = 404;
+      throw err;
+    }
+
+    const user = userRows[0];
+
+    // 이미 탈퇴한 계정인 경우
+    if (user.status === 'deleted') {
+      const err = new Error('이미 탈퇴 처리된 계정입니다.');
+      err.status = 400;
+      throw err;
+    }
+
+    // 이용 정지(신고 누적 등) 상태인 경우 탈퇴 차단 (어뷰징 방지)
+    if (user.status === 'suspended') {
+      const err = new Error('이용 정지 상태인 계정은 탈퇴할 수 없습니다. 고객센터에 문의해주세요.');
+      err.status = 403;
+      throw err;
+    }
+
+    // [단계 2] 비공개 콘텐츠 삭제/숨김 (타인이 볼 수 없는 유령 더미 데이터 정리)
+    await client.query(
+      `UPDATE courses SET status = 'deleted' WHERE owner_id = $1 AND is_public = false`,
+      [userId]
+    );
+    await client.query(
+      `UPDATE course_reviews SET status = 'hidden' WHERE user_id = $1 AND is_public = false`,
+      [userId]
+    );
+    await client.query(
+      `UPDATE spot_reviews SET status = 'hidden' WHERE user_id = $1 AND is_public = false`,
+      [userId]
+    );
+
+    // [단계 3] 개인 활동 데이터 완전 삭제 (북마크, 후기 반응, 알림, 차단)
+    await client.query(`DELETE FROM bookmarks WHERE user_id = $1`, [userId]);
+    await client.query(`DELETE FROM reactions WHERE user_id = $1`, [userId]);
+    await client.query(`DELETE FROM notifications WHERE user_id = $1`, [userId]);
+    await client.query(
+      `DELETE FROM user_blocks WHERE blocker_id = $1 OR blocked_id = $1`,
+      [userId]
+    );
+
+    // [단계 4] 산책 기록의 GPS 좌표 파기 및 신고자 익명화
+    await client.query(
+      `UPDATE walk_records SET actual_route = NULL WHERE user_id = $1`,
+      [userId]
+    );
+    await client.query(
+      `UPDATE reports SET reporter_id = NULL WHERE reporter_id = $1`,
+      [userId]
+    );
+
+    // [단계 5] users 테이블 개인정보 파기 및 마스킹 (동일 이메일 즉시 재가입 허용)
+    const maskedEmail = `deleted_${userId}@swu.local`;
+    const maskedNickname = `탈퇴회원_${userId.replace(/-/g, '').slice(0, 6)}`;
+    const dummyPasswordHash = '$2b$12$DELETED_USER_DUMMY_PASSWORD_HASH_VALUE';
+
+    await client.query(
+      `UPDATE users
+       SET status            = 'deleted',
+           email             = $1,
+           nickname          = $2,
+           password_hash     = $3,
+           profile_image_url = NULL,
+           social_provider   = NULL,
+           social_id         = NULL,
+           pref_conditions   = NULL,
+           pref_tag_ids      = NULL,
+           pref_categories   = NULL,
+           updated_at        = NOW()
+       WHERE user_id = $4`,
+      [maskedEmail, maskedNickname, dummyPasswordHash, userId]
+    );
+
+    // 3. 트랜잭션 정상 커밋
+    await client.query('COMMIT');
+
+    return { message: '회원 탈퇴가 완료되었습니다.' };
+  } catch (err) {
+    // 4. 에러 발생 시 모든 변경 사항 롤백
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    // 5. 빌려온 DB 클라이언트 반납
+    client.release();
+  }
 };

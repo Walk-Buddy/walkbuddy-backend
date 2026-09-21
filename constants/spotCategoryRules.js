@@ -1,102 +1,351 @@
-//사용자가 선택할 수 있는 장소(스팟) 카테고리 목록
-
-const SPOT_CATEGORIES=[
-  '산',
+// 사용자가 선택할 수 있는 장소(스팟) 10대 표준 카테고리 목록
+const SPOT_CATEGORIES = [
+  '산·등산로',
   '숲·휴양림',
   '수목원·정원',
   '강·하천',
   '호수·저수지',
-  '계곡·폭포',
-  '해수욕장·해변',
-  '생태·서식지',
   '공원·광장',
+  '역사·유적',
+  '전시·문화공간',
+  '카페·맛집',
+  '전통시장·로컬마켓',
 ];
 
-//스팟 카테고리별 카카오 API 키워드 검색에 사용할 query 목록
-//category_group_code=AT4 카카오 장소 카테고리 중 '관광명소'를 의미
+// 타겟 지역 정의 (서울 전체 + 25개 구 & 강원 춘천시)
+// TourAPI 4.0 서울 시군구 코드: areaCode=1, sigunguCode 1~25
+const TARGET_REGIONS = {
+  // ── 서울 전체 (구 미지정, 서울 전역 조회) ──────────────────────
+  SEOUL: {
+    code: 'seoul',
+    name: '서울',
+    fullName: '서울특별시',
+    tourApi: { areaCode: '1', sigunguCode: null }, // sigunguCode 없이 서울 전체 조회
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['서울', 'seoul', '서울특별시', 'seoul_all'],
+  },
+  // ── 서울 25개 구 ────────────────────────────────────────────────
+  GANGNAM: {
+    code: 'gangnam',
+    name: '강남구',
+    fullName: '서울특별시 강남구',
+    tourApi: { areaCode: '1', sigunguCode: '1' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['강남', '강남구', 'gangnam'],
+  },
+  GANGDONG: {
+    code: 'gangdong',
+    name: '강동구',
+    fullName: '서울특별시 강동구',
+    tourApi: { areaCode: '1', sigunguCode: '2' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['강동', '강동구', 'gangdong'],
+  },
+  GANGBUK: {
+    code: 'gangbuk',
+    name: '강북구',
+    fullName: '서울특별시 강북구',
+    tourApi: { areaCode: '1', sigunguCode: '3' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['강북', '강북구', 'gangbuk'],
+  },
+  GANGSEO: {
+    code: 'gangseo',
+    name: '강서구',
+    fullName: '서울특별시 강서구',
+    tourApi: { areaCode: '1', sigunguCode: '4' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['강서', '강서구', 'gangseo'],
+  },
+  GWANAK: {
+    code: 'gwanak',
+    name: '관악구',
+    fullName: '서울특별시 관악구',
+    tourApi: { areaCode: '1', sigunguCode: '5' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['관악', '관악구', 'gwanak'],
+  },
+  GWANGJIN: {
+    code: 'gwangjin',
+    name: '광진구',
+    fullName: '서울특별시 광진구',
+    tourApi: { areaCode: '1', sigunguCode: '6' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['광진', '광진구', 'gwangjin'],
+  },
+  GURO: {
+    code: 'guro',
+    name: '구로구',
+    fullName: '서울특별시 구로구',
+    tourApi: { areaCode: '1', sigunguCode: '7' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['구로', '구로구', 'guro'],
+  },
+  GEUMCHEON: {
+    code: 'geumcheon',
+    name: '금천구',
+    fullName: '서울특별시 금천구',
+    tourApi: { areaCode: '1', sigunguCode: '8' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['금천', '금천구', 'geumcheon'],
+  },
+  NOWON: {
+    code: 'nowon',
+    name: '노원구',
+    fullName: '서울특별시 노원구',
+    tourApi: { areaCode: '1', sigunguCode: '9' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['노원', '노원구', 'nowon', 'seoul_nowon'],
+  },
+  DOBONG: {
+    code: 'dobong',
+    name: '도봉구',
+    fullName: '서울특별시 도봉구',
+    tourApi: { areaCode: '1', sigunguCode: '10' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['도봉', '도봉구', 'dobong'],
+  },
+  DONGDAEMUN: {
+    code: 'dongdaemun',
+    name: '동대문구',
+    fullName: '서울특별시 동대문구',
+    tourApi: { areaCode: '1', sigunguCode: '11' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['동대문', '동대문구', 'dongdaemun'],
+  },
+  DONGJAK: {
+    code: 'dongjak',
+    name: '동작구',
+    fullName: '서울특별시 동작구',
+    tourApi: { areaCode: '1', sigunguCode: '12' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['동작', '동작구', 'dongjak'],
+  },
+  MAPO: {
+    code: 'mapo',
+    name: '마포구',
+    fullName: '서울특별시 마포구',
+    tourApi: { areaCode: '1', sigunguCode: '13' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['마포', '마포구', 'mapo'],
+  },
+  SEODAEMUN: {
+    code: 'seodaemun',
+    name: '서대문구',
+    fullName: '서울특별시 서대문구',
+    tourApi: { areaCode: '1', sigunguCode: '14' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['서대문', '서대문구', 'seodaemun'],
+  },
+  SEOCHO: {
+    code: 'seocho',
+    name: '서초구',
+    fullName: '서울특별시 서초구',
+    tourApi: { areaCode: '1', sigunguCode: '15' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['서초', '서초구', 'seocho'],
+  },
+  SEONGDONG: {
+    code: 'seongdong',
+    name: '성동구',
+    fullName: '서울특별시 성동구',
+    tourApi: { areaCode: '1', sigunguCode: '16' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['성동', '성동구', 'seongdong'],
+  },
+  SEONGBUK: {
+    code: 'seongbuk',
+    name: '성북구',
+    fullName: '서울특별시 성북구',
+    tourApi: { areaCode: '1', sigunguCode: '17' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['성북', '성북구', 'seongbuk'],
+  },
+  SONGPA: {
+    code: 'songpa',
+    name: '송파구',
+    fullName: '서울특별시 송파구',
+    tourApi: { areaCode: '1', sigunguCode: '18' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['송파', '송파구', 'songpa'],
+  },
+  YANGCHEON: {
+    code: 'yangcheon',
+    name: '양천구',
+    fullName: '서울특별시 양천구',
+    tourApi: { areaCode: '1', sigunguCode: '19' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['양천', '양천구', 'yangcheon'],
+  },
+  YEONGDEUNGPO: {
+    code: 'yeongdeungpo',
+    name: '영등포구',
+    fullName: '서울특별시 영등포구',
+    tourApi: { areaCode: '1', sigunguCode: '20' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['영등포', '영등포구', 'yeongdeungpo'],
+  },
+  YONGSAN: {
+    code: 'yongsan',
+    name: '용산구',
+    fullName: '서울특별시 용산구',
+    tourApi: { areaCode: '1', sigunguCode: '21' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['용산', '용산구', 'yongsan'],
+  },
+  EUNPYEONG: {
+    code: 'eunpyeong',
+    name: '은평구',
+    fullName: '서울특별시 은평구',
+    tourApi: { areaCode: '1', sigunguCode: '22' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['은평', '은평구', 'eunpyeong'],
+  },
+  JONGNO: {
+    code: 'jongno',
+    name: '종로구',
+    fullName: '서울특별시 종로구',
+    tourApi: { areaCode: '1', sigunguCode: '23' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['종로', '종로구', 'jongno'],
+  },
+  JUNG: {
+    code: 'jung',
+    name: '중구',
+    fullName: '서울특별시 중구',
+    tourApi: { areaCode: '1', sigunguCode: '24' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['중구', 'jung', '서울중구'],
+  },
+  JUNGNANG: {
+    code: 'jungnang',
+    name: '중랑구',
+    fullName: '서울특별시 중랑구',
+    tourApi: { areaCode: '1', sigunguCode: '25' },
+    durunubi: { sigun: '서울특별시' },
+    aliases: ['중랑', '중랑구', 'jungnang'],
+  },
+  // ── 강원 춘천시 ─────────────────────────────────────────────────
+  CHUNCHEON: {
+    code: 'chuncheon',
+    name: '춘천시',
+    fullName: '강원특별자치도 춘천시',
+    tourApi: { areaCode: '32', sigunguCode: '13' },
+    durunubi: { sigun: '춘천시' },
+    aliases: ['춘천', '춘천시', 'chuncheon', 'gangwon_chuncheon', '강원특별자치도 춘천', '강원특별자치도', '강원도', '강원', 'gangwon', '강원도 춘천', '강원 춘천'],
+  },
+};
 
-const SPOT_CATEGORY_SEARCH_RULES={
-    '산':[
-        {query: '산', category_group_code:'AT4'},
-        {query: '오름'},
-        {query:'산봉우리'},
-        {query:'등산로'},
-    ],
-    '숲·휴양림': [
+/**
+ * region 문자열을 받아 TARGET_REGIONS 항목을 반환합니다.
+ * - '서울' / 'seoul' → SEOUL (전 구 조회, sigunguCode 없음)
+ * - '강남구' / '강남' → GANGNAM
+ * - '춘천' / '춘천시' → CHUNCHEON
+ * - 매칭 없으면 null 반환 (caller에서 처리)
+ */
+function resolveRegion(regionInput) {
+  if (!regionInput) return null;
+  const normalized = String(regionInput).trim().toLowerCase();
+
+  for (const regionKey of Object.keys(TARGET_REGIONS)) {
+    const r = TARGET_REGIONS[regionKey];
+    if (r.aliases.some((alias) => alias.toLowerCase() === normalized || normalized.includes(alias.toLowerCase()))) {
+      return r;
+    }
+  }
+
+  return null;
+}
+
+// 스팟 카테고리별 카카오 API / TourAPI 키워드 검색 규칙
+const SPOT_CATEGORY_SEARCH_RULES = {
+  '산·등산로': [
+    { query: '산', category_group_code: 'AT4' },
+    { query: '오름' },
+    { query: '산봉우리' },
+    { query: '등산로' },
+    { query: '전망대' },
+  ],
+  '숲·휴양림': [
     { query: '숲', category_group_code: 'AT4' },
     { query: '숲길', category_group_code: 'AT4' },
     { query: '자연휴양림', category_group_code: 'AT4' },
     { query: '산림욕장', category_group_code: 'AT4' },
   ],
-
   '수목원·정원': [
     { query: '수목원', category_group_code: 'AT4' },
     { query: '식물원', category_group_code: 'AT4' },
     { query: '정원', category_group_code: 'AT4' },
     { query: '국가정원', category_group_code: 'AT4' },
   ],
-
   '강·하천': [
     { query: '강', category_group_code: 'AT4' },
     { query: '하천' },
+    { query: '천변' },
+    { query: '당현천' },
+    { query: '중랑천' },
+    { query: '공지천' },
   ],
-
   '호수·저수지': [
     { query: '호수', category_group_code: 'AT4' },
     { query: '저수지', category_group_code: 'AT4' },
     { query: '연못' },
     { query: '호수공원' },
   ],
-
-  '계곡·폭포': [
-    { query: '계곡', category_group_code: 'AT4' },
-    { query: '계곡' },
-    { query: '폭포' },
-  ],
-
-  '해수욕장·해변': [
-    { query: '해수욕장', category_group_code: 'AT4' },
-    { query: '해변', category_group_code: 'AT4' },
-  ],
-
-  '생태·서식지': [
-    { query: '생태공원' },
-    { query: '습지' },
-    { query: '서식지' },
-    { query: '자연생태' },
-    { query: '철새', category_group_code: 'AT4' },
-    { query: '생태', category_group_code: 'AT4' },
-  ],
-
   '공원·광장': [
     { query: '공원' },
     { query: '도시근린공원' },
     { query: '광장' },
-    { query: '한강공원' },
-    { query: '호수공원' },
-    { query: '생태공원' },
     { query: '수변공원' },
+  ],
+  '역사·유적': [
+    { query: '고궁', category_group_code: 'AT4' },
+    { query: '사찰', category_group_code: 'AT4' },
+    { query: '절', category_group_code: 'AT4' },
+    { query: '성곽', category_group_code: 'AT4' },
+    { query: '유적지', category_group_code: 'AT4' },
+    { query: '태릉' },
+    { query: '강릉' },
+    { query: '청평사' },
+    { query: '사적지', category_group_code: 'AT4' },
+  ],
+  '전시·문화공간': [
+    { query: '박물관', category_group_code: 'CT1' },
+    { query: '미술관', category_group_code: 'CT1' },
+    { query: '문학관', category_group_code: 'CT1' },
+    { query: '전시관', category_group_code: 'CT1' },
+    { query: '천문우주과학관' },
+  ],
+  '카페·맛집': [
+    { query: '카페', category_group_code: 'CE7' },
+    { query: '전통찻집', category_group_code: 'CE7' },
+    { query: '베이커리', category_group_code: 'CE7' },
+    { query: '닭갈비' },
+  ],
+  '전통시장·로컬마켓': [
+    { query: '전통시장' },
+    { query: '재래시장' },
+    { query: '풍물시장' },
+    { query: '도깨비시장' },
+    { query: '5일장' },
   ],
 };
 
-
-// 카카오 categoryName 문자열에서 마지막 카테고리 추출, category 값으로 사용
-//EX) 여행 > 관광,명소 > 강 -> 강
-function getLastCategory(categoryName=''){
-    return categoryName.split('>').pop().trim();
+function getLastCategory(categoryName = '') {
+  return categoryName.split('>').pop().trim();
 }
 
 function getFallbackCategory(categoryName = '') {
-    const parts = categoryName.split('>').map(part => part.trim()).filter(Boolean);
-    return parts[2] || parts[1] || '';
+  const parts = categoryName.split('>').map((part) => part.trim()).filter(Boolean);
+  return parts[2] || parts[1] || '';
 }
 
-function includesAny(text='', keywords=[]){
-    return keywords.some(keyword=> text.includes(keyword));   
+function includesAny(text = '', keywords = []) {
+  return keywords.some((keyword) => text.includes(keyword));
 }
 
-const EXCLUDED_PLACE_KEYWORDS=[
-'주차장',
+const EXCLUDED_PLACE_KEYWORDS = [
+  '주차장',
   '화장실',
   '관리사무소',
   '안내소',
@@ -108,14 +357,9 @@ const EXCLUDED_PLACE_KEYWORDS=[
   '테니스장',
   '농구장',
   '배드민턴장',
-  '카페',
-  '식당',
-  '편의점',
   '공인중개사',
   '약국',
-  '교회',
   '주유소',
-  '도서관',
   '사우나',
   '빌딩',
 ];
@@ -126,138 +370,305 @@ function isExcludedKakaoPlace(kakaoPlace = {}) {
   return includesAny(placeName, EXCLUDED_PLACE_KEYWORDS) || includesAny(categoryName, EXCLUDED_PLACE_KEYWORDS);
 }
 
-//카카오 장소 응답을 앱 스팟 카테고리 배열로 변환
-function inferSpotCategories(kakaoPlace={}){
-    const placeName=kakaoPlace.place_name || '';
-    const categoryName=kakaoPlace.category_name || '';
-    const lastCategory=getLastCategory(categoryName);
+// 카카오 장소 응답 또는 TourAPI 정보를 앱 스팟 10대 카테고리 배열로 변환
+function inferSpotCategories(place = {}) {
+  const placeName = place.place_name || place.name || place.title || '';
+  const categoryName = place.category_name || place.kakao_category_name || '';
+  const lastCategory = getLastCategory(categoryName);
 
-//EXCLUDED_PLACE_KEYWORDS에 포함된 장소는 제외
-    if(isExcludedKakaoPlace(kakaoPlace)){
-        return [];
-    }
-
-//한 장소가 여러 카테고리에 속할 수 있으므로 배열로 저장
-
-const categories=[];
-
-//산
-if(['산','오름','산봉우리'].includes(lastCategory)){
-    categories.push('산');
-}
-if(
-    lastCategory==='등산로'&&
-    includesAny(placeName,['입구', '쉼터', '고개', '정상', '전망대'])&&
-    !includesAny(placeName,['코스', '구간', '둘레길', '종주', '탐방로'])
-){
-    categories.push('산');
-}
-
-//숲·휴양림
-if (['숲','자연휴양림'].includes(lastCategory)){
-    categories.push('숲·휴양림');
-}
-
-if(
-    ['도보여행', '둘레길', '서울둘레길', '무장애나눔길'].includes(lastCategory)&&
-    includesAny(placeName,['숲길', '산책길', '나들길', '산책로', '무장애숲길', '치유의 숲', '치유의숲'] )&&
-    !includesAny(placeName,['코스', '구간', '서울둘레길', '북한산둘레길', '관악산둘레길'])
-){
-    categories.push('숲·휴양림');
-}
-
- // 수목원·정원
-  if (['수목원,식물원', '국가정원'].includes(lastCategory)) {
-    categories.push('수목원·정원');
+  if (isExcludedKakaoPlace(place)) {
+    return [];
   }
 
-  if (lastCategory === '관광농원' && placeName.includes('정원')) {
-    categories.push('수목원·정원');
-  }
+  const categories = [];
 
+  // 1. 산·등산로
+  if (['산', '오름', '산봉우리'].includes(lastCategory) || includesAny(placeName, ['불암산', '수락산', '봉의산', '삼악산', '산봉우리', '전망대', '정상', '고개'])) {
+    categories.push('산·등산로');
+  }
   if (
-    lastCategory === '도보여행' &&
-    placeName.includes('정원') &&
-    !includesAny(placeName, ['코스', '구간', '둘레길'])
+    lastCategory === '등산로' &&
+    includesAny(placeName, ['입구', '쉼터', '고개', '정상', '전망대']) &&
+    !includesAny(placeName, ['코스', '구간', '둘레길', '종주', '탐방로'])
   ) {
+    categories.push('산·등산로');
+  }
+
+  // 2. 숲·휴양림
+  if (['숲', '자연휴양림'].includes(lastCategory) || includesAny(placeName, ['경춘선숲길', '경춘선 숲길', '자연휴양림', '산림욕장', '치유의숲', '숲길'])) {
+    categories.push('숲·휴양림');
+  }
+
+  // 3. 수목원·정원
+  if (['수목원,식물원', '국가정원'].includes(lastCategory) || includesAny(placeName, ['나비정원', '수목원', '식물원', '화목원', '정원', '제이드가든'])) {
     categories.push('수목원·정원');
   }
 
-  // 강·하천
-  if (['강', '하천'].includes(lastCategory)) {
+  // 4. 강·하천
+  if (['강', '하천'].includes(lastCategory) || includesAny(placeName, ['당현천', '중랑천', '공지천', '소양강', '한강', '천변', '수변공원'])) {
     categories.push('강·하천');
   }
 
-  if (includesAny(placeName, ['한강공원', '강변공원', '수변공원', '천변공원', '하천공원'])) {
-    categories.push('강·하천');
-  }
-
-  // 호수·저수지
-  if (['호수', '저수지', '연못'].includes(lastCategory)) {
+  // 5. 호수·저수지
+  if (['호수', '저수지', '연못'].includes(lastCategory) || includesAny(placeName, ['의암호', '소양호', '춘천호', '호수공원', '원터근린공원 연못'])) {
     categories.push('호수·저수지');
   }
 
-  if (placeName.includes('호수공원')) {
-    categories.push('호수·저수지');
-  }
-
-  // 계곡·폭포
-  if (['계곡', '폭포'].includes(lastCategory)) {
-    categories.push('계곡·폭포');
-  }
-
-  if (lastCategory === '관광,명소' && placeName.includes('계곡')) {
-    categories.push('계곡·폭포');
-  }
-
-  if (placeName.includes('폭포공원')) {
-    categories.push('계곡·폭포');
-  }
-
-  // 해수욕장·해변
-  if (lastCategory === '해수욕장,해변') {
-    categories.push('해수욕장·해변');
-  }
-
-  // 생태·서식지
-  if (lastCategory === '생태보존,서식지') {
-    categories.push('생태·서식지');
-  }
-
-  if (includesAny(placeName, ['생태공원', '생태습지', '습지공원', '서식지', '철새', '갈대', '람사르'])) {
-    categories.push('생태·서식지');
-  }
-
-  if (
-    ['연못', '저수지', '수목원,식물원', '전망대'].includes(lastCategory) &&
-    includesAny(placeName, ['생태', '습지', '철새조망대'])
-  ) {
-    categories.push('생태·서식지');
-  }
-
-  // 공원·광장
-  if (['공원', '도시근린공원', '광장'].includes(lastCategory)) {
+  // 6. 공원·광장
+  if (['공원', '도시근린공원', '광장'].includes(lastCategory) || includesAny(placeName, ['공원', '근린공원', '생태공원', '마을마당', '광장'])) {
     categories.push('공원·광장');
   }
 
-  //중복된 카테고리 제거
+  // 7. 역사·유적 (TourAPI A0201 연계)
+  if (
+    ['문화유적', '사찰', '성곽', '유적지', '왕릉'].includes(lastCategory) ||
+    includesAny(placeName, ['궁', '사찰', '청평사', '조계사', '성곽', '유적', '태릉', '강릉', '왕릉', '신숭겸', '생가', '사적지'])
+  ) {
+    categories.push('역사·유적');
+  }
+
+  // 8. 전시·문화공간 (TourAPI A0206 연계)
+  if (
+    ['박물관', '미술관', '문화시설', '전시관'].includes(lastCategory) ||
+    includesAny(placeName, ['박물관', '미술관', '문학관', '김유정문학촌', '애니메이션박물관', '천문우주과학관', '아트센터', '전시관', '서울시립북서울미술관'])
+  ) {
+    categories.push('전시·문화공간');
+  }
+
+  // 9. 카페·맛집 (TourAPI A0502 연계)
+  if (
+    ['카페', '디저트', '음식점', '한식', '전통찻집'].includes(lastCategory) ||
+    includesAny(categoryName, ['카페', '음식점', '제과,베이커리']) ||
+    includesAny(placeName, ['카페거리', '닭갈비', '막국수', '전통찻집', '베이커리', '공릉동 도깨비'])
+  ) {
+    categories.push('카페·맛집');
+  }
+
+  // 10. 전통시장·로컬마켓 (TourAPI A0401 연계)
+  if (
+    ['전통시장', '재래시장', '시장'].includes(lastCategory) ||
+    includesAny(placeName, ['풍물시장', '중앙시장', '도깨비시장', '공릉도깨비시장', '상계중앙시장', '전통시장', '5일장', '상점가'])
+  ) {
+    categories.push('전통시장·로컬마켓');
+  }
+
+  // 기본 fallback: 공원·광장
+  if (categories.length === 0 && includesAny(placeName, ['길', '마루', '터', '쉼터'])) {
+    categories.push('공원·광장');
+  }
+
   return [...new Set(categories)];
 }
 
-function inferSpotCategoriesWithFallback(kakaoPlace = {}) {
-  const appCategories = inferSpotCategories(kakaoPlace);
+function inferSpotCategoriesWithFallback(place = {}) {
+  const appCategories = inferSpotCategories(place);
   if (appCategories.length > 0) return appCategories;
-  if (isExcludedKakaoPlace(kakaoPlace)) return [];
+  if (isExcludedKakaoPlace(place)) return [];
 
-  const fallbackCategory = getFallbackCategory(kakaoPlace.category_name || '');
-  return fallbackCategory ? [fallbackCategory] : [];
+  const fallbackCategory = getFallbackCategory(place.category_name || '');
+  return fallbackCategory ? [fallbackCategory] : ['공원·광장'];
 }
 
-module.exports={
-    SPOT_CATEGORIES,
-    SPOT_CATEGORY_SEARCH_RULES,
-    getLastCategory,
-    getFallbackCategory,
-    inferSpotCategories,
-    inferSpotCategoriesWithFallback,
+// ── 서울 25개 자치구 목록 ──────────────────────────────────────────
+const SEOUL_DISTRICTS = [
+  '강남구', '강동구', '강북구', '강서구', '관악구',
+  '광진구', '구로구', '금천구', '노원구', '도봉구',
+  '동대문구', '동작구', '마포구', '서대문구', '서초구',
+  '성동구', '성북구', '송파구', '양천구', '영등포구',
+  '용산구', '은평구', '종로구', '중구', '중랑구',
+];
+
+// ── 춘천 주요 권역 목록 ────────────────────────────────────────────
+const CHUNCHEON_AREAS = [
+  '의암호·공지천권',
+  '소양강·신북권',
+  '도심·명동권',
+  '동면·구봉산권',
+  '강촌·남산권',
+];
+
+// ── 춘천 권역 대표 좌표 (프론트엔드 권역 필터와 동일한 기준) ──────────
+// 프론트(app)는 권역별 대표 좌표로 '내 위치 → 권역'을 온디바이스에서 계산한다.
+// 서버는 '코스/스팟 자체의 좌표'만 동일 기준으로 분류할 뿐, 이용자의
+// 실시간 GPS(개인위치정보)는 절대 수신·저장하지 않는다. (LBS 사업자 미신고 요건 유지)
+const CHUNCHEON_AREA_CENTERS = [
+  { name: '의암호·공지천권', lat: 37.8746, lng: 127.7088 },
+  { name: '소양강·신북권', lat: 37.9200, lng: 127.7400 },
+  { name: '도심·명동권', lat: 37.8800, lng: 127.7260 },
+  { name: '동면·구봉산권', lat: 37.9050, lng: 127.8400 },
+  { name: '강촌·남산권', lat: 37.8100, lng: 127.6400 },
+];
+
+// 춘천시 중심 좌표 및 권역 분류 반경 (프론트 RegionGeometry 춘천시 = 20.0km와 동일)
+const CHUNCHEON_CITY_CENTER = { lat: 37.8813, lng: 127.7298 };
+const CHUNCHEON_CITY_RADIUS_M = 20000;
+
+// ── 지원 지역 전체 구조 (클라이언트 전달용) ──────────────────────────
+const SUPPORTED_REGION_LIST = [
+  {
+    id: 'all',
+    code: 'all',
+    name: '전국',
+    fullName: '전국',
+    params: { region: null, sub_region: null },
+    sub_regions: [
+      { name: '전체', code: 'all', params: { region: null, sub_region: null } },
+    ],
+  },
+  {
+    id: 'seoul',
+    code: 'seoul',
+    name: '서울특별시',
+    fullName: '서울특별시',
+    params: { region: '서울', sub_region: null },
+    sub_regions: [
+      { name: '전체', code: 'all', params: { region: '서울', sub_region: null } },
+      ...SEOUL_DISTRICTS.map((gu) => ({
+        name: gu,
+        code: gu,
+        params: { region: '서울', sub_region: gu },
+      })),
+    ],
+  },
+  {
+    id: 'gangwon',
+    code: 'gangwon',
+    name: '강원특별자치도',
+    fullName: '강원특별자치도',
+    params: { region: '춘천', sub_region: null },
+    sub_regions: [
+      { name: '전체', code: 'all', params: { region: '춘천', sub_region: null } },
+      { name: '춘천시', code: 'chuncheon', params: { region: '춘천', sub_region: null } },
+      ...CHUNCHEON_AREAS.map((area) => ({
+        name: area,
+        code: area,
+        params: { region: '춘천', sub_region: area },
+      })),
+    ],
+  },
+];
+
+/**
+ * 주소(address) 또는 장소명 문자열에서 region('서울' | '춘천')과 sub_region을 자동 추출합니다.
+ */
+function extractRegionFromAddress(addressOrText = '') {
+  if (!addressOrText || typeof addressOrText !== 'string') {
+    return { region: '서울', sub_region: null };
+  }
+
+  const text = addressOrText.trim();
+
+  // 1. 춘천 확인
+  if (text.includes('춘천') || text.includes('강원특별자치도 춘천') || text.includes('강원도 춘천')) {
+    let matchedSub = null;
+    if (text.includes('의암') || text.includes('공지천') || text.includes('삼천동') || text.includes('근화동') || text.includes('칠전동')) {
+      matchedSub = '의암호·공지천권';
+    } else if (text.includes('소양') || text.includes('신북') || text.includes('사북') || text.includes('우두동') || text.includes('신사우동')) {
+      matchedSub = '소양강·신북권';
+    } else if (text.includes('명동') || text.includes('중앙로') || text.includes('효자') || text.includes('퇴계') || text.includes('석사') || text.includes('온의') || text.includes('약사')) {
+      matchedSub = '도심·명동권';
+    } else if (text.includes('구봉산') || text.includes('동면') || text.includes('만천') || text.includes('장학')) {
+      matchedSub = '동면·구봉산권';
+    } else if (text.includes('강촌') || text.includes('남산') || text.includes('남면') || text.includes('김유정') || text.includes('신동면')) {
+      matchedSub = '강촌·남산권';
+    }
+    return { region: '춘천', sub_region: matchedSub };
+  }
+
+  // 2. 서울 확인
+  for (const district of SEOUL_DISTRICTS) {
+    if (text.includes(district) || text.includes(district.replace('구', ''))) {
+      return { region: '서울', sub_region: district };
+    }
+  }
+
+      if (text.includes('서울')) {
+    return { region: '서울', sub_region: null };
+  }
+
+  return { region: '서울', sub_region: null };
+}
+
+// ── 좌표 기반 권역 추론 ─────────────────────────────────────────────
+// 두 좌표 사이의 거리(m)를 Haversine 방식으로 계산합니다.
+function haversineMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function toFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * 좌표가 춘천시 권역 내에 있으면 가장 가까운 권역명을 반환합니다.
+ * 춘천시 밖이면 null을 반환합니다.
+ */
+function resolveChuncheonArea(lat, lng) {
+  const flat = toFiniteNumber(lat);
+  const flng = toFiniteNumber(lng);
+  if (flat === null || flng === null) return null;
+
+  const distanceFromCity = haversineMeters(
+    flat,
+    flng,
+    CHUNCHEON_CITY_CENTER.lat,
+    CHUNCHEON_CITY_CENTER.lng
+  );
+  if (distanceFromCity > CHUNCHEON_CITY_RADIUS_M) return null;
+
+  let nearest = null;
+  let nearestDistance = Infinity;
+  for (const area of CHUNCHEON_AREA_CENTERS) {
+    const d = haversineMeters(flat, flng, area.lat, area.lng);
+    if (d < nearestDistance) {
+      nearestDistance = d;
+      nearest = area.name;
+    }
+  }
+  return nearest;
+}
+
+/**
+ * 좌표(+주소)로 region / sub_region을 추론합니다.
+ *   1) 좌표가 춘천시 권역 내면 → region='춘천', sub_region=가장 가까운 권역
+ *   2) 아니면 기존 주소 키워드 기반 추출(extractRegionFromAddress)로 폴백
+ *
+ * NOTE: 입력 좌표는 '스팟/코스 자체의 좌표'이며, 이용자의 실시간 GPS가 아니다.
+ */
+function inferRegionFromLocation({ lat, lng, address = '' } = {}) {
+  const area = resolveChuncheonArea(lat, lng);
+  if (area) {
+    return { region: '춘천', sub_region: area };
+  }
+  return extractRegionFromAddress(address);
+}
+
+module.exports = {
+  SPOT_CATEGORIES,
+  TARGET_REGIONS,
+  SEOUL_DISTRICTS,
+  CHUNCHEON_AREAS,
+  CHUNCHEON_AREA_CENTERS,
+  CHUNCHEON_CITY_CENTER,
+  CHUNCHEON_CITY_RADIUS_M,
+  SUPPORTED_REGION_LIST,
+  resolveRegion,
+  extractRegionFromAddress,
+  resolveChuncheonArea,
+  inferRegionFromLocation,
+  SPOT_CATEGORY_SEARCH_RULES,
+  getLastCategory,
+  getFallbackCategory,
+  inferSpotCategories,
+  inferSpotCategoriesWithFallback,
 };
+

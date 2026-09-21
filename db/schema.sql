@@ -227,11 +227,22 @@ CREATE TABLE tags (
     -- 태그 적용 대상 구분
     -- 'course': 코스 태그 / 'spot': 스팟 태그
 
+    group_name  VARCHAR(30)     NOT NULL DEFAULT '기타',
+    -- 태그 세부 분류 그룹명
+    -- UI에서 태그를 섹션별로 나누어 노출하기 위한 그룹
+    -- 스팟: '시설·편의', '동반·접근성', '분위기·테마', '해설·안내' 등
+    -- 코스: '추천·테마', '동반·접근성' 등
+
     is_active   BOOLEAN         NOT NULL DEFAULT TRUE,
     -- 태그 활성화 여부
     -- TRUE: 활성화 (사용자 선택 가능)
     -- FALSE: 비활성화 (선택 불가, 목록에서 숨김)
     -- 계절 태그 관리용 (예: #벚꽃 봄 외 시즌 비활성화, #단풍 가을 외 비활성화)
+
+    is_review_tag BOOLEAN       NOT NULL DEFAULT TRUE,
+    -- 후기(리뷰) 태그 사용 가능 여부 (migrate-tag-overhaul-final 통합)
+    -- TRUE: 후기 작성 시 선택 가능 / FALSE: 시스템·인증 전용 (후기 불가)
+    -- 예: 열린관광·공식코스·Odii음성해설·실시간축제 등은 FALSE
 
     created_at  TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
 
@@ -248,10 +259,10 @@ CREATE TABLE tags (
     -- type 허용값 외 입력 차단
 );
 
--- 태그 type 별 조회용
--- 코스 등록·스팟 등록 시 해당 type 태그 목록 조회 빈도 높음
-CREATE INDEX ix_tags_type
-    ON tags (type);
+-- 태그 type 및 그룹별 조회용
+-- 코스 등록·스팟 등록·필터 UI에서 type 및 group_name 별 조회 빈도 높음
+CREATE INDEX ix_tags_type_group
+    ON tags (type, group_name);
 -- [주의] tags 삭제 시 users.pref_tag_ids 배열에 남아있는
 --        tag_id 정리는 앱단에서 처리 필요 (배열 타입 FK 미지원)
 
@@ -321,9 +332,14 @@ CREATE TABLE spots (
     -- 역사 해설 텍스트
     -- NULL 이면 해당 스팟은 역사 해설 불가
 
-    content_tour        TEXT            NULL,
+        content_tour        TEXT            NULL,
     -- 관광 안내 해설 텍스트
     -- NULL 이면 해당 스팟은 관광 안내 불가
+
+    first_image         VARCHAR(500)    NULL,
+    -- 장소 목록 카드 노출용 대표 사진 URL
+    -- 한국관광공사 TourAPI firstimage 저장
+    -- NULL 이면 프론트에서 후기 사진(spot_reviews.photos[1])을 폴백으로 사용
 
     recommend_pct       DECIMAL(5,2)    NULL,
     -- 추천도 퍼센트 캐시값
@@ -331,6 +347,21 @@ CREATE TABLE spots (
     -- 예: 85.50 (85.5%)
     -- 후기 등록·수정·삭제 시 트리거 또는 앱단에서 업데이트
     -- 후기 없을 시 NULL
+
+    barrier_free_info   JSONB           NULL,
+    -- 무장애 여행정보(열린관광/KorWithService2 연동 데이터)
+
+    pet_tour_info       JSONB           NULL,
+    -- 반려동물 동반여행 정보(한국관광공사 KorPetTourService2 연동 데이터)
+
+    is_night_tour       BOOLEAN         NOT NULL DEFAULT FALSE,
+    -- 야간명소 여부
+
+    region              VARCHAR(20)     NOT NULL DEFAULT '서울',
+    -- 지역 구분 ('서울', '춘천')
+
+    sub_region          VARCHAR(50)     NULL,
+    -- 세부 자치구 또는 권역 (예: '노원구', '마포구', '의암호·공지천권')
 
     status              VARCHAR(20)     NOT NULL DEFAULT 'active',
     -- 'active': 정상 / 'hidden': 신고로 숨김
@@ -349,8 +380,8 @@ CREATE TABLE spots (
     CONSTRAINT chk_spots_status
         CHECK (status IN ('active', 'auto_hidden', 'hidden')),
 
-    CONSTRAINT chk_spots_source
-        CHECK (source IN ('admin', 'kakao')),
+        CONSTRAINT chk_spots_source
+        CHECK (source IN ('admin', 'kakao', 'tour')),
 
     CONSTRAINT chk_spots_recommend_pct
         CHECK (recommend_pct IS NULL OR recommend_pct BETWEEN 0 AND 100)
@@ -366,6 +397,10 @@ CREATE TABLE spots (
 -- ST_DWithin(), ST_Distance() 등 PostGIS 함수와 함께 사용
 CREATE INDEX ix_spots_location
     ON spots USING GIST (location);
+
+-- 지역 및 권역 필터 조회용 인덱스
+CREATE INDEX ix_spots_region
+    ON spots (region, sub_region);
 
 -- 상태 필터 조회용
 CREATE INDEX ix_spots_status
@@ -444,23 +479,11 @@ CREATE TABLE courses (
     --   ST_Length(route_geometry) → 미터 단위 거리 반환
     --   estimated_duration 계산 기준으로도 사용
     --
-    -- [용도 2] 가까운순 정렬
-    --   ST_Distance(route_geometry, ST_Point(:lng, :lat)::GEOGRAPHY)
-    --   경유지 포함 가장 가까운 지점 기준으로 정렬
-    --
-    -- [용도 3] 반경 내 코스 검색
-    --   ST_DWithin(route_geometry, ST_Point(:lng, :lat)::GEOGRAPHY, 5000)
-    --   경로가 사용자 위치 반경 5km 이내를 지나는 코스 검색
-    --
-    -- [용도 4] 경로 상 스팟 자동 감지
+    -- [용도 2] 경로 상 스팟 자동 감지
     --   ST_DWithin(spots.location, route_geometry, 50)
     --   경로 반경 50m 이내 스팟 자동 감지 및 추가 제안
     --
     -- [주의] 스팟 좌표(spots.location) 수정 시 route_geometry 도 함께 업데이트 필요
-    --        (앱단 또는 트리거로 처리)
-    -- [주의] 이용자의 실제 이동 경로 표시는 이 컬럼이 아닌
-    --        walk_records.actual_route 를 사용해야 함
-    --        (route_geometry = 코스 계획 경로 / actual_route = 실제 이동 경로)
 
     total_distance      INT             NOT NULL,
     -- 총 거리 (미터 단위)
@@ -469,6 +492,18 @@ CREATE TABLE courses (
 
     estimated_duration  INT             NOT NULL,
     -- 예상 소요 시간 (분 단위, 도보 평균 속도 기반 자동 계산)
+
+    is_cycle            BOOLEAN         NOT NULL DEFAULT FALSE,
+    -- 순환형(원점회귀) 여부 (TRUE: 순환형, FALSE: 편도형)
+
+    difficulty_level    SMALLINT        NOT NULL DEFAULT 1,
+    -- 코스 기본 난이도 (1: 쉬움, 2: 보통, 3: 어려움)
+
+    region              VARCHAR(20)     NOT NULL DEFAULT '서울',
+    -- 지역 구분 ('서울', '춘천')
+
+    sub_region          VARCHAR(50)     NULL,
+    -- 세부 자치구 또는 권역 (예: '노원구', '마포구', '의암호·공지천권')
 
     is_public           BOOLEAN         NOT NULL DEFAULT TRUE,
     -- 공개/비공개 설정
@@ -522,6 +557,10 @@ CREATE TABLE courses (
 CREATE INDEX ix_courses_owner_id
     ON courses (owner_id);
 
+-- 지역 및 권역 필터 조회용 인덱스
+CREATE INDEX ix_courses_region
+    ON courses (region, sub_region);
+
 -- 공공 데이터 중복 등록 방지용 Partial Index
 -- 같은 출처(data_source) 안에서 같은 원본 ID(source_id)만 중복으로 판단
 -- 예: 두루누비 source_id='1' 과 서울시 source_id='1' 은 서로 다른 코스로 허용
@@ -534,11 +573,8 @@ CREATE UNIQUE INDEX uix_courses_data_source_source_id
 CREATE INDEX ix_courses_public_status
     ON courses (is_public, status);
 
--- 코스 전체 경로 공간 검색·가까운순 정렬용 GiST 인덱스
--- ST_Distance(route_geometry, ST_Point(:lng,:lat)::GEOGRAPHY) 로 가까운순 정렬
--- ST_DWithin() 으로 반경 내 코스 검색
--- 경유지 포함 가장 가까운 지점 기준으로 정렬 (방법 2)
--- 특정 위치 반경 내 경로가 지나가는 코스 검색 가능
+-- 코스 경로 공간 인덱스 (경로-스팟 간 거리 계산용 GiST 인덱스)
+-- ST_DWithin(spots.location, route_geometry, 반경) 으로 경로 근처 스팟 감지 시 사용
 CREATE INDEX ix_courses_route_geometry
     ON courses USING GIST (route_geometry);
 
@@ -841,16 +877,9 @@ CREATE TABLE walk_records (
     -- 자유 경로 기록 시 NULL
     -- 코스 삭제 시 NULL 로 변경 (산책 기록은 유지)
 
-    actual_route        GEOGRAPHY(LINESTRING, 4326)  NULL,
-    -- 실제 이동 경로 GPS 좌표 (LINESTRING)
-    -- 예: ST_GeomFromText('LINESTRING(126.97 37.56, 126.98 37.57)', 4326)
-    -- ST_Length() 로 실제 이동 거리 자동 계산
-    -- 미완주·중단 시에도 이동한 만큼 저장
-    -- 진행 중일 때는 NULL
-
     total_distance      INT             NULL,
     -- 실제 이동 거리 (미터 단위)
-    -- 산책 종료 시 ST_Length(actual_route) 로 자동 계산 후 저장
+    -- 앱에서 계산한 수치를 산책 종료 시 전달받아 저장
 
     duration            INT             NULL,
     -- 실제 소요 시간 (분 단위)
@@ -866,6 +895,10 @@ CREATE TABLE walk_records (
     ended_at            TIMESTAMPTZ     NULL,
     -- 산책 종료 시각
     -- 진행 중일 때는 NULL
+
+    map_image_url       VARCHAR(500)    NULL,
+    -- 산책 경로 지도 캡처 이미지 URL
+    -- 앱 로컬에서 캡처한 이미지를 업로드 후 저장
 
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
 
@@ -899,8 +932,7 @@ CREATE INDEX ix_walk_records_course_id
     WHERE course_id IS NOT NULL;
 
 -- [이용한 스팟 조회 방법]
--- 코스 기반 산책: courses.route JSONB 파싱으로 스팟 목록 추출
--- 자유 경로 산책: ST_DWithin(spots.location, actual_route, 반경) 으로 감지
+-- 코스 기반 산책: courses.route_geometry 의 경유지 스팟 목록 추출
 
 
 -- ================================================
@@ -965,11 +997,6 @@ CREATE TABLE course_reviews (
     -- walk_record_id NOT NULL 이므로 산책 기록 삭제 차단
     -- 후기 삭제 후 walk_records 삭제 필요 (앱단에서 처리)
 
-    CONSTRAINT uq_course_reviews_walk_record
-        UNIQUE (walk_record_id),
-    -- 이용 기록 1건 당 코스 후기 1번만 작성 가능
-    -- 동일 walk_record_id 로 중복 후기 INSERT 차단
-
     CONSTRAINT chk_course_reviews_difficulty
         CHECK (difficulty IS NULL OR difficulty IN ('easy', 'normal', 'hard')),
     -- NULL: 미입력 허용
@@ -981,6 +1008,11 @@ CREATE TABLE course_reviews (
     CONSTRAINT chk_course_reviews_status
         CHECK (status IN ('active', 'auto_hidden', 'hidden'))
 );
+
+-- 이용 기록 1건 당 활성 코스 후기 1번만 작성 가능 (삭제된 후기는 제외하여 재작성 허용)
+CREATE UNIQUE INDEX uq_course_reviews_walk_record_active
+    ON course_reviews (walk_record_id)
+    WHERE status = 'active';
 
 -- 코스별 후기 최신순 조회용
 CREATE INDEX ix_course_reviews_course_id
@@ -1065,11 +1097,6 @@ CREATE TABLE spot_reviews (
     -- walk_record_id NOT NULL 이므로 산책 기록 삭제 차단
     -- 후기 삭제 후 walk_records 삭제 필요 (앱단에서 처리)
 
-    CONSTRAINT uq_spot_reviews_walk_spot
-        UNIQUE (walk_record_id, spot_id),
-    -- 이용 기록 1건 당 스팟별 후기 1번만 작성 가능
-    -- 동일 walk_record_id + spot_id 조합 중복 INSERT 차단
-
     CONSTRAINT chk_spot_reviews_status
         CHECK (status IN ('active', 'auto_hidden', 'hidden')),
 
@@ -1077,6 +1104,11 @@ CREATE TABLE spot_reviews (
         CHECK (array_length(photos, 1) <= 5)
     -- 사진 최대 5장 제한 DB단 보완
 );
+
+-- 이용 기록 1건 당 활성 스팟별 후기 1번만 작성 가능 (삭제된 후기는 제외하여 재작성 허용)
+CREATE UNIQUE INDEX uq_spot_reviews_walk_spot_active
+    ON spot_reviews (walk_record_id, spot_id)
+    WHERE status = 'active';
 
 -- 스팟별 후기 최신순 조회용
 CREATE INDEX ix_spot_reviews_spot_id
@@ -1208,13 +1240,6 @@ CREATE TABLE reports (
     memo            TEXT            NULL,
     -- 간단 메모 (선택 입력)
 
-    location        GEOGRAPHY(POINT, 4326)  NULL,
-    -- 산책 중 위치 기반 신고 시 신고 지점 좌표 저장
-    -- 예: ST_Point(126.97, 37.56)::GEOGRAPHY
-    -- 특정 코스·스팟 ID 기반 신고 시 NULL
-    -- 지도에 신고 위치 핀 표시 시 사용
-    -- [주의] target_id 와 location 중 하나는 반드시 존재해야 함 (chk_reports_target 으로 보장)
-
     photo_url       TEXT            NULL,
     -- 첨부 사진 URL (선택 입력, 1장)
 
@@ -1242,22 +1267,14 @@ CREATE TABLE reports (
     -- 동일 사용자가 동일 대상 중복 신고 방지 (명세 요구사항)
 
     CONSTRAINT chk_reports_target
-        CHECK (
-            (target_id IS NOT NULL AND location IS NULL)   -- ID 기반 신고
-            OR
-            (target_id IS NULL AND location IS NOT NULL)   -- 위치 기반 신고
-        ),
-    -- target_id (ID 기반) 또는 location (위치 기반) 중 하나는 반드시 존재
-    -- 둘 다 NULL 이거나 둘 다 NOT NULL 인 경우 차단
+        CHECK (target_id IS NOT NULL),
+    -- 모든 신고는 대상 ID(target_id) 필수 (위치 기반 신고 미지원)
 
     CONSTRAINT chk_reports_target_type
         CHECK (
-            (target_type IN ('course', 'spot', 'course_review', 'spot_review', 'user') AND target_id IS NOT NULL)
-            OR
-            (target_type = 'location' AND location IS NOT NULL)
+            target_type IN ('course', 'spot', 'course_review', 'spot_review', 'user') AND target_id IS NOT NULL
         ),
-    -- target_type = 'location': 위치 기반 신고 (산책 중 특정 지점 신고)
-    -- 나머지 target_type: ID 기반 신고
+    -- 모든 신고는 target_type + target_id 쌍으로 처리
 
     CONSTRAINT chk_reports_category
         CHECK (report_category IN ('environment', 'user')),
@@ -1285,12 +1302,7 @@ CREATE INDEX ix_reports_target
     ON reports (target_type, target_id)
     WHERE target_id IS NOT NULL;
 
--- 위치 기반 신고 공간 검색용 GiST 인덱스
--- 특정 반경 내 신고 위치 조회 시 사용
--- 예: ST_DWithin(location, ST_Point(:lng, :lat)::GEOGRAPHY, 500)
-CREATE INDEX ix_reports_location
-    ON reports USING GIST (location)
-    WHERE location IS NOT NULL;
+
 
 -- updated_at 자동 갱신 트리거
 CREATE TRIGGER trg_reports_updated_at
@@ -1486,3 +1498,96 @@ CREATE INDEX ix_user_blocks_blocker_id
 CREATE INDEX ix_user_blocks_blocked_id
     ON user_blocks (blocked_id);
 
+
+
+-- ================================================
+-- 태그 메타데이터 시드 (통합)
+-- 기존 개별 마이그레이션을 schema.sql 로 통합:
+--   - migrate-tour-v2.sql
+--   - migrate-hierarchical-tags.sql
+--   - migrate-course-tags-group.sql
+--   - migrate-tag-overhaul-final.sql
+--   - migrate-bomnaegil-tag.sql
+-- reset.sql → schema.sql 만으로 태그를 완비하기 위한 시드.
+-- ON CONFLICT (name, type) DO UPDATE 로 idempotent 하게 동작한다.
+-- ================================================
+
+-- 1. 표준 코스 태그 (그룹 / 후기권한 포함)
+INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
+VALUES
+  -- 코스 출처 (시스템 전용, 후기 불가)
+  ('공식코스',   'course', '코스 출처',  TRUE, FALSE),
+  ('사용자코스', 'course', '코스 출처',  TRUE, FALSE),
+
+  -- 추천·종류 (시스템/에디터 추천, 후기 불가)
+  ('추천코스',   'course', '추천·종류',  TRUE, FALSE),
+  ('관광코스',   'course', '추천·종류',  TRUE, FALSE),
+  ('둘레길',     'course', '추천·종류',  TRUE, FALSE),
+  ('춘천 봄내길', 'course', '추천·종류',  TRUE, FALSE),
+
+  -- 분위기 (후기 가능)
+  ('힐링',       'course', '분위기',      TRUE, TRUE),
+  ('노을·야경',  'course', '분위기',      TRUE, TRUE),
+  ('자연·풍경',  'course', '분위기',      TRUE, TRUE),
+  ('역사·문화',  'course', '분위기',      TRUE, TRUE),
+
+  -- 동반·접근성 (무장애길은 인증 전용, 나머지는 후기 가능)
+  ('무장애길',   'course', '동반·접근성', TRUE, FALSE),
+  ('반려동물',   'course', '동반·접근성', TRUE, TRUE),
+  ('아이와함께', 'course', '동반·접근성', TRUE, TRUE)
+ON CONFLICT (name, type) DO UPDATE SET
+  group_name    = EXCLUDED.group_name,
+  is_active     = EXCLUDED.is_active,
+  is_review_tag = EXCLUDED.is_review_tag;
+
+-- 2. 표준 스팟 태그 (그룹 / 후기권한 포함)
+INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
+VALUES
+  -- 열린관광 (무장애 편의시설)
+  ('열린관광',           'spot', '열린관광',     TRUE, FALSE), -- 인증 대표 태그 (후기 불가)
+  ('무단차통로',         'spot', '열린관광',     TRUE, TRUE),
+  ('휠체어접근',         'spot', '열린관광',     TRUE, TRUE),
+  ('휠체어대여',         'spot', '열린관광',     TRUE, TRUE),
+  ('장애인주차',         'spot', '열린관광',     TRUE, TRUE),
+  ('장애인화장실',       'spot', '열린관광',     TRUE, TRUE),
+  ('엘리베이터',         'spot', '열린관광',     TRUE, TRUE),
+  ('안내견동반',         'spot', '열린관광',     TRUE, TRUE),
+  ('시각장애인음성안내', 'spot', '열린관광',     TRUE, FALSE), -- 전문 시설 (후기 불가)
+  ('점자안내',           'spot', '열린관광',     TRUE, TRUE),
+  ('수어안내',           'spot', '열린관광',     TRUE, TRUE),
+  ('유모차대여',         'spot', '열린관광',     TRUE, TRUE),
+  ('수유실',             'spot', '열린관광',     TRUE, TRUE),
+
+  -- 반려동물
+  ('반려견동반',         'spot', '반려동물',     TRUE, TRUE),
+  ('소형견동반',         'spot', '반려동물',     TRUE, TRUE),
+  ('대형견가능',         'spot', '반려동물',     TRUE, TRUE),
+  ('반려견배변시설',     'spot', '반려동물',     TRUE, TRUE),
+  ('반려견놀이터',       'spot', '반려동물',     TRUE, TRUE),
+
+  -- 시설·편의
+  ('화장실',             'spot', '시설·편의',    TRUE, TRUE),
+  ('주차가능',           'spot', '시설·편의',    TRUE, TRUE),
+  ('식수대',             'spot', '시설·편의',    TRUE, TRUE),
+  ('벤치·쉼터',          'spot', '시설·편의',    TRUE, TRUE),
+  ('카페&식당',          'spot', '시설·편의',    TRUE, TRUE),
+
+  -- 분위기·테마
+  ('Odii음성해설',       'spot', '분위기·테마',  TRUE, FALSE), -- Odii 연동 전용 (후기 불가)
+  ('포토존',             'spot', '분위기·테마',  TRUE, TRUE),
+  ('전통·한옥',          'spot', '분위기·테마',  TRUE, TRUE),
+  ('낮그늘',             'spot', '분위기·테마',  TRUE, TRUE),
+    ('야경명소',           'spot', '분위기·테마',  TRUE, TRUE),
+  ('야간명소',           'spot', '분위기·테마',  TRUE, TRUE),
+  ('야간개방',           'spot', '분위기·테마',  TRUE, TRUE),
+  ('일출명소',           'spot', '분위기·테마',  TRUE, TRUE),
+  ('일몰명소',           'spot', '분위기·테마',  TRUE, TRUE),
+  ('문화/예술',          'spot', '분위기·테마',  TRUE, TRUE),
+  ('실시간축제',         'spot', '분위기·테마',  TRUE, FALSE), -- 실시간 연동 전용 (후기 불가)
+  ('역사유적',           'spot', '분위기·테마',  TRUE, TRUE),
+  ('벚꽃',               'spot', '분위기·테마',  FALSE, TRUE), -- 계절 태그 (봄 외 비활성)
+  ('단풍',               'spot', '분위기·테마',  FALSE, TRUE)  -- 계절 태그 (가을 외 비활성)
+ON CONFLICT (name, type) DO UPDATE SET
+  group_name    = EXCLUDED.group_name,
+  is_active     = EXCLUDED.is_active,
+  is_review_tag = EXCLUDED.is_review_tag;

@@ -20,9 +20,12 @@ const reviewPhotoUpload = multer({
 
 router.get('/health', (req, res) => res.json({ success: true, message: 'spot router connected' }));
 router.get('/search', spotController.searchSpots);
-router.get('/filter', spotController.filterSpots);
 router.get('/', spotController.getSpots);
 router.get('/:spot_id/ai-contents', spotController.getAiContents);
+router.post('/ai-summary', spotController.summarizeOverview);
+router.get('/:spot_id/ai-summary', spotController.summarizeOverview);
+router.post('/:spot_id/ai-summary', spotController.summarizeOverview);
+router.get('/:spot_id/photos', spotController.getSpotPhotos);
 router.get('/:spot_id', spotController.getSpotById);
 router.post('/kakao', authenticate, spotController.saveKakaoSpot);
 router.post('/', authenticate, spotController.createSpot);

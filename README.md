@@ -47,6 +47,8 @@ TOUR_API_MATCH_RADIUS=300
 
 ---
 
-## 🔗 API 문서
+## 🔗 API 문서 (Swagger)
 
-[http://43.200.171.53:3000/api-docs](http://43.200.171.53:3000/api-docs)
+- **메인 배포 서버 (Main)**: [https://api.gilbom.quest/api-docs](https://api.gilbom.quest/api-docs)
+- **공모전 배포 서버 (Contest)**: [https://contest.gilbom.quest/api-docs](https://contest.gilbom.quest/api-docs)
+- **로컬 개발 서버 (Local)**: [http://localhost:3000/api-docs](http://localhost:3000/api-docs)

@@ -3,6 +3,7 @@ require('dotenv').config();
 const axios = require('axios');
 const pool = require('../config/db');
 const spotService = require('../services/spotService');
+const courseTagService = require('../services/courseTagService');
 const { getDurunubiCourseSpotMappings } = require('../constants/durunubiSpotMappings');
 
 const BASE_URL = 'http://apis.data.go.kr/B551011/Durunubi';
@@ -13,7 +14,14 @@ const DEFAULT_MOBILE_APP = 'WalkBuddy';
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_WAYPOINTS = 1200;
 
-const serviceKey = process.env.DURUNUBI_SERVICE_KEY;
+// 두루누비는 별도 키가 아니라 공공데이터포털(한국관광공사) 공용 인증키를 사용한다.
+// DURUNUBI_SERVICE_KEY가 없어도 TourAPI 키로 자동 폴백한다.
+const serviceKey =
+  process.env.DURUNUBI_SERVICE_KEY ||
+  process.env.TOURAPI_SERVICE_KEY ||
+  process.env.TOUR_API_SERVICE_KEY ||
+  process.env.TOUR_API_KEY ||
+  '';
 const mobileOS = process.env.DURUNUBI_MOBILE_OS || DEFAULT_MOBILE_OS;
 const mobileApp = process.env.DURUNUBI_MOBILE_APP || DEFAULT_MOBILE_APP;
 const brdDiv = process.env.DURUNUBI_BRD_DIV || '';
@@ -41,7 +49,10 @@ function toNumber(value) {
 
 function requireEnv() {
   if (!serviceKey) {
-    throw new Error('DURUNUBI_SERVICE_KEY가 .env에 없습니다.');
+    throw new Error(
+      'DURUNUBI_SERVICE_KEY(또는 TOURAPI_SERVICE_KEY)가 .env에 없습니다. ' +
+      '두루누비는 TourAPI와 동일한 공공데이터포털 인증키를 사용합니다.'
+    );
   }
 }
 
@@ -310,11 +321,17 @@ async function findAvailableNickname(client, baseName) {
 }
 
 async function ensureCourseTag(client) {
+  // 프론트 정본(ServerTags.DEFAULT_COURSE_TAGS_BY_GROUP)과 일치하도록
+  // group_name='추천·종류', is_review_tag=FALSE 를 명시한다.
+  // (기존 시드 태그가 있으면 group_name/is_review_tag 를 올바른 값으로 보정)
   const { rows } = await client.query(
-    `INSERT INTO tags (name, type, is_active)
-     VALUES ($1, 'course', TRUE)
+    `INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
+     VALUES ($1, 'course', '추천·종류', TRUE, FALSE)
      ON CONFLICT (name, type)
-     DO UPDATE SET is_active = TRUE
+     DO UPDATE SET
+       group_name    = EXCLUDED.group_name,
+       is_active     = TRUE,
+       is_review_tag = EXCLUDED.is_review_tag
      RETURNING tag_id`,
     [COURSE_TAG_NAME]
   );
@@ -557,7 +574,7 @@ async function importCourse(client, item, ownerId, tagId) {
     [tagId, course.course_id, ownerId]
   );
 
-  return { status: 'imported', name, courseId: course.course_id, pointCount: points.length, points };
+    return { status: 'imported', name, courseId: course.course_id, pointCount: points.length, points, description };
 }
 
 async function main() {
@@ -617,11 +634,26 @@ async function main() {
             }
           }
 
-          await client.query('BEGIN');
+                    await client.query('BEGIN');
           await insertWaypoints(client, result.courseId, result.points, spotResult.waypointSpots);
           await client.query('COMMIT');
           if (spotResult.waypointSpots.length > 0) {
             console.log(`  - 코스 경유지 연결: 스팟 ${spotResult.waypointSpots.length}개`);
+          }
+
+          // 코스 태그 최대 연결: 카테고리·설명·경유지 스팟 태그를 코스 태그로 승격
+          try {
+            const derivedTags = await courseTagService.autoTagCourse({
+              courseId: result.courseId,
+              category: '둘레길',
+              description: result.description || null,
+              userId: ownerId,
+            }, client);
+            if (derivedTags.length > 0) {
+              console.log(`  - 코스 자동 태그: ${derivedTags.join(', ')}`);
+            }
+          } catch (tagErr) {
+            console.warn(`  - 코스 자동 태그 실패(무시): ${tagErr.message}`);
           }
         } else {
           summary.skipped += 1;

@@ -12,10 +12,16 @@
     "seed": "node scripts/seed-demo-data.js",
     "seed:full": "node scripts/seed-demo-data.js --with-durunubi",
     "generate:durunubi-spot-mappings": "node scripts/generate-durunubi-spot-mappings.js",
-    "import:durunubi": "node scripts/import-durunubi-courses.js",
+        "import:durunubi": "node scripts/import-durunubi-courses.js",
+    "import:street-tourism": "node scripts/import-street-tourism-courses.js",
+    "backfill:course-tags": "node scripts/backfill-course-tags.js",
+    "backfill:spot-tags": "node scripts/backfill-spot-tags.js",
+    "backfill:spot-first-image": "node scripts/backfill-spot-first-image.js",
     "seed:prewalk-course": "node scripts/create-prewalk-course-via-api.js",
     "seed:prewalk-reviews": "node scripts/create-prewalk-course-via-api.js --reviews-only",
-    "db:seed": "node db/run-sql.js db/seed.sql"
+    "seed:demo": "node scripts/seed-demo-engagements.js",
+    "seed:demo:reset": "node scripts/seed-demo-engagements.js --reset",
+    "seed:first-image": "node scripts/backfill-spot-first-image.js --sleep 400"
   },
   "dependencies": {
 
@@ -44,5 +50,4 @@
     "nodemon": "^3.0.1"
   }
 }
-
 
