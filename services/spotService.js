@@ -264,7 +264,6 @@ function extractTourTags({ overview, barrierFreeInfo, petTourInfo, odiiGuide }) 
 
     // 2. 무장애 편의시설 (KorWithService2) 세부 태그
     if (barrierFreeInfo?.has_barrier_free_info && barrierFreeInfo.details) {
-        tags.add('열린관광');
         const d = barrierFreeInfo.details;
         if (d.physical?.wheelchair) {
             const wcStr = String(d.physical.wheelchair);
@@ -281,23 +280,20 @@ function extractTourTags({ overview, barrierFreeInfo, petTourInfo, odiiGuide }) 
         if (d.infant?.stroller && !/(불가|없음)/.test(d.infant.stroller)) tags.add('유모차대여');
         if (d.infant?.lactation_room && !/(없음|미설치)/.test(d.infant.lactation_room)) tags.add('수유실');
         if (d.visual?.braile_block || d.visual?.braile_promotion) tags.add('점자안내');
-        if (d.visual?.help_dog && !/(불가|금지)/.test(d.visual.help_dog)) tags.add('안내견동반');
-        if (d.visual?.audio_guide && !/(없음|미설치)/.test(d.visual.audio_guide)) tags.add('시각장애인음성안내');
+        if (d.visual?.help_dog) tags.add('안내견동반');
+        if (d.visual?.audio_guide) tags.add('시각장애인음성안내');
         if (d.hearing?.sign_language || d.hearing?.video_guide) tags.add('수어안내');
     }
 
     // 3. 반려동물 동반 (KorPetTourService2) 세부 태그
     if (petTourInfo?.has_pet_info) {
-        tags.add('반려견동반');
+        tags.add('반려동물');
         const petDetails = petTourInfo.details || {};
-        const sizeStr = `${petDetails.allowed_pet_size || ''} ${petDetails.etc_info || ''} ${petDetails.pet_tour_info || ''}`;
-        if (!/(출입\s*불가|입장\s*금지)/.test(sizeStr)) {
-            if (/대형견|전\s*견종|전견종|모든\s*견종|제한\s*없음|제한없음/i.test(sizeStr)) {
-                tags.add('대형견가능');
-            }
-            if (/소형견|중[,\s·]*소형견|중형견|10kg|15kg|전\s*견종|전견종|모든\s*견종/i.test(sizeStr)) {
-                tags.add('소형견동반');
-            }
+        const sizeStr = String(petDetails.allowed_pet_size || '');
+        if (sizeStr.includes('대형견') || sizeStr.includes('모두') || sizeStr.includes('제한없음')) {
+            tags.add('대형견 동반');
+        } else if (sizeStr.includes('소형견') || sizeStr.includes('중형견')) {
+            tags.add('소형견동반');
         }
 
         const facilityStr = `${petDetails.facilities || ''} ${petDetails.etc_info || ''}`;

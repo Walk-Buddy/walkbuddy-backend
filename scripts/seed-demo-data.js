@@ -76,10 +76,8 @@ async function ensureServer() {
 }
 
 async function main() {
-    await runNode(['db/run-sql.js', 'db/reset.sql'], 'DB 초기화');
-  await runNode(['db/run-sql.js', 'db/schema.sql'], 'DB 스키마 재구성');
-  // 주의: db/seed.sql 은 삭제됨. 시연용 사용자/engagement 데이터는
-  //       scripts/seed-demo-engagements.js (npm run seed:demo) 로 생성한다.
+  await runNode(['db/run-sql.js', 'db/reset.sql'], 'DB 초기화');
+  await runNode(['db/run-sql.js', 'db/schema.sql'], 'DB 스키마 및 태그 마스터 구성');
 
   if (includeDurunubi) {
     await runNode(['scripts/import-durunubi-courses.js'], '두루누비 코스 import');

@@ -524,9 +524,9 @@ exports.getBarrierFreeInfo = async (contentId) => {
   const summaryTags = [];
   if (item.parking) summaryTags.push("#주차가능");
   if (item.restroom) summaryTags.push("#화장실");
-  if (item.audioguide) summaryTags.push("#음성해설");
-  if (item.helpdog) summaryTags.push("#반려견동반");
-  if (item.wheelchair || item.route) summaryTags.push("#열린관광");
+  if (item.audioguide) summaryTags.push("#시각장애인음성안내");
+  if (item.helpdog) summaryTags.push("#안내견동반");
+  if (item.wheelchair || item.route) summaryTags.push("#휠체어접근");
 
   return {
     content_id: contentId,
@@ -1067,23 +1067,9 @@ exports.getPetTourDetail = async (contentId) => {
     };
   }
 
-  // 표준 11개 스팟 태그 및 반려동물 세부 태그 추출
-  const summaryTags = ["#반려견동반", "#반려동물"];
-  const petSize = `${item.acmpyPsblCpam || ""} ${item.etcAcmpyInfo || ""} ${item.petTursmInfo || ""}`;
-  const facilities = `${item.relaPosesFclty || ""} ${item.etcAcmpyInfo || ""}`;
-
-  if (/대형견|전\s*견종|전견종|모든\s*견종|제한\s*없음|제한없음/i.test(petSize)) {
-    summaryTags.push("#대형견가능");
-  }
-  if (/소형견|중[,\s·]*소형견|중형견|10kg|15kg|전\s*견종|전견종|모든\s*견종/i.test(petSize)) {
-    summaryTags.push("#소형견동반");
-  }
-  if (/배변|배변봉투|배변시설|수거함/i.test(facilities)) {
-    summaryTags.push("#반려견배변시설");
-  }
-  if (/놀이터|운동장|안전문|펜스/i.test(facilities)) {
-    summaryTags.push("#반려견놀이터");
-  }
+  // 표준 스팟 태그에 매핑 가능한 요약 태그 추출
+  const summaryTags = ["#반려동물"];
+  const facilities = item.relaPosesFclty || "";
   if (facilities.includes("주차") || facilities.includes("주차장")) summaryTags.push("#주차가능");
   if (facilities.includes("화장실")) summaryTags.push("#화장실");
   if (facilities.includes("쉼터") || facilities.includes("벤치")) summaryTags.push("#벤치·쉼터");
