@@ -193,7 +193,6 @@ function extractTourTags({ overview, barrierFreeInfo, petTourInfo }) {
 
     // 2. 무장애 편의시설 (KorWithService2) 세부 태그
     if (barrierFreeInfo?.has_barrier_free_info && barrierFreeInfo.details) {
-        tags.add('열린관광');
         const d = barrierFreeInfo.details;
         if (d.physical?.wheelchair) tags.add('휠체어접근');
         if (d.physical?.route) tags.add('무단차통로');

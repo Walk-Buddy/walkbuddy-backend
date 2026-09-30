@@ -185,9 +185,8 @@ async function fetchPetTourInfo(contentId) {
 function deriveSpotTags({ overview, barrierFree, petTour }) {
   const tags = new Set();
 
-  // (1) 무장애 여행정보 (KorWithService2 - 열린관광 공식 태그)
+  // (1) 무장애 여행정보 (KorWithService2 - 열린관광 공식 편의시설 태그)
   if (barrierFree) {
-    tags.add('열린관광');
     const p = barrierFree.physical || {};
     const v = barrierFree.visual || {};
     const h = barrierFree.hearing || {};

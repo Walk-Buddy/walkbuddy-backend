@@ -1525,11 +1525,10 @@ ON CONFLICT (name, type) DO UPDATE SET
   is_active     = EXCLUDED.is_active,
   is_review_tag = EXCLUDED.is_review_tag;
 
--- 2. 표준 스팟 태그 (32개)
+-- 2. 표준 스팟 태그 (31개)
 INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
 VALUES
-  -- 열린관광 (무장애 편의시설 - 전부 후기 불가 FALSE)
-  ('열린관광',           'spot', '열린관광',     TRUE, FALSE),
+  -- 열린관광 (무장애 편의시설 12개 - 전부 후기 불가 FALSE)
   ('무단차통로',         'spot', '열린관광',     TRUE, FALSE),
   ('휠체어접근',         'spot', '열린관광',     TRUE, FALSE),
   ('휠체어대여',         'spot', '열린관광',     TRUE, FALSE),

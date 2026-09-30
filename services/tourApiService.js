@@ -378,7 +378,7 @@ exports.getBarrierFreeInfo = async (contentId) => {
   if (item.restroom) summaryTags.push("#화장실");
   if (item.audioguide) summaryTags.push("#시각장애인음성안내");
   if (item.helpdog) summaryTags.push("#안내견동반");
-  if (item.wheelchair || item.route) summaryTags.push("#열린관광");
+  if (item.wheelchair || item.route) summaryTags.push("#휠체어접근");
 
   return {
     content_id: contentId,
