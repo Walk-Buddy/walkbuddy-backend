@@ -672,7 +672,7 @@ const swaggerDefinition = {
                         '반려동물': {
                           api_theme: 'pet',
                           tags: [
-                            { tag_id: 'uuid', name: '반려견동반', type: 'spot', group_name: '반려동물', api_theme: 'pet' },
+                            { tag_id: 'uuid', name: '반려동물', type: 'spot', group_name: '반려동물', api_theme: 'pet' },
                           ],
                         },
                         '시설·편의': {
@@ -1435,7 +1435,7 @@ const swaggerDefinition = {
           { name: 'region', in: 'query', schema: { type: 'string' }, description: '시/도 지역 필터 (예: 서울, 춘천)' },
           { name: 'sub_region', in: 'query', schema: { type: 'string' }, description: '세부 자치구/권역 필터 (예: 노원구, 마포구, 의암호·공지천권)' },
           { name: 'category', in: 'query', schema: { type: 'string', enum: ['산·등산로', '숲·휴양림', '수목원·정원', '강·하천', '호수·저수지', '공원·광장', '역사·유적', '전시·문화공간', '카페·맛집', '전통시장·로컬마켓'] }, description: '스팟 10대 표준 카테고리' },
-          { name: 'tag_name', in: 'query', schema: { type: 'string' }, description: '스팟 태그명 (예: 음성해설, 열린관광, 야간명소, 포토존, 전통·한옥, 낮그늘, 실시간축제, 반려견동반, 화장실, 주차가능, 벤치·쉼터)' },
+          { name: 'tag_name', in: 'query', schema: { type: 'string' }, description: '스팟 태그명 (예: Odii음성해설, 열린관광, 밤산책, 포토존, 전통·한옥, 낮그늘, 실시간축제, 반려동물, 화장실, 주차가능, 벤치·쉼터)' },
           { name: 'tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표로 구분된 태그 UUID 목록' },
           { name: 'min_recommend_pct', in: 'query', schema: { type: 'number', minimum: 0, maximum: 100 }, description: '최소 추천율 (0~100)' },
           { name: 'sort', in: 'query', schema: { type: 'string', enum: ['latest', 'recommend', 'name'], default: 'latest' }, description: '정렬 기준 (latest: 최신순, recommend: 추천율순, name: 이름순)' },
@@ -2888,7 +2888,7 @@ const swaggerDefinition = {
                       properties: {
                         content_id: { type: 'string', example: '2654601' },
                         has_pet_info: { type: 'boolean', example: true },
-                        summary_tags: { type: 'array', items: { type: 'string' }, example: ['#반려견동반'] },
+                        summary_tags: { type: 'array', items: { type: 'string' }, example: ['#반려동물'] },
                         details: {
                           type: 'object',
                           properties: {

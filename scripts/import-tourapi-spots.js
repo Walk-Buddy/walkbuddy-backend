@@ -202,15 +202,16 @@ function deriveSpotTags({ overview, barrierFree, petTour }) {
     if (i.lactation_room) tags.add('수유실');
     if (v.braile_block || v.braile_promotion) tags.add('점자안내');
     if (v.help_dog) tags.add('안내견동반');
+    if (v.audio_guide) tags.add('시각장애인음성안내');
     if (h.sign_language || h.video_guide) tags.add('수어안내');
   }
 
   // (2) 반려동물 동반정보 (KorPetTourService2 - 반려동물 공식 태그)
   if (petTour) {
-    tags.add('반려견동반');
+    tags.add('반려동물');
     const size = String(petTour.allowed_pet_size || '');
     if (size.includes('대형견') || size.includes('모두') || size.includes('제한없음')) {
-      tags.add('대형견가능');
+      tags.add('대형견 동반');
     } else if (size.includes('소형견') || size.includes('중형견')) {
       tags.add('소형견동반');
     }

@@ -376,8 +376,8 @@ exports.getBarrierFreeInfo = async (contentId) => {
   const summaryTags = [];
   if (item.parking) summaryTags.push("#주차가능");
   if (item.restroom) summaryTags.push("#화장실");
-  if (item.audioguide) summaryTags.push("#음성해설");
-  if (item.helpdog) summaryTags.push("#반려견동반");
+  if (item.audioguide) summaryTags.push("#시각장애인음성안내");
+  if (item.helpdog) summaryTags.push("#안내견동반");
   if (item.wheelchair || item.route) summaryTags.push("#열린관광");
 
   return {
@@ -909,8 +909,8 @@ exports.getPetTourDetail = async (contentId) => {
     };
   }
 
-  // 표준 11개 스팟 태그에 매핑 가능한 요약 태그 추출
-  const summaryTags = ["#반려견동반"];
+  // 표준 스팟 태그에 매핑 가능한 요약 태그 추출
+  const summaryTags = ["#반려동물"];
   const facilities = item.relaPosesFclty || "";
   if (facilities.includes("주차") || facilities.includes("주차장")) summaryTags.push("#주차가능");
   if (facilities.includes("화장실") || facilities.includes("배변")) summaryTags.push("#화장실");

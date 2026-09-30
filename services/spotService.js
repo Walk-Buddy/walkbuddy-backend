@@ -203,18 +203,18 @@ function extractTourTags({ overview, barrierFreeInfo, petTourInfo }) {
         if (d.infant?.stroller) tags.add('유모차대여');
         if (d.infant?.lactation_room) tags.add('수유실');
         if (d.visual?.braile_block || d.visual?.braile_promotion) tags.add('점자안내');
-        if (d.visual?.help_dog) tags.add('도우미견가능');
-        if (d.visual?.audio_guide) tags.add('음성해설');
+        if (d.visual?.help_dog) tags.add('안내견동반');
+        if (d.visual?.audio_guide) tags.add('시각장애인음성안내');
         if (d.hearing?.sign_language || d.hearing?.video_guide) tags.add('수어안내');
     }
 
     // 3. 반려동물 동반 (KorPetTourService2) 세부 태그
     if (petTourInfo?.has_pet_info) {
-        tags.add('반려견동반');
+        tags.add('반려동물');
         const petDetails = petTourInfo.details || {};
         const sizeStr = String(petDetails.allowed_pet_size || '');
         if (sizeStr.includes('대형견') || sizeStr.includes('모두') || sizeStr.includes('제한없음')) {
-            tags.add('대형견가능');
+            tags.add('대형견 동반');
         } else if (sizeStr.includes('소형견') || sizeStr.includes('중형견')) {
             tags.add('소형견동반');
         }

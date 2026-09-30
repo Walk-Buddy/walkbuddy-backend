@@ -1498,7 +1498,7 @@ CREATE INDEX ix_user_blocks_blocked_id
 -- ON CONFLICT (name, type) DO UPDATE 로 멱등(Idempotent)하게 동작합니다.
 -- ================================================
 
--- 1. 표준 코스 태그 (13개)
+-- 1. 표준 코스 태그 (12개)
 INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
 VALUES
   -- 코스 출처 (시스템 전용, 후기 불가)
@@ -1507,7 +1507,6 @@ VALUES
 
   -- 추천·종류 (시스템/에디터 추천, 후기 불가)
   ('추천코스',   'course', '추천·종류',  TRUE, FALSE),
-  ('관광코스',   'course', '추천·종류',  TRUE, FALSE),
   ('둘레길',     'course', '추천·종류',  TRUE, FALSE),
   ('춘천 봄내길', 'course', '추천·종류',  TRUE, FALSE),
 
@@ -1526,50 +1525,47 @@ ON CONFLICT (name, type) DO UPDATE SET
   is_active     = EXCLUDED.is_active,
   is_review_tag = EXCLUDED.is_review_tag;
 
--- 2. 표준 스팟 태그 (37개)
+-- 2. 표준 스팟 태그 (32개)
 INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
 VALUES
-  -- 열린관광 (무장애 편의시설)
-  ('열린관광',           'spot', '열린관광',     TRUE, FALSE), -- 인증 대표 태그 (후기 불가)
-  ('무단차통로',         'spot', '열린관광',     TRUE, TRUE),
-  ('휠체어접근',         'spot', '열린관광',     TRUE, TRUE),
-  ('휠체어대여',         'spot', '열린관광',     TRUE, TRUE),
-  ('장애인주차',         'spot', '열린관광',     TRUE, TRUE),
-  ('장애인화장실',       'spot', '열린관광',     TRUE, TRUE),
-  ('엘리베이터',         'spot', '열린관광',     TRUE, TRUE),
-  ('안내견동반',         'spot', '열린관광',     TRUE, TRUE),
-  ('시각장애인음성안내', 'spot', '열린관광',     TRUE, FALSE), -- 전문 시설 (후기 불가)
-  ('점자안내',           'spot', '열린관광',     TRUE, TRUE),
-  ('수어안내',           'spot', '열린관광',     TRUE, TRUE),
-  ('유모차대여',         'spot', '열린관광',     TRUE, TRUE),
-  ('수유실',             'spot', '열린관광',     TRUE, TRUE),
+  -- 열린관광 (무장애 편의시설 - 전부 후기 불가 FALSE)
+  ('열린관광',           'spot', '열린관광',     TRUE, FALSE),
+  ('무단차통로',         'spot', '열린관광',     TRUE, FALSE),
+  ('휠체어접근',         'spot', '열린관광',     TRUE, FALSE),
+  ('휠체어대여',         'spot', '열린관광',     TRUE, FALSE),
+  ('장애인주차',         'spot', '열린관광',     TRUE, FALSE),
+  ('장애인화장실',       'spot', '열린관광',     TRUE, FALSE),
+  ('엘리베이터',         'spot', '열린관광',     TRUE, FALSE),
+  ('안내견동반',         'spot', '열린관광',     TRUE, FALSE),
+  ('시각장애인음성안내', 'spot', '열린관광',     TRUE, FALSE),
+  ('점자안내',           'spot', '열린관광',     TRUE, FALSE),
+  ('수어안내',           'spot', '열린관광',     TRUE, FALSE),
+  ('유모차대여',         'spot', '열린관광',     TRUE, FALSE),
+  ('수유실',             'spot', '열린관광',     TRUE, FALSE),
 
-  -- 반려동물
-  ('반려견동반',         'spot', '반려동물',     TRUE, TRUE),
-  ('소형견동반',         'spot', '반려동물',     TRUE, TRUE),
-  ('대형견가능',         'spot', '반려동물',     TRUE, TRUE),
-  ('반려견배변시설',     'spot', '반려동물',     TRUE, TRUE),
-  ('반려견놀이터',       'spot', '반려동물',     TRUE, TRUE),
+  -- 반려동물 (한국관광공사 공인 데이터 - 전부 후기 불가 FALSE)
+  ('반려동물',           'spot', '반려동물',     TRUE, FALSE),
+  ('소형견동반',         'spot', '반려동물',     TRUE, FALSE),
+  ('대형견 동반',        'spot', '반려동물',     TRUE, FALSE),
+  ('반려견배변시설',     'spot', '반려동물',     TRUE, FALSE),
+  ('반려견놀이터',       'spot', '반려동물',     TRUE, FALSE),
 
-  -- 시설·편의
+  -- 시설·편의 (후기 가능)
   ('화장실',             'spot', '시설·편의',    TRUE, TRUE),
   ('주차가능',           'spot', '시설·편의',    TRUE, TRUE),
   ('식수대',             'spot', '시설·편의',    TRUE, TRUE),
   ('벤치·쉼터',          'spot', '시설·편의',    TRUE, TRUE),
-  ('카페&식당',          'spot', '시설·편의',    TRUE, TRUE),
 
   -- 분위기·테마
   ('Odii음성해설',       'spot', '분위기·테마',  TRUE, FALSE), -- Odii 연동 전용 (후기 불가)
+  ('실시간축제',         'spot', '분위기·테마',  TRUE, FALSE), -- 실시간 연동 전용 (후기 불가)
   ('포토존',             'spot', '분위기·테마',  TRUE, TRUE),
   ('전통·한옥',          'spot', '분위기·테마',  TRUE, TRUE),
   ('낮그늘',             'spot', '분위기·테마',  TRUE, TRUE),
-  ('야경명소',           'spot', '분위기·테마',  TRUE, TRUE),
-  ('야간명소',           'spot', '분위기·테마',  TRUE, TRUE),
-  ('야간개방',           'spot', '분위기·테마',  TRUE, TRUE),
+  ('밤산책',             'spot', '분위기·테마',  TRUE, TRUE),   -- 야간명소 -> 밤산책 추천 대체
   ('일출명소',           'spot', '분위기·테마',  TRUE, TRUE),
   ('일몰명소',           'spot', '분위기·테마',  TRUE, TRUE),
   ('문화/예술',          'spot', '분위기·테마',  TRUE, TRUE),
-  ('실시간축제',         'spot', '분위기·테마',  TRUE, FALSE), -- 실시간 연동 전용 (후기 불가)
   ('역사유적',           'spot', '분위기·테마',  TRUE, TRUE),
   ('벚꽃',               'spot', '분위기·테마',  FALSE, TRUE), -- 계절 태그 (봄 외 비활성)
   ('단풍',               'spot', '분위기·테마',  FALSE, TRUE)  -- 계절 태그 (가을 외 비활성)
