@@ -160,6 +160,22 @@ async function fetchBarrierFreeInfo(contentId) {
   };
 }
 
+async function fetchSpotIntro(contentId) {
+  const items = await callOpenApi(BASE_URL, 'detailIntro2', { contentId, contentTypeId: 12 }, 'KorService2');
+  const item = items[0];
+  if (!item) return null;
+  return {
+    parking: item.parking || null,
+    chkbabycarriage: item.chkbabycarriage || null,
+    chkpet: item.chkpet || null,
+    usetime: item.usetime || null,
+    restdate: item.restdate || null,
+    heritage1: String(item.heritage1 || '0'),
+    heritage2: String(item.heritage2 || '0'),
+    heritage3: String(item.heritage3 || '0'),
+  };
+}
+
 async function fetchPetTourInfo(contentId) {
   const items = await callOpenApi(PET_TOUR_BASE_URL, 'detailPetTour2', { contentId }, 'KorPetTourService2');
   const item = items[0];
@@ -167,35 +183,163 @@ async function fetchPetTourInfo(contentId) {
 
   const hasPet = Boolean(
     item.relaAcmdFee || item.relaPosesFclty || item.relaFrnPrvt ||
-    item.etcAcmFclty || item.relaRntlPrn || item.acmCheckList
+    item.etcAcmFclty || item.relaRntlPrn || item.acmCheckList ||
+    item.acmpyPsblCpam || item.acmpyTypeCd
   );
   if (!hasPet) return null;
 
   return {
-    allowed_pet_size: item.acmCheckList || null,
+    allowed_pet_size: item.acmCheckList || item.acmpyPsblCpam || null,
     facilities: item.relaPosesFclty || null,
-    notes: item.etcAcmFclty || null,
+    notes: item.etcAcmFclty || item.etcAcmpyInfo || null,
     parking: item.relaFrnPrvt || null,
+    acmpyTypeCd: item.acmpyTypeCd || null,
   };
 }
 
 // ──────────────────────────────────────────────────────────
-// 4. 데이터 기반 장소 태그 자동 도출 알고리즘
+// 4. AI 기반 분위기·테마 정밀 태그 추론 (Gemini / SWU AI Gateway)
 // ──────────────────────────────────────────────────────────
-function deriveSpotTags({ overview, barrierFree, petTour }) {
+let currentKeyIndex = 0;
+function getSwuApiKey() {
+  const keys = (process.env.SWU_AI_API_KEY || '').split(',').map((k) => k.trim()).filter(Boolean);
+  if (!keys.length) return '';
+  const key = keys[currentKeyIndex % keys.length];
+  currentKeyIndex = (currentKeyIndex + 1) % keys.length;
+  return key;
+}
+
+// 허용된 정본 31개 스팟 태그 마스터 (db/schema.sql 기준)
+const CANONICAL_SPOT_TAGS = new Set([
+  '무단차통로', '휠체어접근', '휠체어대여', '장애인주차', '장애인화장실',
+  '엘리베이터', '안내견동반', '시각장애인음성안내', '점자안내', '수어안내',
+  '유모차대여', '수유실', '반려동물', '소형견동반', '대형견 동반',
+  '반려견배변시설', '반려견놀이터', '화장실', '주차가능', '식수대',
+  '벤치·쉼터', 'Odii음성해설', '실시간축제', '포토존', '전통·한옥',
+  '낮그늘', '밤산책', '일출명소', '일몰명소', '문화/예술', '역사유적'
+]);
+
+async function inferAiThemeTags({ title, categories = [], overview = '' }) {
+  const allowedTags = new Set([
+    '밤산책', '일몰명소', '일출명소', '포토존', '전통·한옥', '낮그늘', '문화/예술', '역사유적', '벤치·쉼터'
+  ]);
+
+  const swuKey = getSwuApiKey();
+  if (!swuKey) return [];
+
+  const prompt = `당신은 대한민국 산책·관광 스팟의 태그를 판정하는 전문가입니다.
+다음 장소의 정보를 읽고, 아래 [허용 태그 목록] 중에서 이 장소에 명확하게 부합하는 태그만 골라 JSON 배열로 출력하세요.
+
+[허용 태그 목록]
+- 밤산책 (야경, 야간 조명, 밤에 방문하기 좋은 곳)
+- 일몰명소 (노을, 석양, 해넘이 조망지)
+- 일출명소 (일출, 해돋이 명소)
+- 포토존 (전망대, 스카이워크, 출렁다리, 케이블카, 기념 조형물, 테마파크, 뷰포인트 사진 명소)
+- 전통·한옥 (전통 한옥, 고택, 전통마을, 한국 전통문화)
+- 낮그늘 (수목이 우거진 숲, 산림욕장, 나무 그늘길)
+- 문화/예술 (미술관, 박물관, 문학관, 전시관, 예술 체험)
+- 역사유적 (사찰, 궁, 묘역, 왕릉, 충혼탑, 석탑, 성곽, 사적지, 지정문화재)
+- 벤치·쉼터 (휴게 쉼터, 정자, 벤치가 있는 휴식 공간)
+
+[대원칙]
+1. 억지로 추측하거나 지어내지 마세요. 장소의 본질적 성격이나 개요에 부합할 때만 선택하세요.
+2. 위 허용 태그 외의 다른 단어는 절대 추가하지 마세요.
+3. 응답은 마크다운 코드블록 없이 순수 JSON 배열만 출력하세요. 예: ["밤산책", "포토존"]
+
+[장소 정보]
+- 장소명: ${title}
+- 카테고리: ${categories.join(', ')}
+- 개요: ${overview.slice(0, 300)}`;
+
+  try {
+    const res = await axios.post(
+      'https://factchat-cloud.mindlogic.ai/v1/gateway/chat/completions/',
+      {
+        model: 'gemini-3.7-flash',
+        messages: [{ role: 'user', content: prompt }],
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${swuKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 10000,
+      }
+    );
+    const content = res.data?.choices?.[0]?.message?.content?.trim() || '';
+    const match = content.match(/\[[\s\S]*?\]/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((t) => allowedTags.has(t));
+      }
+    }
+  } catch (err) {
+    // AI 에러 시 fallback
+  }
+  return [];
+}
+
+// ──────────────────────────────────────────────────────────
+// 5. 데이터 기반 장소 태그 자동 도출 알고리즘 (하이브리드)
+// ──────────────────────────────────────────────────────────
+function deriveSpotTags({ title = '', categories = [], overview = '', barrierFree, petTour, intro, aiTags = [] }) {
   const tags = new Set();
 
-  // (1) 무장애 여행정보 (KorWithService2 - 열린관광 공식 편의시설 태그)
+  // (1) detailIntro2 공인 운영/편의 데이터 기반
+  if (intro) {
+    const park = String(intro.parking || '');
+    if (/가능|무료|유료|주차장/.test(park) && !/불가|없음/.test(park)) {
+      tags.add('주차가능');
+    }
+    const baby = String(intro.chkbabycarriage || '');
+    if (/가능|대여|유료|무료/.test(baby) && !/불가|없음/.test(baby)) {
+      tags.add('유모차대여');
+    }
+    const pet = String(intro.chkpet || '');
+    if (/가능/.test(pet) && !/불가|금지|없음/.test(pet)) {
+      tags.add('반려동물');
+    }
+    if (intro.heritage1 === '1' || intro.heritage2 === '1' || intro.heritage3 === '1') {
+      tags.add('역사유적');
+    }
+    const usetime = String(intro.usetime || '');
+    if (/상시\s*개방|24시간|야간/.test(usetime)) {
+      tags.add('밤산책');
+    }
+  }
+
+  // (2) 무장애 여행정보 (KorWithService2 - 열린관광 공식 편의시설 태그)
   if (barrierFree) {
     const p = barrierFree.physical || {};
     const v = barrierFree.visual || {};
     const h = barrierFree.hearing || {};
     const i = barrierFree.infant || {};
 
-    if (p.wheelchair) tags.add('휠체어접근');
-    if (p.route) tags.add('무단차통로');
-    if (p.restroom) tags.add('장애인화장실');
-    if (p.parking) tags.add('장애인주차');
+    if (p.wheelchair) {
+      tags.add('휠체어접근');
+      const wText = String(p.wheelchair);
+      if (/대여|빌려|구비/.test(wText)) {
+        tags.add('휠체어대여');
+      }
+    }
+    if (p.route || p.exit || p.handicapetc) {
+      tags.add('무단차통로');
+      const routeText = `${p.route || ''} ${p.exit || ''} ${p.handicapetc || ''}`;
+      if (/휠체어|경사로|턱이\s*없어|완만/.test(routeText)) {
+        tags.add('휠체어접근');
+      }
+    }
+
+    if (p.restroom) {
+      tags.add('장애인화장실');
+      tags.add('화장실');
+    }
+    if (p.parking) {
+      tags.add('장애인주차');
+      tags.add('주차가능');
+    }
+
     if (p.elevator) tags.add('엘리베이터');
     if (i.stroller) tags.add('유모차대여');
     if (i.lactation_room) tags.add('수유실');
@@ -205,29 +349,46 @@ function deriveSpotTags({ overview, barrierFree, petTour }) {
     if (h.sign_language || h.video_guide) tags.add('수어안내');
   }
 
-  // (2) 반려동물 동반정보 (KorPetTourService2 - 반려동물 공식 태그)
+  // (3) 반려동물 동반정보 (KorPetTourService2 - 반려동물 공식 태그)
   if (petTour) {
     tags.add('반려동물');
     const size = String(petTour.allowed_pet_size || '');
-    if (size.includes('대형견') || size.includes('모두') || size.includes('제한없음')) {
+    if (size.includes('대형견') || size.includes('모두') || size.includes('제한없음') || size.includes('전 견종')) {
       tags.add('대형견 동반');
     } else if (size.includes('소형견') || size.includes('중형견')) {
       tags.add('소형견동반');
     }
 
-    const fac = String(petTour.facilities || '');
-    if (fac.includes('배변') || fac.includes('봉투') || fac.includes('수거함')) {
-      tags.add('반려견배변시설');
-    }
-    if (fac.includes('놀이터') || fac.includes('운동장') || fac.includes('펜스')) {
-      tags.add('반려견놀이터');
-    }
-    if (fac.includes('주차') || petTour.parking) tags.add('주차가능');
-    if (fac.includes('화장실')) tags.add('화장실');
-    if (fac.includes('쉼터') || fac.includes('벤치')) tags.add('벤치·쉼터');
+    const fac = `${petTour.facilities || ''} ${petTour.notes || ''}`;
+    if (/배변|봉투|수거함/.test(fac)) tags.add('반려견배변시설');
+    if (/놀이터|운동장|펜스/.test(fac)) tags.add('반려견놀이터');
+    if (petTour.parking) tags.add('주차가능');
   }
 
-  return Array.from(tags);
+  // (4) 지형 및 시설물 팩트 기반 패턴 매칭 (정밀 방어)
+  const tText = String(title || '');
+  if (/약수터|식수대|음수대/.test(tText)) tags.add('식수대');
+  if (/스카이워크|출렁다리|전망대|타워|케이블카/.test(tText)) tags.add('포토존');
+  if (/사찰|절|궁|묘역|능|왕릉|충혼탑|비석|석탑|성곽|사적지|생가|추모상|추모비|위령탑/.test(tText) || categories.includes('역사·유적')) {
+    tags.add('역사유적');
+  }
+  if (/문학공원|조각공원|예술공원|미술관|박물관|문학관|전시관|아트센터|도예/.test(tText) || categories.includes('전시·문화공간')) {
+    tags.add('문화/예술');
+  }
+  if (categories.includes('숲·휴양림')) {
+    tags.add('낮그늘');
+    tags.add('벤치·쉼터');
+  }
+
+  // (5) AI 분석 테마 태그 병합 (검증된 정본 31개 태그 풀 일치)
+  if (Array.isArray(aiTags)) {
+    for (const tag of aiTags) {
+      tags.add(tag);
+    }
+  }
+
+  // 정본 31개 스팟 태그 마스터 일치 태그만 최종 반환
+  return Array.from(tags).filter((t) => CANONICAL_SPOT_TAGS.has(t));
 }
 
 // ──────────────────────────────────────────────────────────
@@ -244,6 +405,12 @@ async function ensureAdminUser(client) {
 async function attachTags(client, spotId, tagNames, ownerId) {
   if (!spotId || !Array.isArray(tagNames) || tagNames.length === 0) return [];
   const attached = [];
+
+  // 시스템(관리자) 기존 태깅 최신화 (사용자 후기 태그는 보존)
+  await client.query(
+    `DELETE FROM taggings WHERE target_id = $1 AND target_type = 'spot' AND user_id = $2`,
+    [spotId, ownerId]
+  ).catch(() => {});
 
   for (const rawName of tagNames) {
     const name = String(rawName).trim().replace(/^#/, '');
@@ -369,12 +536,13 @@ async function main() {
           continue;
         }
 
-        // 1. 상세 정보 병렬 조회 (개요, 무장애, 반려동물)
+        // 1. 상세 정보 병렬 조회 (개요, 무장애, 반려동물, 운영정보)
         await sleep(sleepMs);
-        const [overview, barrierFree, petTour] = await Promise.all([
+        const [overview, barrierFree, petTour, intro] = await Promise.all([
           fetchSpotOverview(contentId).catch(() => ''),
           fetchBarrierFreeInfo(contentId).catch(() => null),
           fetchPetTourInfo(contentId).catch(() => null),
+          fetchSpotIntro(contentId).catch(() => null),
         ]);
 
         // 2. 카테고리 및 권역 추론
@@ -396,8 +564,27 @@ async function main() {
         const determinedRegion = target.name === '춘천' ? '춘천' : (regionInfo.region || '서울');
         const determinedSubRegion = regionInfo.sub_region || null;
 
-        // 3. 데이터 기반 태그 도출
-        const autoTags = deriveSpotTags({ overview, barrierFree, petTour });
+        // 3. AI 테마 태그 추론 (Gemini 3.7 Flash)
+        const aiTags = await inferAiThemeTags({
+          title,
+          categories,
+          overview,
+        }).catch(() => []);
+
+        // 4. 데이터 기반 태그 종합 도출 (운영정보, 무장애, 반려동물, AI테마)
+        const autoTags = deriveSpotTags({
+          title,
+          categories,
+          overview,
+          barrierFree,
+          petTour,
+          intro,
+          aiTags,
+        });
+
+        const rawImg = item.firstimage || item.firstimage2 || null;
+        const firstImage = rawImg ? rawImg.replace(/^http:\/\//i, 'https://').trim() : null;
+        const isNightTour = autoTags.includes('밤산책');
 
         if (isDryRun) {
           resultRows.push({
@@ -405,22 +592,27 @@ async function main() {
             '권역/구': determinedSubRegion || '-',
             '스팟명': title,
             '카테고리': categories.join(', ') || '공원·광장',
+            '대표사진': firstImage ? 'O' : 'X',
             '태그수': autoTags.length,
             '태그 목록': autoTags.map((t) => `#${t}`).join(' ') || '(없음)',
           });
+
+          console.log(
+            `   [${resultRows.length}] [dry-run] ${determinedRegion} (${determinedSubRegion || '-'}) | ${title} | 사진:${firstImage ? 'O' : 'X'} | 태그(${autoTags.map((t) => `#${t}`).join(', ') || '없음'})`
+          );
           continue;
         }
 
-        // 4. DB spots 테이블에 영구 저장 (INSERT ... ON CONFLICT DO UPDATE)
+        // 5. DB spots 테이블에 영구 저장 (INSERT ... ON CONFLICT DO UPDATE)
         const { rows } = await client.query(
           `INSERT INTO spots (
              kakao_place_id, name, location, address, categories,
              kakao_category_name, source, region, sub_region,
-             content_tour, barrier_free_info, last_synced_at
+             content_tour, first_image, barrier_free_info, pet_tour_info, is_night_tour, last_synced_at
            ) VALUES (
              $1, $2, ST_Point($3, $4)::GEOGRAPHY, $5, $6::TEXT[],
              $7, 'admin', $8, $9,
-             $10, $11, NOW()
+             $10, $11, $12, $13, $14, NOW()
            )
            ON CONFLICT (kakao_place_id) DO UPDATE SET
              name = EXCLUDED.name,
@@ -429,7 +621,10 @@ async function main() {
              region = EXCLUDED.region,
              sub_region = EXCLUDED.sub_region,
              content_tour = COALESCE(EXCLUDED.content_tour, spots.content_tour),
+             first_image = COALESCE(EXCLUDED.first_image, spots.first_image),
              barrier_free_info = COALESCE(EXCLUDED.barrier_free_info, spots.barrier_free_info),
+             pet_tour_info = COALESCE(EXCLUDED.pet_tour_info, spots.pet_tour_info),
+             is_night_tour = EXCLUDED.is_night_tour,
              last_synced_at = NOW(),
              updated_at = NOW()
            RETURNING spot_id`,
@@ -444,13 +639,16 @@ async function main() {
             determinedRegion,
             determinedSubRegion,
             overview || null,
+            firstImage,
             barrierFree ? JSON.stringify(barrierFree) : null,
+            petTour ? JSON.stringify(petTour) : null,
+            isNightTour,
           ]
         );
 
         const spotId = rows[0]?.spot_id;
 
-        // 5. 태그 매핑 (taggings)
+        // 6. 태그 매핑 (taggings)
         let attachedCount = 0;
         if (spotId && autoTags.length > 0) {
           const attached = await attachTags(client, spotId, autoTags, ownerId);
@@ -466,22 +664,30 @@ async function main() {
           '권역/구': determinedSubRegion || '-',
           '스팟명': title,
           '카테고리': categories.join(', '),
+          '대표사진': firstImage ? 'O' : 'X',
           '태그수': attachedCount,
           '주요 태그': autoTags.slice(0, 3).map((t) => `#${t}`).join(' '),
         });
 
         console.log(
-          `   [${resultRows.length}] ${determinedRegion} | ${title} (${autoTags.map((t) => `#${t}`).join(', ') || '태그없음'})`
+          `   [${resultRows.length}] ${determinedRegion} (${determinedSubRegion || '-'}) | ${title} | 사진:${firstImage ? 'O' : 'X'} | 태그(${autoTags.map((t) => `#${t}`).join(', ') || '없음'})`
         );
       }
     }
 
     console.log('\n============================================================');
-    console.log('🎉 [TourAPI 스팟 적재 결과]');
+    console.log(isDryRun ? '🔍 [TourAPI 스팟 Dry-Run 분석 결과]' : '🎉 [TourAPI 스팟 적재 결과]');
     console.table(resultRows);
-    console.log(`- 춘천 스팟 적재: ${summary.chuncheon_loaded}건`);
-    console.log(`- 서울 스팟 적재: ${summary.seoul_loaded}건`);
-    console.log(`- 총 부착된 태그: ${summary.total_tags_attached}개`);
+    if (isDryRun) {
+      const photoCount = resultRows.filter((r) => r['대표사진'] === 'O').length;
+      console.log(`- 분석 대상 스팟: 총 ${resultRows.length}개`);
+      console.log(`- 대표사진 보유: ${photoCount}개 (${Math.round((photoCount / (resultRows.length || 1)) * 100)}%)`);
+      console.log(`- 태그 1개 이상 부여: ${resultRows.filter((r) => r['태그수'] > 0).length}개`);
+    } else {
+      console.log(`- 춘천 스팟 적재: ${summary.chuncheon_loaded}건`);
+      console.log(`- 서울 스팟 적재: ${summary.seoul_loaded}건`);
+      console.log(`- 총 부착된 태그: ${summary.total_tags_attached}개`);
+    }
     console.log('============================================================\n');
   } catch (err) {
     console.error('❌ 적재 실패:', err.message);

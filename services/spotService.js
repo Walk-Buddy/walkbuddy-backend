@@ -845,7 +845,7 @@ exports.getSpots = async (query) => {
         const spotsResult = await pool.query(
         `SELECT
             s.spot_id, s.name, s.address, s.categories, s.region, s.sub_region, s.recommend_pct,
-            s.barrier_free_info, s.is_night_tour,
+            s.barrier_free_info, s.pet_tour_info, s.is_night_tour,
             s.first_image,
             -- 후기 사진 폴백: 이 장소의 후기 중 사진이 있는 가장 최근 후기의 첫 사진 key
             (
@@ -935,7 +935,7 @@ exports.getSpotById = async (spotId) => {
             s.spot_id, s.name, s.address, s.categories, s.kakao_category_name,
             s.region, s.sub_region,
                         s.recommend_pct, s.source, s.content_place, s.content_history, s.content_tour,
-            s.barrier_free_info, s.is_night_tour,
+            s.barrier_free_info, s.pet_tour_info, s.is_night_tour,
             s.first_image,
             ST_X(s.location::GEOMETRY) AS x,
             ST_Y(s.location::GEOMETRY) AS y,

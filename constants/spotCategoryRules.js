@@ -616,9 +616,17 @@ function extractRegionFromAddress(addressOrText = '') {
     return { region: '춘천', sub_region: matchedSub };
   }
 
-  // 2. 서울 확인
+  // 2. 서울 확인 (1단계: '종로구', '노원구' 등 정확한 자치구 명칭 우선)
   for (const district of SEOUL_DISTRICTS) {
-    if (text.includes(district) || text.includes(district.replace('구', ''))) {
+    if (text.includes(district)) {
+      return { region: '서울', sub_region: district };
+    }
+  }
+
+  // 2단계: '구'가 생략된 경우 (예: '서울 강남', '서울 노원')
+  for (const district of SEOUL_DISTRICTS) {
+    const base = district.replace(/구$/, '');
+    if (base !== '중' && new RegExp(`(^|[\\s,])(${base})([\\s,]|\$)`).test(text)) {
       return { region: '서울', sub_region: district };
     }
   }
