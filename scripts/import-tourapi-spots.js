@@ -21,9 +21,10 @@ function getArg(prefix, fallback = null) {
 }
 
 const isDryRun = args.includes('--dry-run');
-const limitPerRegion = Number.parseInt(getArg('limit', process.env.TOUARPI_IMPORT_LIMIT || '15'), 10);
+const isAll = args.includes('--all');
+const limitPerRegion = isAll ? 500 : Number.parseInt(getArg('limit', process.env.TOUARPI_IMPORT_LIMIT || '15'), 10);
 const targetRegion = (getArg('region', 'all') || 'all').trim();
-const sleepMs = Number.parseInt(getArg('sleep', '200'), 10);
+const sleepMs = Number.parseInt(getArg('sleep', isAll ? '150' : '200'), 10);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
