@@ -3,7 +3,10 @@ require('dotenv').config();
 const axios = require('axios');
 const pool = require('../config/db');
 const spotService = require('../services/spotService');
+const courseTagService = require('../services/courseTagService');
 const { getDurunubiCourseSpotMappings } = require('../constants/durunubiSpotMappings');
+const { inferRegionFromLocation } = require('../constants/spotCategoryRules');
+const { parseDescriptionSections } = require('../utils/courseDescription');
 
 const BASE_URL = 'http://apis.data.go.kr/B551011/Durunubi';
 const DATA_SOURCE = '한국관광공사_두루누비';
@@ -13,7 +16,12 @@ const DEFAULT_MOBILE_APP = 'WalkBuddy';
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_WAYPOINTS = 1200;
 
-const serviceKey = process.env.DURUNUBI_SERVICE_KEY;
+const serviceKey =
+  process.env.DURUNUBI_SERVICE_KEY ||
+  process.env.TOURAPI_SERVICE_KEY ||
+  process.env.TOUR_API_SERVICE_KEY ||
+  process.env.TOUR_API_KEY ||
+  '';
 const mobileOS = process.env.DURUNUBI_MOBILE_OS || DEFAULT_MOBILE_OS;
 const mobileApp = process.env.DURUNUBI_MOBILE_APP || DEFAULT_MOBILE_APP;
 const brdDiv = process.env.DURUNUBI_BRD_DIV || '';
@@ -521,16 +529,25 @@ async function importCourse(client, item, ownerId, tagId) {
   const estimatedDuration = durationFromApi || Math.max(1, Math.ceil(stats.distance / 1.1 / 60));
   const description = buildDescription(item);
 
+  const sigun = pick(item, ['sigun']) || '';
+  const regionInfo = inferRegionFromLocation({
+    lat: points[0]?.lat,
+    lng: points[0]?.lng,
+    address: `${sigun} ${name}`,
+  });
+  const region = regionInfo.region || '서울';
+  const subRegion = regionInfo.sub_region || null;
+
   const { rows: [course] } = await client.query(
     `INSERT INTO courses (
        owner_id, name, description, category, route_geometry,
-       total_distance, estimated_duration, is_public,
-       data_source, source_id, status
+       total_distance, estimated_duration, region, sub_region,
+       is_public, data_source, source_id, status
      )
      VALUES (
        $1, $2, $3, '둘레길', $4::geography,
-       $5, $6, TRUE,
-       $7, $8, 'active'
+       $5, $6, $7, $8,
+       TRUE, $9, $10, 'active'
      )
      ON CONFLICT (data_source, source_id) WHERE source_id IS NOT NULL
      DO UPDATE SET
@@ -541,12 +558,14 @@ async function importCourse(client, item, ownerId, tagId) {
        route_geometry = EXCLUDED.route_geometry,
        total_distance = EXCLUDED.total_distance,
        estimated_duration = EXCLUDED.estimated_duration,
+       region = EXCLUDED.region,
+       sub_region = EXCLUDED.sub_region,
        is_public = TRUE,
        data_source = EXCLUDED.data_source,
        status = 'active',
        updated_at = NOW()
      RETURNING course_id`,
-    [ownerId, name, description, wkt, totalDistance, estimatedDuration, DATA_SOURCE, sourceId]
+    [ownerId, name, description, wkt, totalDistance, estimatedDuration, region, subRegion, DATA_SOURCE, sourceId]
   );
 
   await insertWaypoints(client, course.course_id, points);
@@ -557,7 +576,7 @@ async function importCourse(client, item, ownerId, tagId) {
     [tagId, course.course_id, ownerId]
   );
 
-  return { status: 'imported', name, courseId: course.course_id, pointCount: points.length, points };
+  return { status: 'imported', name, courseId: course.course_id, pointCount: points.length, points, description, region, subRegion };
 }
 
 async function main() {
@@ -622,6 +641,24 @@ async function main() {
           await client.query('COMMIT');
           if (spotResult.waypointSpots.length > 0) {
             console.log(`  - 코스 경유지 연결: 스팟 ${spotResult.waypointSpots.length}개`);
+          }
+          // 코스 태그 최대 연결: 카테고리·설명 기반 코스 태그 도출
+          try {
+            const sections = parseDescriptionSections(result.description);
+            const derivedTags = await courseTagService.autoTagCourse({
+              courseId: result.courseId,
+              courseName: result.name,
+              category: '둘레길',
+              description: result.description || null,
+              sections,
+              dataSource: DATA_SOURCE,
+              userId: ownerId,
+            }, client);
+            if (derivedTags.length > 0) {
+              console.log(`  - 코스 자동 태그: ${derivedTags.join(', ')}`);
+            }
+          } catch (tagErr) {
+            console.warn(`  - 코스 자동 태그 실패(무시): ${tagErr.message}`);
           }
         } else {
           summary.skipped += 1;
