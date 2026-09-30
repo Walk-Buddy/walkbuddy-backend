@@ -49,7 +49,10 @@ function toNumber(value) {
 
 function requireEnv() {
   if (!serviceKey) {
-    throw new Error('DURUNUBI_SERVICE_KEY가 .env에 없습니다.');
+    throw new Error(
+      'DURUNUBI_SERVICE_KEY(또는 TOURAPI_SERVICE_KEY)가 .env에 없습니다. ' +
+      '두루누비는 TourAPI와 동일한 공공데이터포털 인증키를 사용합니다.'
+    );
   }
 }
 
@@ -318,11 +321,17 @@ async function findAvailableNickname(client, baseName) {
 }
 
 async function ensureCourseTag(client) {
+  // 프론트 정본(ServerTags.DEFAULT_COURSE_TAGS_BY_GROUP)과 일치하도록
+  // group_name='추천·종류', is_review_tag=FALSE 를 명시한다.
+  // (기존 시드 태그가 있으면 group_name/is_review_tag 를 올바른 값으로 보정)
   const { rows } = await client.query(
-    `INSERT INTO tags (name, type, is_active)
-     VALUES ($1, 'course', TRUE)
+    `INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
+     VALUES ($1, 'course', '추천·종류', TRUE, FALSE)
      ON CONFLICT (name, type)
-     DO UPDATE SET is_active = TRUE
+     DO UPDATE SET
+       group_name    = EXCLUDED.group_name,
+       is_active     = TRUE,
+       is_review_tag = EXCLUDED.is_review_tag
      RETURNING tag_id`,
     [COURSE_TAG_NAME]
   );
@@ -636,7 +645,7 @@ async function main() {
             }
           }
 
-          await client.query('BEGIN');
+                    await client.query('BEGIN');
           await insertWaypoints(client, result.courseId, result.points, spotResult.waypointSpots);
           await client.query('COMMIT');
           if (spotResult.waypointSpots.length > 0) {

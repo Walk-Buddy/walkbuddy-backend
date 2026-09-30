@@ -2,6 +2,7 @@ const axios = require("axios");
 const { resolveRegion, TARGET_REGIONS, inferSpotCategories, inferSpotCategoriesWithFallback, extractRegionFromAddress } = require("../constants/spotCategoryRules");
 const pool = require("../config/db");
 const trafficLog = require("./tourTrafficLog");
+const tourCache = require("./tourCache");
 
 const BASE_URL = "https://apis.data.go.kr/B551011/KorService2";
 const WITH_TOUR_BASE_URL = "https://apis.data.go.kr/B551011/KorWithService2"; // 무장애 여행정보 API
@@ -104,27 +105,30 @@ function buildUrl(pathname, params = {}) {
 }
 
 async function requestTourApi(pathname, params = {}) {
-  const url = buildUrl(pathname, params);
-  const api = "KorService2";
-  const { data, httpStatus, durationMs, startedAt } = await fetchJson({
-    api,
-    pathname,
-    params,
-    url,
-    authMessage: "한국관광공사 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.",
+  const cacheKey = `KorService2:${pathname}:${JSON.stringify(params)}`;
+  return tourCache.swr(cacheKey, async () => {
+    const url = buildUrl(pathname, params);
+    const api = "KorService2";
+    const { data, httpStatus, durationMs, startedAt } = await fetchJson({
+      api,
+      pathname,
+      params,
+      url,
+      authMessage: "한국관광공사 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.",
+    });
+
+    const header = data?.response?.header;
+    if (header?.resultCode && header.resultCode !== "0000") {
+      const err = new Error(header.resultMsg || "TourAPI 호출 실패");
+      err.code = header.resultCode;
+      err.status = 502;
+      trafficLog.record({ api, pathname, params, status: "error", httpStatus, resultCode: header.resultCode, message: err.message, durationMs, startedAt });
+      throw err;
+    }
+
+    trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: header?.resultCode || "0000", durationMs, startedAt });
+    return data;
   });
-
-  const header = data?.response?.header;
-  if (header?.resultCode && header.resultCode !== "0000") {
-    const err = new Error(header.resultMsg || "TourAPI 호출 실패");
-    err.code = header.resultCode;
-    err.status = 502;
-    trafficLog.record({ api, pathname, params, status: "error", httpStatus, resultCode: header.resultCode, message: err.message, durationMs, startedAt });
-    throw err;
-  }
-
-  trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: header?.resultCode || "0000", durationMs, startedAt });
-  return data;
 }
 
 function buildWithTourUrl(pathname, params = {}) {
@@ -155,31 +159,34 @@ function buildWithTourUrl(pathname, params = {}) {
 }
 
 async function requestWithTourApi(pathname, params = {}) {
-  const url = buildWithTourUrl(pathname, params);
-  const api = "KorWithService2";
-  const { data, httpStatus, durationMs, startedAt } = await fetchJson({
-    api,
-    pathname,
-    params,
-    url,
-    authMessage: "한국관광공사 무장애 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.",
-  });
+  const cacheKey = `KorWithService2:${pathname}:${JSON.stringify(params)}`;
+  return tourCache.swr(cacheKey, async () => {
+    const url = buildWithTourUrl(pathname, params);
+    const api = "KorWithService2";
+    const { data, httpStatus, durationMs, startedAt } = await fetchJson({
+      api,
+      pathname,
+      params,
+      url,
+      authMessage: "한국관광공사 무장애 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.",
+    });
 
-  const header = data?.response?.header;
-  if (header?.resultCode && header.resultCode !== "0000") {
-    if (header.resultCode === "03") {
-      trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: "03", message: "결과 없음", durationMs, startedAt });
-      return { response: { body: { items: { item: [] }, totalCount: 0 } } };
+    const header = data?.response?.header;
+    if (header?.resultCode && header.resultCode !== "0000") {
+      if (header.resultCode === "03") {
+        trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: "03", message: "결과 없음", durationMs, startedAt });
+        return { response: { body: { items: { item: [] }, totalCount: 0 } } };
+      }
+      const err = new Error(header.resultMsg || "무장애 TourAPI 호출 실패");
+      err.code = header.resultCode;
+      err.status = 502;
+      trafficLog.record({ api, pathname, params, status: "error", httpStatus, resultCode: header.resultCode, message: err.message, durationMs, startedAt });
+      throw err;
     }
-    const err = new Error(header.resultMsg || "무장애 TourAPI 호출 실패");
-    err.code = header.resultCode;
-    err.status = 502;
-    trafficLog.record({ api, pathname, params, status: "error", httpStatus, resultCode: header.resultCode, message: err.message, durationMs, startedAt });
-    throw err;
-  }
 
-  trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: header?.resultCode || "0000", durationMs, startedAt });
-  return data;
+    trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: header?.resultCode || "0000", durationMs, startedAt });
+    return data;
+  });
 }
 
 function buildPetTourUrl(pathname, params = {}) {
@@ -210,31 +217,34 @@ function buildPetTourUrl(pathname, params = {}) {
 }
 
 async function requestPetTourApi(pathname, params = {}) {
-  const url = buildPetTourUrl(pathname, params);
-  const api = "KorPetTourService2";
-  const { data, httpStatus, durationMs, startedAt } = await fetchJson({
-    api,
-    pathname,
-    params,
-    url,
-    authMessage: "한국관광공사 반려동물 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.",
-  });
+  const cacheKey = `KorPetTourService2:${pathname}:${JSON.stringify(params)}`;
+  return tourCache.swr(cacheKey, async () => {
+    const url = buildPetTourUrl(pathname, params);
+    const api = "KorPetTourService2";
+    const { data, httpStatus, durationMs, startedAt } = await fetchJson({
+      api,
+      pathname,
+      params,
+      url,
+      authMessage: "한국관광공사 반려동물 TourAPI 인증 실패: TOURAPI_SERVICE_KEY를 확인해주세요.",
+    });
 
-  const header = data?.response?.header;
-  if (header?.resultCode && header.resultCode !== "0000") {
-    if (header.resultCode === "03") {
-      trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: "03", message: "결과 없음", durationMs, startedAt });
-      return { response: { body: { items: { item: [] }, totalCount: 0 } } };
+    const header = data?.response?.header;
+    if (header?.resultCode && header.resultCode !== "0000") {
+      if (header.resultCode === "03") {
+        trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: "03", message: "결과 없음", durationMs, startedAt });
+        return { response: { body: { items: { item: [] }, totalCount: 0 } } };
+      }
+      const err = new Error(header.resultMsg || "반려동물 TourAPI 호출 실패");
+      err.code = header.resultCode;
+      err.status = 502;
+      trafficLog.record({ api, pathname, params, status: "error", httpStatus, resultCode: header.resultCode, message: err.message, durationMs, startedAt });
+      throw err;
     }
-    const err = new Error(header.resultMsg || "반려동물 TourAPI 호출 실패");
-    err.code = header.resultCode;
-    err.status = 502;
-    trafficLog.record({ api, pathname, params, status: "error", httpStatus, resultCode: header.resultCode, message: err.message, durationMs, startedAt });
-    throw err;
-  }
 
-  trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: header?.resultCode || "0000", durationMs, startedAt });
-  return data;
+    trafficLog.record({ api, pathname, params, status: "ok", httpStatus, resultCode: header?.resultCode || "0000", durationMs, startedAt });
+    return data;
+  });
 }
 
 function getItems(data) {
@@ -248,7 +258,7 @@ function getTotalCount(data) {
 }
 
 /**
- * 1. 실시간 축제/행사 조회 (searchFestival1)
+ * 1. 실시간 축제/행사 조회 (searchFestival1 / searchKeyword2)
  * 서울 25개 구 / 춘천시 대상
  */
 exports.getFestivals = async ({ region, eventStartDate, page = 1, limit = 10 } = {}) => {
@@ -256,31 +266,169 @@ exports.getFestivals = async ({ region, eventStartDate, page = 1, limit = 10 } =
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const startDate = eventStartDate || today;
 
-  const data = await requestTourApi("searchFestival2", {
-    areaCode: target.tourApi.areaCode,
-    sigunguCode: target.tourApi.sigunguCode,
-    eventStartDate: startDate,
-    pageNo: page,
-    numOfRows: limit,
-    arrange: "A",
-  });
+  // ── 춘천시 축제 처리 ─────────────────────────────────────────────
+  // 한국관광공사 TourAPI의 searchFestival2는 춘천 축제들의 areacode가 공백으로
+  // 등록되어 있어 areaCode=32&sigunguCode=13 조회 시 누락된다.
+  // 따라서 춘천의 경우 searchKeyword2(keyword="춘천", contentTypeId=15)로
+  // 검색하고 detailIntro2/detailCommon2로 기간·개요·이미지를 보강한다.
+  if (target.code === 'chuncheon') {
+    let kwData;
+    try {
+      kwData = await requestTourApi("searchKeyword2", {
+        keyword: "춘천",
+        contentTypeId: "15",
+        pageNo: page,
+        numOfRows: Math.max(Number(limit) * 2, 20),
+        arrange: "A",
+      });
+    } catch (err) {
+      kwData = null;
+    }
 
-  const rawItems = getItems(data);
-  const festivals = rawItems.map((item) => ({
-    content_id: item.contentid,
-    title: item.title,
-    address: item.addr1 + (item.addr2 ? " " + item.addr2 : ""),
-    event_start_date: item.eventstartdate,
-    event_end_date: item.eventenddate,
-    image_url: item.firstimage || item.firstimage2 || null,
-    tel: item.tel || null,
-    x: item.mapx ? Number(item.mapx) : null,
-    y: item.mapy ? Number(item.mapy) : null,
-    region: target.name,
-  }));
+    const kwItems = getItems(kwData);
+    if (kwItems.length > 0) {
+      const enrichedFestivals = await Promise.all(
+        kwItems.map(async (item) => {
+          let intro = {};
+          let common = {};
+          try {
+            const [introRes, commonRes] = await Promise.all([
+              requestTourApi("detailIntro2", {
+                contentId: item.contentid,
+                contentTypeId: "15",
+              }).catch(() => null),
+              requestTourApi("detailCommon2", {
+                contentId: item.contentid,
+              }).catch(() => null),
+            ]);
+            intro = getItems(introRes)[0] || {};
+            common = getItems(commonRes)[0] || {};
+          } catch (e) {
+            // detail fetch 실패 시 기본 데이터 유지
+          }
+
+          return {
+            content_id: item.contentid,
+            title: item.title,
+            address: item.addr1 + (item.addr2 ? " " + item.addr2 : ""),
+            event_start_date: intro.eventstartdate || item.eventstartdate || null,
+            event_end_date: intro.eventenddate || item.eventenddate || null,
+            image_url: item.firstimage || item.firstimage2 || common.firstimage || null,
+            tel: item.tel || intro.sponsor1tel || common.tel || null,
+            overview: common.overview || null,
+            event_place: intro.eventplace || null,
+            x: item.mapx ? Number(item.mapx) : null,
+            y: item.mapy ? Number(item.mapy) : null,
+            region: target.name,
+            modified_time: item.modifiedtime || null,
+          };
+        })
+      );
+
+      // 날짜 및 최근순 정렬:
+      // 1) 현재 진행 중이거나 다가오는 축제 (event_end_date >= today)를 시작일 오름차순(가장 가까운 예정순)으로 정렬
+      // 2) 지난 축제는 최신순(종료일 내림차순)으로 뒤에 배치
+      const upcomingOrOngoing = [];
+      const past = [];
+
+      for (const f of enrichedFestivals) {
+        if (f.event_end_date && f.event_end_date >= today) {
+          upcomingOrOngoing.push(f);
+        } else {
+          past.push(f);
+        }
+      }
+
+      upcomingOrOngoing.sort((a, b) => (a.event_start_date || "99999999").localeCompare(b.event_start_date || "99999999"));
+      past.sort((a, b) => (b.event_end_date || "00000000").localeCompare(a.event_end_date || "00000000"));
+
+      let sortedFestivals = [...upcomingOrOngoing, ...past];
+
+      if (eventStartDate && eventStartDate !== today) {
+        sortedFestivals = sortedFestivals.filter((f) => {
+          const s = f.event_start_date;
+          const e = f.event_end_date || s;
+          if (!s && !e) return true;
+          return !(e && e < eventStartDate) && !(s && s > eventStartDate);
+        });
+      }
+
+      return {
+        total: sortedFestivals.length,
+        page: Number(page),
+        limit: Number(limit),
+        region: target.name,
+        festivals: sortedFestivals.slice(0, Number(limit)),
+      };
+    }
+  }
+
+  // ── 서울 및 기타 지역 조회 ───────────────────────────────────────
+  let data;
+  try {
+    data = await requestTourApi("searchFestival2", {
+      areaCode: target.tourApi.areaCode,
+      sigunguCode: target.tourApi.sigunguCode,
+      eventStartDate: startDate,
+      pageNo: page,
+      numOfRows: limit,
+      arrange: "A",
+    });
+  } catch (err) {
+    data = null;
+  }
+
+  let rawItems = getItems(data);
+
+  // 날짜 필터로 인해 결과가 0건인 경우 이전 1년치 기준 또는 기본 날짜로 fallback
+  if (rawItems.length === 0 && !eventStartDate) {
+    const fallbackYear = String(Number(today.slice(0, 4)) - 1);
+    const fallbackStartDate = fallbackYear + today.slice(4);
+    try {
+      const fallbackData = await requestTourApi("searchFestival2", {
+        areaCode: target.tourApi.areaCode,
+        sigunguCode: target.tourApi.sigunguCode,
+        eventStartDate: fallbackStartDate,
+        pageNo: page,
+        numOfRows: limit,
+        arrange: "A",
+      });
+      rawItems = getItems(fallbackData);
+    } catch (e) {
+      // fallback 실패 시 무시
+    }
+  }
+
+  const festivals = await Promise.all(
+    rawItems.map(async (item) => {
+      let overview = null;
+      try {
+        const commonData = await requestTourApi("detailCommon2", {
+          contentId: item.contentid,
+        }).catch(() => null);
+        overview = getItems(commonData)[0]?.overview || null;
+      } catch (e) {
+        // 무시
+      }
+
+      return {
+        content_id: item.contentid,
+        title: item.title,
+        address: item.addr1 + (item.addr2 ? " " + item.addr2 : ""),
+        event_start_date: item.eventstartdate,
+        event_end_date: item.eventenddate,
+        image_url: item.firstimage || item.firstimage2 || null,
+        tel: item.tel || null,
+        overview,
+        x: item.mapx ? Number(item.mapx) : null,
+        y: item.mapy ? Number(item.mapy) : null,
+        region: target.name,
+      };
+    })
+  );
 
   return {
-    total: getTotalCount(data),
+    total: festivals.length,
     page: Number(page),
     limit: Number(limit),
     region: target.name,
@@ -548,7 +696,13 @@ function mapCategoryToTourParams(category) {
 }
 
 /**
- * 4. 실시간 지역/테마/위치별 관광 스팟 목록 조회 (areaBasedList2 / locationBasedList2)
+ * 4. 실시간 지역/테마별 관광 스팟 목록 조회 (areaBasedList2 / locationBasedList2)
+ *
+ * [LBS 사업자 미신고 안전]
+ *  - latitude / longitude / radius 는 "이용자의 실시간 단말기 GPS"가 아니라,
+ *    서버 내부 스크립트가 특정 스팟 자체 좌표 주변을 조회할 때만 쓰는 내부 전용 인자다.
+ *  - 외부 HTTP 진입점(controllers/tourController.js#getTourSpots)에서는 화이트리스트로
+ *    차단되어 이용자 좌표가 서버로 유입될 수 없다.
  */
 exports.getTourSpots = async ({
   region,
@@ -793,54 +947,58 @@ exports.getPhotosByKeyword = async (keyword, limit = 10) => {
     throw err;
   }
 
-  const serviceKey = getServiceKey();
-  if (!serviceKey) {
-    throw new Error("TOURAPI_SERVICE_KEY 환경변수가 설정되지 않았습니다.");
-  }
-
-  const url = new URL(`${PHOTO_BASE_URL}/galleryList1`);
-  url.searchParams.append("serviceKey", serviceKey);
-  url.searchParams.append("MobileOS", DEFAULT_MOBILE_OS);
-  url.searchParams.append("MobileApp", DEFAULT_MOBILE_APP);
-  url.searchParams.append("_type", "json");
-  url.searchParams.append("keyword", keyword.trim());
-  url.searchParams.append("numOfRows", String(limit));
-  url.searchParams.append("pageNo", "1");
-
-    const _startedAt = Date.now();
-  const _params = { keyword: keyword.trim(), numOfRows: limit, pageNo: 1 };
-  try {
-    const { data } = await http.get(url.toString());
-    const header = data?.response?.header;
-    if (header?.resultCode && header.resultCode !== "0000") {
-      if (header.resultCode === "03") {
-        trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "ok", resultCode: "03", message: "결과 없음", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
-        return [];
-      }
-      const err = new Error(header.resultMsg || "관광사진 API 호출 실패");
-      err.code = header.resultCode;
-      err.status = 502;
-      trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "error", resultCode: header.resultCode, message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
-      throw err;
+  const cacheKey = `PhotoGalleryService1:galleryList1:${keyword.trim()}:${limit}`;
+  return tourCache.swr(cacheKey, async () => {
+    const serviceKey = getServiceKey();
+    if (!serviceKey) {
+      throw new Error("TOURAPI_SERVICE_KEY 환경변수가 설정되지 않았습니다.");
     }
 
-    const item = data?.response?.body?.items?.item;
-    const rawItems = !item ? [] : Array.isArray(item) ? item : [item];
+    const url = new URL(`${PHOTO_BASE_URL}/galleryList1`);
+    url.searchParams.append("serviceKey", serviceKey);
+    url.searchParams.append("MobileOS", DEFAULT_MOBILE_OS);
+    url.searchParams.append("MobileApp", DEFAULT_MOBILE_APP);
+    url.searchParams.append("_type", "json");
+    url.searchParams.append("keyword", keyword.trim());
+    url.searchParams.append("numOfRows", String(limit));
+    url.searchParams.append("pageNo", "1");
 
-    trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "ok", resultCode: header?.resultCode || "0000", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+    const _startedAt = Date.now();
+    const _params = { keyword: keyword.trim(), numOfRows: limit, pageNo: 1 };
+    try {
+      const { data } = await http.get(url.toString());
+      const header = data?.response?.header;
+      if (header?.resultCode && header.resultCode !== "0000") {
+        if (header.resultCode === "03") {
+          trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "ok", resultCode: "03", message: "결과 없음", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+          return [];
+        }
+        const err = new Error(header.resultMsg || "관광사진 API 호출 실패");
+        err.code = header.resultCode;
+        err.status = 502;
+        trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "error", resultCode: header.resultCode, message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+        throw err;
+      }
 
-    return rawItems.map((img) => ({
-      thumbnail: img.galWebImageUrl || img.galThumbnailImage || null,
-      original: img.galWebImageUrl || null,
-      title: img.galTitle || null,
-    }));
-  } catch (err) {
-    if (err.status) throw err;
-    trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "error", message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
-    console.error("[PhotoGallery API 오류]", err.message);
-    return [];
-  }
+      const item = data?.response?.body?.items?.item;
+      const rawItems = !item ? [] : Array.isArray(item) ? item : [item];
+
+      trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "ok", resultCode: header?.resultCode || "0000", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+
+      return rawItems.map((img) => ({
+        thumbnail: img.galWebImageUrl || img.galThumbnailImage || null,
+        original: img.galWebImageUrl || null,
+        title: img.galTitle || null,
+      }));
+    } catch (err) {
+      if (err.status) throw err;
+      trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "error", message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+      console.error("[PhotoGallery API 오류]", err.message);
+      return [];
+    }
+  });
 };
+
 
 /**
  * 7. 스팟 사진 조회 (혼합 전략)
@@ -913,8 +1071,8 @@ exports.getPetTourDetail = async (contentId) => {
   const summaryTags = ["#반려동물"];
   const facilities = item.relaPosesFclty || "";
   if (facilities.includes("주차") || facilities.includes("주차장")) summaryTags.push("#주차가능");
-  if (facilities.includes("화장실") || facilities.includes("배변")) summaryTags.push("#화장실");
-  if (facilities.includes("쉼터") || facilities.includes("벤치") || facilities.includes("놀이터")) summaryTags.push("#벤치·쉼터");
+  if (facilities.includes("화장실")) summaryTags.push("#화장실");
+  if (facilities.includes("쉼터") || facilities.includes("벤치")) summaryTags.push("#벤치·쉼터");
 
   return {
     content_id: contentId,
@@ -960,7 +1118,7 @@ exports.getPetTourSpots = async ({ region, contentTypeId, page = 1, limit = 10 }
   const data = await requestPetTourApi("areaBasedList2", params);
   const rawItems = getItems(data);
 
-  const spots = rawItems.map((item) => ({
+  let spots = rawItems.map((item) => ({
     content_id: item.contentid,
     content_type_id: item.contenttypeid,
     title: item.title,
@@ -974,7 +1132,53 @@ exports.getPetTourSpots = async ({ region, contentTypeId, page = 1, limit = 10 }
     cat3: item.cat3 || null,
     region: target.name,
     is_pet_friendly: true,
+    tags: [
+      { tag_id: "pet", name: "반려견동반" },
+      { tag_id: "pet2", name: "반려동물" },
+    ],
   }));
+
+  // DB 연동 및 추천도/태그 보강
+  if (spots.length > 0) {
+    try {
+      const titles = spots.map((s) => s.title);
+      const dbSpotsResult = await pool.query(
+        `SELECT s.spot_id, s.name, s.recommend_pct,
+                COALESCE(json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
+                FILTER (WHERE t.tag_id IS NOT NULL), '[]') AS tags
+         FROM spots s
+         LEFT JOIN taggings tg ON tg.target_id = s.spot_id AND tg.target_type = 'spot'
+         LEFT JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+         WHERE s.name = ANY($1::TEXT[]) AND s.status = 'active'
+         GROUP BY s.spot_id`,
+        [titles]
+      );
+
+      if (dbSpotsResult.rows.length > 0) {
+        const dbMap = new Map();
+        for (const row of dbSpotsResult.rows) {
+          dbMap.set(row.name, row);
+        }
+
+        spots = spots.map((s) => {
+          const dbSpot = dbMap.get(s.title);
+          if (dbSpot) {
+            const mergedTags = [...(s.tags || []), ...(dbSpot.tags || [])];
+            const uniqueTags = Array.from(new Map(mergedTags.map((t) => [t.name, t])).values());
+            return {
+              ...s,
+              spot_id: dbSpot.spot_id,
+              recommend_pct: dbSpot.recommend_pct == null ? null : Number(dbSpot.recommend_pct),
+              tags: uniqueTags,
+            };
+          }
+          return s;
+        });
+      }
+    } catch (dbErr) {
+      console.error("PetTourSpots DB enrichment error:", dbErr.message);
+    }
+  }
 
   return {
     total: getTotalCount(data),
@@ -1027,6 +1231,10 @@ exports.searchPetTourPlaces = async ({ region, keyword, contentTypeId, page = 1,
     y: item.mapy ? Number(item.mapy) : null,
     region: target ? target.name : "전체",
     is_pet_friendly: true,
+    tags: [
+      { tag_id: "pet", name: "반려견동반" },
+      { tag_id: "pet2", name: "반려동물" },
+    ],
   }));
 
   return {
@@ -1037,3 +1245,4 @@ exports.searchPetTourPlaces = async ({ region, keyword, contentTypeId, page = 1,
     spots,
   };
 };
+

@@ -3,19 +3,29 @@ const axios = require('axios');
 const {
     SPOT_CATEGORIES,
     SPOT_CATEGORY_SEARCH_RULES,
+    getFallbackCategory,
     inferSpotCategoriesWithFallback,
     extractRegionFromAddress,
     inferRegionFromLocation,
     resolveRegion,
 } = require('../constants/spotCategoryRules');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const tourApiService = require('./tourApiService');
+const odiiService = require('./odiiService');
 const trafficLog = require('./tourTrafficLog');
 
 const TOUR_API_BASE_URL = 'https://apis.data.go.kr/B551011/KorService2';
 const TOUR_API_MATCH_RADIUS = Number(process.env.TOUR_API_MATCH_RADIUS || 300);
 const TOUR_API_FALLBACK_MATCH_RADIUS = 500;
+
+function sanitizeText(text) {
+    if (!text) return '';
+    return String(text)
+        .replace(/<[^>]*>/g, '')          // HTML 태그 제거
+        .replace(/&[a-zA-Z0-9#]+;/g, ' ') // &nbsp;, &amp; 등 HTML 엔티티 제거
+        .replace(/[\r\t]+/g, ' ')         // 탭/개행 정규화
+        .replace(/\s{2,}/g, ' ')          // 다중 공백 단일화
+        .trim();
+}
 
 function getTourApiServiceKey() {
     return process.env.TOUR_API_SERVICE_KEY || process.env.TOURAPI_SERVICE_KEY;
@@ -109,6 +119,60 @@ async function fetchTourLocationCandidates({ lng, lat, radius }) {
             startedAt,
         });
 
+                return normalizeTourApiItems(item);
+    } catch (err) {
+        trafficLog.record({
+            api,
+            pathname,
+            params,
+            status: 'error',
+            httpStatus: err.response?.status ?? null,
+            message: err.message,
+            durationMs: Date.now() - startedAt,
+            startedAt,
+        });
+        // 429(rate limit) 등 일시적 오류 시 throw 하지 않고 빈 배열 반환.
+        // → 매칭 실패로 처리되어 다음 폴백(키워드/기존 contentId)으로 진행되게 하여
+        //   enrich 전체가 죽는 것을 방지한다.
+        return [];
+    }
+}
+
+async function fetchTourKeywordCandidates(keyword) {
+    const serviceKey = getTourApiServiceKey();
+    if (!serviceKey || !keyword) return [];
+
+    const api = 'KorService2';
+    const pathname = 'searchKeyword2';
+    const params = {
+        MobileOS: process.env.TOUR_API_MOBILE_OS || 'ETC',
+        MobileApp: process.env.TOUR_API_MOBILE_APP || 'WalkBuddy',
+        _type: 'json',
+        keyword: keyword.trim(),
+        numOfRows: 10,
+        pageNo: 1,
+    };
+    const startedAt = Date.now();
+
+    try {
+        const response = await axios.get(`${TOUR_API_BASE_URL}/${pathname}`, {
+            params: { serviceKey, ...params },
+        });
+
+        const header = response.data?.response?.header;
+        const item = response.data?.response?.body?.items?.item;
+
+        trafficLog.record({
+            api,
+            pathname,
+            params,
+            status: 'ok',
+            httpStatus: response.status,
+            resultCode: header?.resultCode || '0000',
+            durationMs: Date.now() - startedAt,
+            startedAt,
+        });
+
         return normalizeTourApiItems(item);
     } catch (err) {
         trafficLog.record({
@@ -121,7 +185,7 @@ async function fetchTourLocationCandidates({ lng, lat, radius }) {
             durationMs: Date.now() - startedAt,
             startedAt,
         });
-        throw err;
+        return [];
     }
 }
 
@@ -134,9 +198,10 @@ async function fetchTourOverview(contentId) {
     const serviceKey = getTourApiServiceKey();
     if (!serviceKey || !contentId) return null;
 
-    const api = 'KorService2';
+        const api = 'KorService2';
     const pathname = 'detailCommon2';
-    const params = { _type: 'json', contentId };
+    // firstImageYN/overviewYN 을 명시해야 대표 이미지(firstimage)까지 함께 내려온다.
+    const params = { _type: 'json', contentId, firstImageYN: 'Y', overviewYN: 'Y' };
     const startedAt = Date.now();
 
     try {
@@ -145,8 +210,10 @@ async function fetchTourOverview(contentId) {
                 serviceKey,
                 MobileOS: process.env.TOUR_API_MOBILE_OS || 'ETC',
                 MobileApp: process.env.TOUR_API_MOBILE_APP || 'WalkBuddy',
-                _type: 'json',
+                                _type: 'json',
                 contentId,
+                firstImageYN: 'Y',
+                overviewYN: 'Y',
             },
         });
 
@@ -166,7 +233,11 @@ async function fetchTourOverview(contentId) {
             startedAt,
         });
 
-        return cleanTourOverview(detail?.overview || '');
+        // overview(개요) + firstImage(대표 이미지 URL) 를 함께 반환한다.
+        return {
+            overview: cleanTourOverview(detail?.overview || ''),
+            firstImage: detail?.firstimage || detail?.firstimage2 || null,
+        };
     } catch (err) {
         trafficLog.record({
             api,
@@ -183,24 +254,31 @@ async function fetchTourOverview(contentId) {
 }
 
 // 관광공사 응답에서 세부 태그 자동 도출
-function extractTourTags({ overview, barrierFreeInfo, petTourInfo }) {
+function extractTourTags({ overview, barrierFreeInfo, petTourInfo, odiiGuide }) {
     const tags = new Set();
 
-    // 1. 일반 관광 개요 → 음성해설 태그
-    if (overview) {
-        tags.add('음성해설');
+    // 1. Odii 오디오 가이드 음원/스크립트 연동 시에만 Odii음성해설 태그 부착
+    if (odiiGuide?.audio_url || odiiGuide?.script) {
+        tags.add('Odii음성해설');
     }
 
     // 2. 무장애 편의시설 (KorWithService2) 세부 태그
     if (barrierFreeInfo?.has_barrier_free_info && barrierFreeInfo.details) {
         const d = barrierFreeInfo.details;
-        if (d.physical?.wheelchair) tags.add('휠체어접근');
-        if (d.physical?.route) tags.add('무단차통로');
-        if (d.physical?.restroom) tags.add('장애인화장실');
-        if (d.physical?.parking) tags.add('장애인주차');
+        if (d.physical?.wheelchair) {
+            const wcStr = String(d.physical.wheelchair);
+            if (/대여|렌탈/.test(wcStr)) {
+                tags.add('휠체어대여');
+            } else {
+                tags.add('휠체어접근');
+            }
+        }
+        if (d.physical?.route && !/(불가|어려움|없음)/.test(d.physical.route)) tags.add('무단차통로');
+        if (d.physical?.restroom && !/(없음|미설치)/.test(d.physical.restroom)) tags.add('장애인화장실');
+        if (d.physical?.parking && !/(없음|불가)/.test(d.physical.parking)) tags.add('장애인주차');
         if (d.physical?.elevator) tags.add('엘리베이터');
-        if (d.infant?.stroller) tags.add('유모차대여');
-        if (d.infant?.lactation_room) tags.add('수유실');
+        if (d.infant?.stroller && !/(불가|없음)/.test(d.infant.stroller)) tags.add('유모차대여');
+        if (d.infant?.lactation_room && !/(없음|미설치)/.test(d.infant.lactation_room)) tags.add('수유실');
         if (d.visual?.braile_block || d.visual?.braile_promotion) tags.add('점자안내');
         if (d.visual?.help_dog) tags.add('안내견동반');
         if (d.visual?.audio_guide) tags.add('시각장애인음성안내');
@@ -218,19 +296,81 @@ function extractTourTags({ overview, barrierFreeInfo, petTourInfo }) {
             tags.add('소형견동반');
         }
 
-        const facilityStr = String(petDetails.facilities || '');
-        if (facilityStr.includes('배변') || facilityStr.includes('봉투') || facilityStr.includes('수거함')) {
+        const facilityStr = `${petDetails.facilities || ''} ${petDetails.etc_info || ''}`;
+        if (/배변|배변봉투|배변시설|수거함/i.test(facilityStr) && !/(없음|미설치)/.test(facilityStr)) {
             tags.add('반려견배변시설');
         }
-        if (facilityStr.includes('놀이터') || facilityStr.includes('운동장') || facilityStr.includes('펜스')) {
+        if (/놀이터|운동장|안전문|펜스/i.test(facilityStr) && !/(없음|미설치)/.test(facilityStr)) {
             tags.add('반려견놀이터');
         }
-        if (facilityStr.includes('주차')) tags.add('주차가능');
-        if (facilityStr.includes('화장실')) tags.add('화장실');
-        if (facilityStr.includes('쉼터') || facilityStr.includes('벤치')) tags.add('벤치·쉼터');
+        if ((facilityStr.includes('주차') || facilityStr.includes('주차장')) && !/(주차\s*불가|주차장\s*없음)/.test(facilityStr)) tags.add('주차가능');
+        if (facilityStr.includes('화장실') && !/(화장실\s*없음)/.test(facilityStr)) tags.add('화장실');
+        if ((facilityStr.includes('쉼터') || facilityStr.includes('벤치')) && !/(쉼터\s*없음)/.test(facilityStr)) tags.add('벤치·쉼터');
     }
 
     return Array.from(tags);
+}
+
+// ──────────────────────────────────────────────────────────
+// 자동 태깅용 "시스템 태깅 계정" 보장
+//   taggings.user_id 는 NOT NULL + FK(users) 이므로 자동 태깅은 반드시
+//   실제 user_id 가 필요하다. 관리자 계정이 있으면 그 계정을, 없으면
+//   'system-tagger' 시드 계정을 1회 생성·재사용한다.
+// ──────────────────────────────────────────────────────────
+let cachedSystemTaggerId = null;
+
+async function ensureSystemTaggerId() {
+    if (cachedSystemTaggerId) return cachedSystemTaggerId;
+
+    // 1. 활성 관리자 우선
+    const { rows: admins } = await pool.query(
+        `SELECT user_id FROM users
+         WHERE role = 'admin' AND status = 'active'
+         ORDER BY created_at LIMIT 1`
+    );
+    if (admins.length) {
+        cachedSystemTaggerId = admins[0].user_id;
+        return cachedSystemTaggerId;
+    }
+
+    // 2. 기존 시스템 태거 계정 재사용
+    const { rows: seedUsers } = await pool.query(
+        `SELECT user_id FROM users
+         WHERE social_provider = 'seed' AND social_id = 'system-tagger'
+         LIMIT 1`
+    );
+    if (seedUsers.length) {
+        cachedSystemTaggerId = seedUsers[0].user_id;
+        return cachedSystemTaggerId;
+    }
+
+        // 3. 없으면 생성 (nickname UNIQUE 충돌 방지를 위해 ON CONFLICT 후 재조회 폴백)
+    try {
+        const { rows: created } = await pool.query(
+            `INSERT INTO users (nickname, social_provider, social_id, role, status)
+             VALUES ('자동태깅', 'seed', 'system-tagger', 'admin', 'active')
+             ON CONFLICT (nickname) DO NOTHING
+             RETURNING user_id`
+        );
+        if (created.length) {
+            cachedSystemTaggerId = created[0].user_id;
+            return cachedSystemTaggerId;
+        }
+    } catch (err) {
+        console.warn('[ensureSystemTaggerId] 시스템 태거 생성 실패, 재조회:', err.message);
+    }
+
+    // 3-b. nickname 충돌 등으로 생성이 안 됐다면 social 기준으로 재조회
+    const { rows: retry } = await pool.query(
+        `SELECT user_id FROM users
+         WHERE social_provider = 'seed' AND social_id = 'system-tagger' LIMIT 1`
+    );
+    if (retry.length) {
+        cachedSystemTaggerId = retry[0].user_id;
+        return cachedSystemTaggerId;
+    }
+
+    return null;
 }
 
 // 스팟에 세부 태그 일괄 자동 부착
@@ -239,7 +379,15 @@ async function attachTagsToSpot(spotId, tagNames, userId) {
     const cleanNames = tagNames.map(t => String(t).trim().replace(/^#/, '')).filter(Boolean);
     if (cleanNames.length === 0) return;
 
-    try {
+        try {
+        // 0. 실제 taggings.user_id 확보 (자동 태깅은 시스템 계정으로 귀속)
+        //    → 기존 userId || null 은 NOT NULL/FK 위반으로 조용히 실패하던 버그
+        const taggerId = userId || await ensureSystemTaggerId();
+        if (!taggerId) {
+            console.error('attachTagsToSpot skipped: no valid user_id for tagging');
+            return;
+        }
+
         // 1. 기존 태그 확인
         const { rows: existingTags } = await pool.query(
             `SELECT tag_id, name FROM tags WHERE name = ANY($1::TEXT[]) AND type = 'spot'`,
@@ -268,7 +416,7 @@ async function attachTagsToSpot(spotId, tagNames, userId) {
                 `INSERT INTO taggings (tag_id, target_id, target_type, user_id)
                  VALUES ($1, $2, 'spot', $3)
                  ON CONFLICT DO NOTHING`,
-                [tag.tag_id, spotId, userId || null]
+                [tag.tag_id, spotId, taggerId]
             );
         }
     } catch (err) {
@@ -313,8 +461,12 @@ async function searchKakaoSpotCandidates({ keyword, category, size = 15 }) {
 
     const uniqueKakaoSpotMap = new Map();
     for (const document of allDocuments) {
-        const categories = inferSpotCategoriesWithFallback(document);
-        if (categories.length === 0) continue;
+        let categories = inferSpotCategoriesWithFallback(document);
+        // 키워드 검색 시에는 일상적인 장소(식당, 카페, 편의점, 약국, 정류장, 주차장, 건물 등)도 배제하지 않고 포함
+        if (categories.length === 0) {
+            const fallbackCat = getFallbackCategory(document.category_name || '');
+            categories = fallbackCat ? [fallbackCat] : ['공원·광장'];
+        }
         if (category && !categories.includes(category)) continue;
         uniqueKakaoSpotMap.set(document.id, {
             kakao_place_id: document.id,
@@ -322,8 +474,8 @@ async function searchKakaoSpotCandidates({ keyword, category, size = 15 }) {
             kakao_category_name: document.category_name,
             categories,
             address: getKakaoAddress(document),
-            x: document.x,
-            y: document.y,
+            x: Number(document.x),
+            y: Number(document.y),
             distance: document.distance ? Number(document.distance) : null,
         });
     }
@@ -354,6 +506,13 @@ async function enrichKakaoSpotTourContent(spot, userId) {
     }
 
     try {
+        // Odii 오디오 가이드 검색을 병렬로 함께 시작
+        const odiiPromise = odiiService.findBestOdiiGuide({
+            name: spot.name,
+            x: lng,
+            y: lat,
+        }).catch(() => null);
+
         let matched = await findTourApiMatchByContentId(spot.tour_api_content_id);
         let candidates = [];
 
@@ -380,47 +539,91 @@ async function enrichKakaoSpotTourContent(spot, userId) {
                 .sort((a, b) => Number(a.dist || 0) - Number(b.dist || 0))[0];
         }
 
-        if (!matched?.contentid) {
-            result.tour_content_status = 'no_matching_tour_place';
-            return { spot, ...result };
+        // 3차 폴백: 키워드 검색 기반 매칭 (관광지 위치가 카카오 좌표와 조금 다르거나 반경 밖인 경우)
+        if (!matched) {
+            const kwCandidates = await fetchTourKeywordCandidates(spot.name);
+            matched = kwCandidates
+                .filter(candidate => isSameTourPlace(spot.name, candidate.title))
+                .sort((a, b) => {
+                    const distA = Math.hypot(Number(a.mapx || 0) - lng, Number(a.mapy || 0) - lat);
+                    const distB = Math.hypot(Number(b.mapx || 0) - lng, Number(b.mapy || 0) - lat);
+                    return distA - distB;
+                })[0];
         }
 
-        const contentId = String(matched.contentid);
-        result.tour_content_match = {
-            content_id: contentId,
-            title: matched.title,
-            distance: matched.dist == null ? null : Number(matched.dist),
-        };
-
-        // 1. 한국관광공사 전방위 API(개요, 무장애, 반려동물) 병렬 조회
-        const [overviewResult, barrierFreeResult, petTourResult] = await Promise.allSettled([
-            fetchTourOverview(contentId),
-            tourApiService.getBarrierFreeInfo(contentId),
-            tourApiService.getPetTourDetail(contentId),
-        ]);
-
-        const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
-        const barrierFreeInfo = barrierFreeResult.status === 'fulfilled' ? barrierFreeResult.value : null;
-        const petTourInfo = petTourResult.status === 'fulfilled' ? petTourResult.value : null;
-
-        // 2. DB 업데이트 구성 (content_tour, barrier_free_info)
         const updateClauses = [];
         const updateParams = [spot.spot_id];
 
-        if (overview && !spot.content_tour) {
-            updateParams.push(overview);
+                let overview = null;
+        let tourFirstImage = null;
+        // extractTourTags 는 if 블록 밖에서 호출되므로, 반드시 바깥 스코프에서 선언해야 한다.
+        // (블록 안 const 로 선언하면 매칭 실패 시 ReferenceError → enrich 전체 실패)
+        let barrierFreeInfo = null;
+        let petTourInfo = null;
+
+        if (matched?.contentid) {
+            const contentId = String(matched.contentid);
+            result.tour_content_match = {
+                content_id: contentId,
+                title: matched.title,
+                distance: matched.dist == null ? null : Number(matched.dist),
+            };
+
+            // 1. 한국관광공사 전방위 API(개요, 무장애, 반려동물) 병렬 조회
+            const [overviewResult, barrierFreeResult, petTourResult] = await Promise.allSettled([
+                fetchTourOverview(contentId),
+                tourApiService.getBarrierFreeInfo(contentId),
+                tourApiService.getPetTourDetail(contentId),
+            ]);
+
+            const tourDetail = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
+            overview = tourDetail?.overview || null;
+            barrierFreeInfo = barrierFreeResult.status === 'fulfilled' ? barrierFreeResult.value : null;
+            petTourInfo = petTourResult.status === 'fulfilled' ? petTourResult.value : null;
+
+            tourFirstImage = matched.firstimage || matched.firstimage2 || tourDetail?.firstImage || null;
+
+            if (barrierFreeInfo?.has_barrier_free_info) {
+                updateParams.push(JSON.stringify(barrierFreeInfo.details));
+                updateClauses.push(`barrier_free_info = $${updateParams.length}`);
+                result.barrier_free_enriched = true;
+            }
+
+            if (petTourInfo?.has_pet_info && petTourInfo.details) {
+                updateParams.push(JSON.stringify(petTourInfo.details));
+                updateClauses.push(`pet_tour_info = $${updateParams.length}`);
+                result.pet_tour_enriched = true;
+            } else if (petTourInfo?.has_pet_info) {
+                result.pet_tour_enriched = true;
+            }
+
+            if (tourFirstImage && !spot.first_image) {
+                updateParams.push(tourFirstImage);
+                updateClauses.push(`first_image = $${updateParams.length}`);
+            }
+        } else {
+            result.tour_content_status = 'no_matching_tour_place';
+        }
+
+        // Odii 오디오 가이드 결과 수신
+        const odiiGuide = await odiiPromise;
+        const sanitizedOdii = sanitizeText(odiiGuide?.script);
+        const sanitizedOverview = sanitizeText(overview);
+
+        // 둘 다 있으면 병합, 둘 중 하나만 있어도 적재
+        let combinedTourContent = null;
+        if (sanitizedOdii && sanitizedOverview) {
+            combinedTourContent = `[스토리 해설]\n${sanitizedOdii}\n\n[관광 정보 개요]\n${sanitizedOverview}`;
+        } else if (sanitizedOdii) {
+            combinedTourContent = sanitizedOdii;
+        } else if (sanitizedOverview) {
+            combinedTourContent = sanitizedOverview;
+        }
+
+        if (combinedTourContent && !spot.content_tour) {
+            updateParams.push(combinedTourContent);
             updateClauses.push(`content_tour = $${updateParams.length}`);
             result.tour_content_enriched = true;
-        }
-
-        if (barrierFreeInfo?.has_barrier_free_info) {
-            updateParams.push(JSON.stringify(barrierFreeInfo.details));
-            updateClauses.push(`barrier_free_info = $${updateParams.length}`);
-            result.barrier_free_enriched = true;
-        }
-
-        if (petTourInfo?.has_pet_info) {
-            result.pet_tour_enriched = true;
         }
 
         let updatedSpot = spot;
@@ -430,7 +633,7 @@ async function enrichKakaoSpotTourContent(spot, userId) {
                  SET ${updateClauses.join(', ')}
                  WHERE spot_id = $1
                  RETURNING spot_id, kakao_place_id, name, address, categories, kakao_category_name,
-                           recommend_pct, content_tour, barrier_free_info,
+                           recommend_pct, content_tour, barrier_free_info, pet_tour_info, first_image,
                            ST_X(location::GEOMETRY) AS x,
                            ST_Y(location::GEOMETRY) AS y`,
                 updateParams
@@ -441,7 +644,7 @@ async function enrichKakaoSpotTourContent(spot, userId) {
         }
 
         // 3. 세부 기능별 태그 자동 도출 및 일괄 부착
-        const autoTags = extractTourTags({ overview, barrierFreeInfo, petTourInfo });
+        const autoTags = extractTourTags({ overview, barrierFreeInfo, petTourInfo, odiiGuide });
         if (autoTags.length > 0) {
             await attachTagsToSpot(updatedSpot.spot_id, autoTags, userId);
             result.attached_tags = autoTags;
@@ -487,8 +690,20 @@ exports.getSpots = async (query) => {
     const rawKeyword = Array.isArray(query.keyword ?? query.q) ? (query.keyword ?? query.q)[0] : (query.keyword ?? query.q);
     const keyword = rawKeyword === undefined || rawKeyword === null ? null : String(rawKeyword).trim();
 
-    const offset = (Number(page) - 1) * Number(limit);
+                const offset = (Number(page) - 1) * Number(limit);
+    // 탐색 기본 목록에서는 단순 un-enriched 카카오 임시 핀(투어/무장애 정보 및 태그가 없는 장소)을 제외한다.
+    // 단, 공식 코스 경유지로 연결된 스팟은 정보가 비어 있어도 노출한다.
+    // (예: 춘천 봄내길 코스의 카카오 스팟 — TourAPI 일일 쿼터 소진 시에도 코스와 함께 보여야 함)
     const whereConditions = ["s.status = 'active'"];
+    if (!query.tag_ids && !query.tag_name && !query.tag_names && !query.category && !query.keyword && !query.q) {
+        whereConditions.push(`(
+            s.source <> 'kakao'
+            OR s.content_tour IS NOT NULL
+            OR s.barrier_free_info IS NOT NULL
+            OR EXISTS (SELECT 1 FROM taggings tg WHERE tg.target_id = s.spot_id)
+            OR EXISTS (SELECT 1 FROM course_waypoints cw WHERE cw.spot_id = s.spot_id)
+        )`);
+    }
     const queryValues = [];
 
     // 정렬 매핑
@@ -548,7 +763,7 @@ exports.getSpots = async (query) => {
         whereConditions.push(`(s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length} OR s.sub_region ILIKE $${queryValues.length})`);
     }
 
-    // 태그 ID 목록 검색 (UUID)
+    // 태그 ID 목록 검색 (UUID) — 열린관광 및 반려견동반 선택 시 하위 태그 자동 포함(Group Expansion)
     if (tag_ids) {
         const tagIdList = (Array.isArray(tag_ids) ? tag_ids.join(',') : tag_ids)
             .split(',').map(t => t.trim()).filter(Boolean);
@@ -559,18 +774,30 @@ exports.getSpots = async (query) => {
         }
         if (tagIdList.length > 0) {
             queryValues.push(tagIdList); const tagIdx = queryValues.length;
-            queryValues.push(tagIdList.length); const cntIdx = queryValues.length;
             whereConditions.push(`
                 s.spot_id IN (
                     SELECT tg.target_id FROM taggings tg
-                    WHERE tg.target_type = 'spot' AND tg.tag_id = ANY($${tagIdx}::UUID[])
-                    GROUP BY tg.target_id HAVING COUNT(DISTINCT tg.tag_id) = $${cntIdx}
+                    JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+                    WHERE tg.target_type = 'spot' AND (
+                        tg.tag_id = ANY($${tagIdx}::UUID[])
+                        OR (
+                            t.group_name = '열린관광' AND EXISTS (
+                                SELECT 1 FROM tags t_p WHERE t_p.name = '열린관광' AND t_p.type = 'spot' AND t_p.tag_id = ANY($${tagIdx}::UUID[])
+                            )
+                        )
+                        OR (
+                            t.group_name = '반려동물' AND EXISTS (
+                                SELECT 1 FROM tags t_p WHERE t_p.name = '반려견동반' AND t_p.type = 'spot' AND t_p.tag_id = ANY($${tagIdx}::UUID[])
+                            )
+                        )
+                    )
+                    GROUP BY tg.target_id
                 )
             `);
         }
     }
 
-    // 태그 이름(tag_name / tag_names) 검색 지원
+    // 태그 이름(tag_name / tag_names) 검색 지원 — 열린관광 및 반려견동반 선택 시 하위 태그 자동 포함
     const targetTagNames = tag_name || tag_names;
     if (targetTagNames) {
         const tagNameList = (Array.isArray(targetTagNames) ? targetTagNames.join(',') : targetTagNames)
@@ -581,16 +808,17 @@ exports.getSpots = async (query) => {
         if (tagNameList.length > 0) {
             queryValues.push(tagNameList);
             const tagIdx = queryValues.length;
-            queryValues.push(tagNameList.length);
-            const cntIdx = queryValues.length;
             whereConditions.push(`
                 s.spot_id IN (
                     SELECT tg.target_id
                     FROM taggings tg
                     JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'spot' AND t.is_active = TRUE
-                    WHERE tg.target_type = 'spot' AND t.name = ANY($${tagIdx}::TEXT[])
+                    WHERE tg.target_type = 'spot' AND (
+                        t.name = ANY($${tagIdx}::TEXT[])
+                        OR ('열린관광' = ANY($${tagIdx}::TEXT[]) AND t.group_name = '열린관광')
+                        OR ('반려견동반' = ANY($${tagIdx}::TEXT[]) AND t.group_name = '반려동물')
+                    )
                     GROUP BY tg.target_id
-                    HAVING COUNT(DISTINCT t.name) >= $${cntIdx}
                 )
             `);
         }
@@ -614,10 +842,22 @@ exports.getSpots = async (query) => {
     queryValues.push(Number(limit)); const limitIdx = queryValues.length;
     queryValues.push(offset);        const offsetIdx = queryValues.length;
 
-    const spotsResult = await pool.query(
+        const spotsResult = await pool.query(
         `SELECT
             s.spot_id, s.name, s.address, s.categories, s.region, s.sub_region, s.recommend_pct,
             s.barrier_free_info, s.is_night_tour,
+            s.first_image,
+            -- 후기 사진 폴백: 이 장소의 후기 중 사진이 있는 가장 최근 후기의 첫 사진 key
+            (
+                SELECT sr.photos[1]
+                FROM spot_reviews sr
+                WHERE sr.spot_id = s.spot_id
+                  AND sr.status = 'active'
+                  AND sr.photos IS NOT NULL
+                  AND array_length(sr.photos, 1) > 0
+                ORDER BY sr.created_at DESC
+                LIMIT 1
+            ) AS review_photo_url,
             ST_X(s.location::GEOMETRY) AS x,
             ST_Y(s.location::GEOMETRY) AS y,
             s.content_place IS NOT NULL AS has_content_place,
@@ -644,6 +884,7 @@ exports.getSpots = async (query) => {
         y: Number(s.y),
         recommend_pct: s.recommend_pct == null ? null : Number(s.recommend_pct),
         tags: s.tags || [],
+        top_tags: s.tags || [],
     }));
 
     const total = Number(countResult.rows[0]?.total || 0);
@@ -663,12 +904,39 @@ exports.getSpots = async (query) => {
 // 스팟 상세 조회
 // ──────────────────────────────────────────────────────────────────────
 exports.getSpotById = async (spotId) => {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(spotId).trim());
+    if (!isUuid) {
+        if (/^\d+$/.test(String(spotId).trim())) {
+            const tourDetail = await tourApiService.getSpotDetail(spotId);
+            return {
+                spot_id: String(spotId),
+                content_id: String(spotId),
+                name: tourDetail.title,
+                address: tourDetail.address,
+                x: tourDetail.x,
+                y: tourDetail.y,
+                source: 'tour',
+                overview: tourDetail.overview,
+                tel: tourDetail.tel,
+                homepage: tourDetail.homepage,
+                first_image: tourDetail.images?.[0]?.image_url || null,
+                images: tourDetail.images?.map(i => i.image_url) || [],
+                top_tags: [],
+                courses: [],
+            };
+        }
+        const err = new Error('스팟을 찾을 수 없습니다.');
+        err.status = 404;
+        throw err;
+    }
+
     const spotResult = await pool.query(
         `SELECT
             s.spot_id, s.name, s.address, s.categories, s.kakao_category_name,
             s.region, s.sub_region,
-            s.recommend_pct, s.source, s.content_place, s.content_history, s.content_tour,
+                        s.recommend_pct, s.source, s.content_place, s.content_history, s.content_tour,
             s.barrier_free_info, s.is_night_tour,
+            s.first_image,
             ST_X(s.location::GEOMETRY) AS x,
             ST_Y(s.location::GEOMETRY) AS y,
             COALESCE(
@@ -726,7 +994,7 @@ exports.createSpot = async (body) => {
         err.status = 400; throw err;
     }
 
-            // 좌표(스팟 자체 위치) 기반 권역 추론 → 춘천이면 근처 권역, 아니면 주소 키워드 폴백
+                    // 좌표(스팟 자체 위치) 기반 권역 추론 → 춘천이면 근처 권역, 아니면 주소 키워드 폴백
     // (이용자 실시간 GPS 아님 → LBS 사업자 미신고 요건 유지)
     const regionInfo = inferRegionFromLocation({
         lat,
@@ -795,7 +1063,7 @@ exports.saveKakaoSpot = async (body, userId) => {
         err.status = 400; throw err;
     }
 
-            // 좌표(스팟 자체 위치) 기반 권역 추론 → 춘천이면 근처 권역, 아니면 주소 키워드 폴백
+                    // 좌표(스팟 자체 위치) 기반 권역 추론 → 춘천이면 근처 권역, 아니면 주소 키워드 폴백
     // (이용자 실시간 GPS 아님 → LBS 사업자 미신고 요건 유지)
     const regionInfo = inferRegionFromLocation({
         lat,
@@ -873,6 +1141,11 @@ exports.saveKakaoSpot = async (body, userId) => {
 };
 
 exports.searchKakaoSpotCandidates = searchKakaoSpotCandidates;
+// 백필(재태깅) 스크립트에서 재사용할 수 있도록 노출
+exports.extractTourTags = extractTourTags;
+exports.attachTagsToSpot = attachTagsToSpot;
+exports.ensureSystemTaggerId = ensureSystemTaggerId;
+exports.enrichKakaoSpotTourContent = enrichKakaoSpotTourContent;
 
 // ──────────────────────────────────────────────────────────────────────
 // 스팟 검색 (카카오 + DB 통합)
@@ -930,7 +1203,18 @@ exports.searchSpots = async (query) => {
         savedKakaoPlaceIdSet = new Set(saved.rows.map(r => r.kakao_place_id));
     }
 
+        // 저장 장소(saved_spots) 중 단순 un-enriched 카카오 임시 핀(투어/무장애 정보 및 태그 없는 경우)만 필터 미지정 시 제외
+    // 단, 공식 코스 경유지로 연결된 스팟은 정보가 비어 있어도 노출한다.
     const whereConditions = ["s.status = 'active'"];
+    if (!tagIdList.length && !category && !keyword) {
+        whereConditions.push(`(
+            s.source <> 'kakao'
+            OR s.content_tour IS NOT NULL
+            OR s.barrier_free_info IS NOT NULL
+            OR EXISTS (SELECT 1 FROM taggings tg WHERE tg.target_id = s.spot_id)
+            OR EXISTS (SELECT 1 FROM course_waypoints cw WHERE cw.spot_id = s.spot_id)
+        )`);
+    }
     const queryValues = [];
     let orderBySql = 's.created_at DESC';
 
@@ -971,16 +1255,56 @@ exports.searchSpots = async (query) => {
         )`);
     }
 
+    // 태그 ID 검색 — 열린관광 및 반려견동반 선택 시 하위 태그 자동 포함 & 다중 태그 OR 매칭 지원
     if (tagIdList.length > 0) {
         queryValues.push(tagIdList); const tagIdx = queryValues.length;
-        queryValues.push(tagIdList.length); const cntIdx = queryValues.length;
         whereConditions.push(`
             s.spot_id IN (
                 SELECT tg.target_id FROM taggings tg
-                WHERE tg.target_type = 'spot' AND tg.tag_id = ANY($${tagIdx}::UUID[])
-                GROUP BY tg.target_id HAVING COUNT(DISTINCT tg.tag_id) = $${cntIdx}
+                JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+                WHERE tg.target_type = 'spot' AND (
+                    tg.tag_id = ANY($${tagIdx}::UUID[])
+                    OR (
+                        t.group_name = '열린관광' AND EXISTS (
+                            SELECT 1 FROM tags t_p WHERE t_p.name = '열린관광' AND t_p.type = 'spot' AND t_p.tag_id = ANY($${tagIdx}::UUID[])
+                        )
+                    )
+                    OR (
+                        t.group_name = '반려동물' AND EXISTS (
+                            SELECT 1 FROM tags t_p WHERE t_p.name = '반려견동반' AND t_p.type = 'spot' AND t_p.tag_id = ANY($${tagIdx}::UUID[])
+                        )
+                    )
+                )
+                GROUP BY tg.target_id
             )
         `);
+    }
+
+    // 태그 이름(tag_name / tag_names) 검색 지원
+    const searchTargetTagNames = query.tag_name || query.tag_names;
+    if (searchTargetTagNames) {
+        const tagNameList = (Array.isArray(searchTargetTagNames) ? searchTargetTagNames.join(',') : searchTargetTagNames)
+            .split(',')
+            .map(t => t.trim().replace(/^#/, ''))
+            .filter(Boolean);
+
+        if (tagNameList.length > 0) {
+            queryValues.push(tagNameList);
+            const tagIdx = queryValues.length;
+            whereConditions.push(`
+                s.spot_id IN (
+                    SELECT tg.target_id
+                    FROM taggings tg
+                    JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'spot' AND t.is_active = TRUE
+                    WHERE tg.target_type = 'spot' AND (
+                        t.name = ANY($${tagIdx}::TEXT[])
+                        OR ('열린관광' = ANY($${tagIdx}::TEXT[]) AND t.group_name = '열린관광')
+                        OR ('반려견동반' = ANY($${tagIdx}::TEXT[]) AND t.group_name = '반려동물')
+                    )
+                    GROUP BY tg.target_id
+                )
+            `);
+        }
     }
 
     if (minRecommendPct !== null) {
@@ -988,10 +1312,22 @@ exports.searchSpots = async (query) => {
         whereConditions.push(`s.recommend_pct >= $${queryValues.length}`);
     }
 
-    const savedSpotsResult = await pool.query(
+        const savedSpotsResult = await pool.query(
         `SELECT s.spot_id, s.kakao_place_id, s.name, s.address, s.categories, s.kakao_category_name,
                 s.region, s.sub_region,
                 s.recommend_pct,
+                s.first_image,
+                -- 후기 사진 폴백: 사진이 있는 가장 최근 후기의 첫 사진 key
+                (
+                    SELECT sr.photos[1]
+                    FROM spot_reviews sr
+                    WHERE sr.spot_id = s.spot_id
+                      AND sr.status = 'active'
+                      AND sr.photos IS NOT NULL
+                      AND array_length(sr.photos, 1) > 0
+                    ORDER BY sr.created_at DESC
+                    LIMIT 1
+                ) AS review_photo_url,
                 ST_X(s.location::GEOMETRY) AS x, ST_Y(s.location::GEOMETRY) AS y,
                 COALESCE(json_agg(DISTINCT jsonb_build_object('tag_id', t.tag_id, 'name', t.name))
                 FILTER (WHERE t.tag_id IS NOT NULL), '[]') AS tags
@@ -1006,6 +1342,8 @@ exports.searchSpots = async (query) => {
     const savedSpots = savedSpotsResult.rows.map(s => ({
         ...s, x: Number(s.x), y: Number(s.y),
         recommend_pct: s.recommend_pct == null ? null : Number(s.recommend_pct),
+        tags: s.tags || [],
+        top_tags: s.tags || [],
         is_saved: true, has_app_data: true, filter_match: 'matched', result_group: 'saved_spot',
     }));
 

@@ -241,8 +241,8 @@ CREATE TABLE tags (
 
     is_review_tag BOOLEAN       NOT NULL DEFAULT TRUE,
     -- 후기(리뷰) 작성 시 사용자 선택 허용 여부
-    -- TRUE: 후기 작성 시 사용자가 직접 선택 가능
-    -- FALSE: 시스템/공식 인증 전용 태그 (공식코스, 무장애길, 열린관광, Odii음성해설 등)
+    -- TRUE: 후기 작성 시 선택 가능 / FALSE: 시스템·공식 인증 전용 (후기 불가)
+    -- 예: 공식코스·무장애길·Odii음성해설·실시간축제·열린관광/반려동물 전 항목 등은 FALSE
 
     created_at  TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
 
@@ -332,9 +332,14 @@ CREATE TABLE spots (
     -- 역사 해설 텍스트
     -- NULL 이면 해당 스팟은 역사 해설 불가
 
-    content_tour        TEXT            NULL,
+        content_tour        TEXT            NULL,
     -- 관광 안내 해설 텍스트
     -- NULL 이면 해당 스팟은 관광 안내 불가
+
+    first_image         VARCHAR(500)    NULL,
+    -- 장소 목록 카드 노출용 대표 사진 URL
+    -- 한국관광공사 TourAPI firstimage 저장
+    -- NULL 이면 프론트에서 후기 사진(spot_reviews.photos[1])을 폴백으로 사용
 
     recommend_pct       DECIMAL(5,2)    NULL,
     -- 추천도 퍼센트 캐시값
@@ -345,6 +350,9 @@ CREATE TABLE spots (
 
     barrier_free_info   JSONB           NULL,
     -- 무장애 여행정보(열린관광/KorWithService2 연동 데이터)
+
+    pet_tour_info       JSONB           NULL,
+    -- 반려동물 동반여행 정보(한국관광공사 KorPetTourService2 연동 데이터)
 
     is_night_tour       BOOLEAN         NOT NULL DEFAULT FALSE,
     -- 야간명소 여부
@@ -372,8 +380,8 @@ CREATE TABLE spots (
     CONSTRAINT chk_spots_status
         CHECK (status IN ('active', 'auto_hidden', 'hidden')),
 
-    CONSTRAINT chk_spots_source
-        CHECK (source IN ('admin', 'kakao')),
+        CONSTRAINT chk_spots_source
+        CHECK (source IN ('admin', 'kakao', 'tour')),
 
     CONSTRAINT chk_spots_recommend_pct
         CHECK (recommend_pct IS NULL OR recommend_pct BETWEEN 0 AND 100)

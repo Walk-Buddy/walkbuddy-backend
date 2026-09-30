@@ -1637,11 +1637,51 @@ const swaggerDefinition = {
       get: {
         tags: ['산책 진행'],
         summary: '산책 기록 상세 조회',
-        parameters: [{ name: 'walk_record_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        description: '특정 산책 기록의 상세 정보를 조회합니다. 연동된 코스 정보, 이동 거리, 소요 시간, 완주 여부, 지도 이미지 URL, 시작/종료 일시가 포함됩니다.',
+        parameters: [{ name: 'walk_record_id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: '산책 기록 ID' }],
         responses: {
           200: {
-            description: '산책 기록 상세',
-            content: { 'application/json': { schema: { type: 'object', properties: { walk_record_id: { type: 'string', format: 'uuid' }, course: { type: 'object' }, total_distance: { type: 'integer' }, duration: { type: 'integer' }, is_completed: { type: 'boolean' }, map_image_url: { type: 'string', nullable: true } } } } },
+            description: '산책 기록 상세 조회 성공',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    walk_record_id: { type: 'string', format: 'uuid', example: 'd3b07384-d113-460d-9597-88d447a16f27' },
+                    total_distance: { type: 'integer', description: '총 이동 거리 (미터)', example: 2800 },
+                    duration: { type: 'integer', description: '총 소요 시간 (초 또는 분)', example: 1500 },
+                    is_completed: { type: 'boolean', description: '완주 여부', example: true },
+                    map_image_url: { type: 'string', nullable: true, description: '경로 지도 이미지 URL', example: 'https://walkbuddy-uploads.s3.ap-northeast-2.amazonaws.com/walk-map-123.png' },
+                    started_at: { type: 'string', format: 'date-time', description: '산책 시작 일시', example: '2026-09-19T09:00:00.000Z' },
+                    ended_at: { type: 'string', format: 'date-time', nullable: true, description: '산책 종료 일시', example: '2026-09-19T09:45:00.000Z' },
+                    course: {
+                      type: 'object',
+                      description: '연동된 코스 정보 (자유 산책일 경우 각 필드가 null일 수 있음)',
+                      properties: {
+                        course_id: { type: 'string', format: 'uuid', nullable: true, example: 'b1a2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d' },
+                        name: { type: 'string', nullable: true, example: '경춘선 숲길 산책로' },
+                        total_distance: { type: 'integer', nullable: true, example: 3500 },
+                        estimated_duration: { type: 'integer', nullable: true, example: 50 },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { description: '인증 실패 (토큰 누락 또는 유효하지 않음)' },
+          404: {
+            description: '산책 기록을 찾을 수 없음',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    message: { type: 'string', example: '산책 기록을 찾을 수 없습니다.' },
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -2612,17 +2652,14 @@ const swaggerDefinition = {
     '/api/tour/spots': {
       get: {
         tags: ['관광공사 TourAPI (실시간)'],
-        summary: '실시간 지역/테마/위치별 관광지 목록 조회',
-        description: '한국관광공사 TourAPI areaBasedList2 및 locationBasedList2 오퍼레이션을 실시간 호출하여 인기순/거리순 관광지 목록을 조회합니다. 위치 반경, 카테고리, 태그, 추천도 필터를 적용할 수 있습니다.',
+        summary: '실시간 지역/테마별 관광지 목록 조회',
+        description: '한국관광공사 TourAPI areaBasedList2 오퍼레이션을 실시간 호출하여 지역/테마/카테고리/태그/추천도 기준으로 관광지 목록을 조회합니다. [LBS 사업자 미신고] 이용자의 실시간 위치(GPS) 좌표는 서버로 전송하지 않으며, 거리·반경 계산은 앱(온디바이스)에서만 수행합니다.',
         parameters: [
           { name: 'region', in: 'query', schema: { type: 'string', default: 'chuncheon' }, description: '지역명 (춘천, 서울, 노원구, 강남구 등)' },
           { name: 'sub_region', in: 'query', schema: { type: 'string' }, description: '세부 권역 또는 자치구명' },
           { name: 'category', in: 'query', schema: { type: 'string' }, description: '장소 유형 필터 (예: 카페, 음식점, 공원·광장, 산·등산로, 전시·문화공간 등)' },
           { name: 'tag_ids', in: 'query', schema: { type: 'string' }, description: '쉼표 구분 태그 UUID 목록' },
           { name: 'min_recommend_pct', in: 'query', schema: { type: 'integer', minimum: 0, maximum: 100 }, description: '최소 추천도 (0–100)' },
-          { name: 'latitude', in: 'query', schema: { type: 'number' }, description: '사용자 위치 위도 (반경 검색 시)' },
-          { name: 'longitude', in: 'query', schema: { type: 'number' }, description: '사용자 위치 경도 (반경 검색 시)' },
-          { name: 'radius', in: 'query', schema: { type: 'number', default: 3000 }, description: '검색 반경 (미터 단위, 기본 3000m, 최대 20000m)' },
           { name: 'contentTypeId', in: 'query', schema: { type: 'string', enum: ['12', '14', '15', '25', '28', '32', '38', '39'] }, description: '관광타입 (12:관광지, 14:문화시설, 15:축제, 28:레포츠, 38:쇼핑, 39:음식점)' },
           { name: 'cat1', in: 'query', schema: { type: 'string' }, description: '대분류 (A01:자연, A02:인문, A03:레포츠, A04:쇼핑, A05:음식)' },
           { name: 'cat2', in: 'query', schema: { type: 'string' }, description: '중분류 (A0101, A0201, A0206 등)' },

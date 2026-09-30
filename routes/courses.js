@@ -10,8 +10,9 @@ router.post('/', authenticate, courseController.createCourse);
 router.get('/', optionalAuthenticate, courseController.getCourses);                         
 router.get('/:course_id', optionalAuthenticate, courseController.getCourseById);
 router.get('/:course_id/photos', courseController.getCoursePhotos);
-router.patch('/:course_id', authenticate, courseController.updateCourse);      
-router.delete('/:course_id', authenticate, courseController.deleteCourse);     
+router.patch('/:course_id', authenticate, courseController.updateCourse);
+router.delete('/:course_id', authenticate, courseController.deleteCourse);
+router.post('/:course_id/prewarm-audio', optionalAuthenticate, courseController.prewarmCourseAudio);
 router.post('/:course_id/reviews', authenticate, reviewController.createCourseReview);
 router.get('/:course_id/reviews', optionalAuthenticate, reviewController.getCourseReviews);
 

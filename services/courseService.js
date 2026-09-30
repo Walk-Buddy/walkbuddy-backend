@@ -1,5 +1,7 @@
 const pool = require('../config/db');
 const { extractRegionFromAddress, inferRegionFromLocation } = require('../constants/spotCategoryRules');
+const { parseDescriptionSections } = require('../utils/courseDescription');
+const courseTagService = require('./courseTagService');
 
 const WALK_SPEED_MPS = 1.1; // 도보 평균 4km/h
 const COURSE_NEARBY_SPOT_RADIUS = Number(process.env.COURSE_NEARBY_SPOT_RADIUS || 500);
@@ -307,86 +309,8 @@ function normalizeDifficulty(value) {
   return normalized;
 }
 
-// 두루누비 description 문자열을 파싱하는 함수
-// 예: "@@summary\n- ..." 형태를 { summary: [...] } 형태로 변환합니다.
-
-function parseDescriptionSections(description){
-  const sections={
-    summary: [],
-    content: null,
-    tour_info:[],
-    traveler_info:[],
-    stamp_location: null,
-    region: null,
-    cycle:null,
-
-  };
-
-  //description이 없으면 빈 sections 반환
-  if(!description) return sections;
-  
-  const blocks = description
-  .split(/\n(?=@@)/)
-  .map((block)=>block.trim())
-  .filter(Boolean);
-
-  for(const block of blocks)
-  {
-    const [firstLine, ...bodyLines]=block.split('\n');
-    const key=firstLine.replace(/^@@/,'').trim();
-    const body=bodyLines.join('\n').trim();
-
-    if(key==='summary'){
-      sections.summary = parseListLines(body);
-    }
-    if(key==='content'){
-      sections.content=body||null;
-    }
-     if (key === 'tour_info') {
-      sections.tour_info = parseListLines(body);
-    }
-    if(key==='traveler_info'){
-      const{list,stampLocation}=parseTravelerInfo(body);
-      sections.traveler_info=list;
-      sections.stamp_location=stampLocation;
-    }
-    if(key==='region'){
-      sections.region=body||null;
-    }
-    if(key==='cycle'){
-      sections.cycle=body||null;
-    }
-  }
-  
-  return sections;
-}
-
-function parseListLines(text){
-  if(!text) return [];
-  return text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => line.replace(/^[-*]\s*/, '').trim())
-    .filter(Boolean);
-} 
-
-function parseTravelerInfo(text){
-  if(!text) {
-    return{list:[],stampLocation:null};
-  }
-
-  const stampMatch=text.match(/\*\s*[^\n]*스탬프함 위치\n([\s\S]*)/);
-
-  const travelerText=stampMatch
-  ?text.slice(0,stampMatch.index).trim()
-  : text.trim();
-
-  return{
-    list:parseListLines(travelerText),
-    stampLocation:stampMatch? stampMatch[1].trim():null,
-  };
-}
+// 두루누비 description 섹션 파싱은 utils/courseDescription.js 로 이전됨
+// (courseService · backfill 스크립트가 공용으로 사용)
 
 function buildCourseDetailDescription(course) {
   if (course.data_source !== '한국관광공사_두루누비') {
@@ -460,10 +384,10 @@ exports.createCourse = async (userId, body) => {
       totalDistance = stats.totalDistance;
       estimatedDuration = body.estimated_duration
         ? Math.ceil(body.estimated_duration)
-        : stats.estimatedDuration;
+                : stats.estimatedDuration;
     }
 
-            // region, sub_region 결정 (입력값 우선, 없으면 '코스 시작 좌표' 기반으로 추론)
+    // region, sub_region 결정 (입력값 우선, 없으면 '코스 시작 좌표' 기반으로 추론)
     // NOTE: 이용자 실시간 GPS가 아니라 코스 시작 지점 좌표만 사용 → LBS 미신고 요건 유지
     let determinedRegion = body.region || null;
     let determinedSubRegion = body.sub_region || null;
@@ -488,7 +412,21 @@ exports.createCourse = async (userId, body) => {
     // waypoints: 장소 목록 독립적으로 저장
     await insertWaypoints(course.course_id, waypoints, client);
 
-    await insertTags(tag_ids, course.course_id, userId, client);
+        await insertTags(tag_ids, course.course_id, userId, client);
+
+    // 사용자가 태그를 명시하지 않은 경우, 카테고리·설명·경유지 스팟 태그로 자동 보강
+    if (!Array.isArray(tag_ids) || tag_ids.length === 0) {
+      try {
+        await courseTagService.autoTagCourse({
+          courseId: course.course_id,
+          category: category || null,
+          description: description || null,
+          userId,
+        }, client);
+      } catch (tagErr) {
+        console.warn('[createCourse] 자동 태깅 실패(무시):', tagErr.message);
+      }
+    }
 
     // 경로 근처 스팟 자동 감지 (반경 50m)
     const existingSpotIds = waypoints.filter((w) => w.type === 'spot').map((w) => w.spot_id);
@@ -533,9 +471,9 @@ exports.createCourseFromWalk = async (userId, body) => {
     // 사용자가 지도에서 직접 선택한 경유지(waypoints)만 허용
     // GPS 실제 이동 궤적(coordinates, actual_route)은 수신하지 않음
     validateWaypoints(body.waypoints, { minLength: 2 });
-    const routeWaypoints = body.waypoints;
+        const routeWaypoints = body.waypoints;
 
-        const wkt = await buildLineString(routeWaypoints, client);
+    const wkt = await buildLineString(routeWaypoints, client);
     const stats = await calcStats(wkt, client);
 
     // region, sub_region 결정 (입력값 우선, 없으면 '코스 시작 좌표' 기반으로 추론)
@@ -619,6 +557,7 @@ exports.getCourses = async (query, currentUserId) => {
 
   const isCycle = query.is_cycle;
   const isPublic = query.is_public;
+  const courseType = readQueryValue(query.course_type, query.courseType);
 
   const page = parseIntegerParam(query.page, 'page', { defaultValue: 1, min: 1, max: 10000 });
   const limit = parseIntegerParam(query.limit, 'limit', { defaultValue: 20, min: 1, max: 100 });
@@ -735,6 +674,13 @@ exports.getCourses = async (query, currentUserId) => {
   if (minAvgRating !== null) {
     params.push(minAvgRating);
     conditions.push(`rs.avg_rating >= $${params.length}`);
+  }
+
+  // 산책로 종류 필터 (user: 사용자 산책로, official: 공식 코스)
+  if (courseType === 'user') {
+    conditions.push(`(c.data_source IS NULL AND (u.role != 'admin' OR u.role IS NULL))`);
+  } else if (courseType === 'official') {
+    conditions.push(`(c.data_source IS NOT NULL OR u.role = 'admin')`);
   }
 
   // 코스 태그 ID 필터
@@ -877,6 +823,8 @@ exports.getCourses = async (query, currentUserId) => {
 
   const fromSql = `
     FROM courses c
+    LEFT JOIN users u
+      ON u.user_id = c.owner_id
     LEFT JOIN review_stats rs
       ON rs.course_id = c.course_id
     LEFT JOIN course_tag_agg ct
@@ -904,7 +852,11 @@ exports.getCourses = async (query, currentUserId) => {
       c.is_cycle,
       c.difficulty_level,
       c.is_public,
+      c.data_source,
       c.created_at,
+      u.nickname AS creator_name,
+      u.role AS owner_role,
+      (c.data_source IS NOT NULL OR u.role = 'admin') AS is_official,
       ST_Y(ST_StartPoint(c.route_geometry::geometry)) AS start_lat,
       ST_X(ST_StartPoint(c.route_geometry::geometry)) AS start_lng,
       rs.avg_rating,
@@ -936,6 +888,9 @@ exports.getCourses = async (query, currentUserId) => {
 
       return {
         ...course,
+        is_official: Boolean(course.is_official),
+        data_source: course.data_source || null,
+        creator_name: course.creator_name || (course.is_official ? '한국관광공사' : null),
         is_cycle: Boolean(course.is_cycle),
         difficulty_level: Number(course.difficulty_level || 1),
         start_location: course.start_lat && course.start_lng ? { lat: Number(course.start_lat), lng: Number(course.start_lng) } : null,
@@ -1028,6 +983,8 @@ exports.getCourseById = async (courseId, userId) => {
          c.region, c.sub_region,
          c.total_distance, c.estimated_duration,
          c.is_public, c.owner_id, c.data_source, c.created_at, c.updated_at,
+         u.nickname AS creator_name, u.role AS owner_role,
+         (c.data_source IS NOT NULL OR u.role = 'admin') AS is_official,
          ST_AsGeoJSON(c.route_geometry)::json AS route,
          ROUND(AVG(cr.rating)::numeric, 1)        AS avg_rating,
          ROUND(AVG(CASE cr.difficulty
@@ -1036,10 +993,12 @@ exports.getCourseById = async (courseId, userId) => {
            WHEN 'hard'   THEN 3 END)::numeric, 1) AS avg_difficulty,
          COUNT(DISTINCT cr.course_review_id)       AS review_count
        FROM courses c
+       LEFT JOIN users u
+         ON u.user_id = c.owner_id
        LEFT JOIN course_reviews cr
          ON cr.course_id = c.course_id AND cr.status = 'active'
        WHERE c.course_id = $1 AND c.status != 'deleted'
-       GROUP BY c.course_id`,
+       GROUP BY c.course_id, u.nickname, u.role`,
       [courseId]
     );
 
@@ -1125,6 +1084,8 @@ exports.getCourseById = async (courseId, userId) => {
 
     return {
       ...course,
+      is_official: Boolean(course.is_official),
+      creator_name: course.creator_name || (course.is_official ? '한국관광공사' : null),
       ...buildCourseDetailDescription(course),
       waypoints: spots,
       spots,
@@ -1183,8 +1144,8 @@ exports.updateCourse = async (userId, courseId, body) => {
     // 미전달된 필드는 기존 코스 값 유지 (부분 수정 지원)
     const nextName = name !== undefined ? name.trim() : course.name;
     const nextDescription = description !== undefined ? description : course.description;
-    const nextCategory = category !== undefined ? category : course.category;
-        let nextRegion = region !== undefined ? region : course.region;
+        const nextCategory = category !== undefined ? category : course.category;
+    let nextRegion = region !== undefined ? region : course.region;
     let nextSubRegion = sub_region !== undefined ? sub_region : course.sub_region;
     const nextIsPublic = is_public !== undefined ? (is_public === true || is_public === 'true') : course.is_public;
     // 경로 변경 시 새 시작 좌표로 권역을 보정하기 위한 값 (좌표 = 코스 시작 지점, 실시간 GPS 아님)
@@ -1196,8 +1157,8 @@ exports.updateCourse = async (userId, courseId, body) => {
     let paramIdx = 7; // $1=name $2=description $3=category $4=region $5=sub_region $6=is_public 이후
 
     if (route) {
-      const coordinates = route.coordinates ?? route;
-            const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
+            const coordinates = route.coordinates ?? route;
+      const routeWaypoints = coordinates.map(([lng, lat]) => ({ type: 'pin', lat, lng }));
       const wkt = await buildLineString(routeWaypoints, client);
       const stats = await calcStats(wkt, client);
       startCoordinate = await fetchStartCoordinate(client, wkt);
@@ -1211,8 +1172,8 @@ exports.updateCourse = async (userId, courseId, body) => {
         await client.query(`DELETE FROM course_waypoints WHERE course_id=$1`, [courseId]);
         await insertWaypoints(courseId, waypoints, client);
       }
-    } else if (waypoints) {
-            validateWaypoints(waypoints, { minLength: 2 });
+        } else if (waypoints) {
+      validateWaypoints(waypoints, { minLength: 2 });
       const wkt = await buildLineString(waypoints, client);
       const { totalDistance, estimatedDuration } = await calcStats(wkt, client);
       startCoordinate = await fetchStartCoordinate(client, wkt);
@@ -1224,9 +1185,9 @@ exports.updateCourse = async (userId, courseId, body) => {
       // 경유지 교체
       await client.query(`DELETE FROM course_waypoints WHERE course_id=$1`, [courseId]);
       await insertWaypoints(courseId, waypoints, client);
-    }
+        }
 
-        // 경로가 바뀌었고 지역이 명시되지 않았다면 새 시작 좌표 기준으로 권역 자동 보정
+    // 경로가 바뀌었고 지역이 명시되지 않았다면 새 시작 좌표 기준으로 권역 자동 보정
     if (startCoordinate && region === undefined) {
       const inferred = inferRegionFromLocation({
         lat: startCoordinate.lat,

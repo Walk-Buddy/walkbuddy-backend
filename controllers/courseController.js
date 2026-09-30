@@ -108,4 +108,20 @@ exports.getCoursePhotos = async (req, res, next) => {
 
     return res.json({ success: true, course_id, course_name: name, ...result });
   } catch (err) { next(err); }
+};
+
+// 코스 오디오 사전 생성 (비동기 백그라운드 0초 딜레이 Warm-up)
+exports.prewarmCourseAudio = async (req, res, next) => {
+  try {
+    const { course_id } = req.params;
+    const aiContentService = require('../services/aiContentService');
+    aiContentService.prewarmCourseAudio(course_id).catch(err => {
+      console.error(`[PrewarmAudio] Failed for course ${course_id}:`, err.message);
+    });
+    return res.status(202).json({
+      success: true,
+      message: '코스 음성 안내 사전 생성이 백그라운드에서 시작되었습니다.',
+      course_id,
+    });
+  } catch (err) { next(err); }
 };

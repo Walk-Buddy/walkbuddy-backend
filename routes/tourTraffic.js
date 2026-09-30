@@ -16,6 +16,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const trafficLog = require('../services/tourTrafficLog');
+const tourCache = require('../services/tourCache');
 
 // 관리자 인증 + 권한
 router.use(authenticate, requireAdmin);
@@ -26,13 +27,14 @@ router.get('/', (req, res) => {
   res.json({
     success: true,
     stats: trafficLog.stats(),
+    cache: tourCache.stats(),
     logs: trafficLog.list({ limit, api, pathname, status }),
   });
 });
 
 // 누적 통계만
 router.get('/stats', (req, res) => {
-  res.json({ success: true, ...trafficLog.stats() });
+  res.json({ success: true, ...trafficLog.stats(), cache: tourCache.stats() });
 });
 
 // 실시간 스트림 (Server-Sent Events)
