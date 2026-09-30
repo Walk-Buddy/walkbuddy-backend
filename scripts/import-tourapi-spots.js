@@ -287,7 +287,13 @@ async function main() {
   console.log('🐾 [TourAPI 국문관광정보 스팟 DB 적재 시작]');
   console.log(`- 설정: 지역=${targetRegion}, 지역당 최대=${limitPerRegion}개, dry-run=${isDryRun}\n`);
 
-  const client = await pool.connect();
+  let client = null;
+  let ownerId = null;
+  if (!isDryRun) {
+    client = await pool.connect();
+    ownerId = await ensureAdminUser(client);
+  }
+
   const summary = {
     chuncheon_loaded: 0,
     seoul_loaded: 0,
@@ -297,11 +303,12 @@ async function main() {
   };
 
   try {
-    const ownerId = await ensureAdminUser(client);
-
     // 대상 지역 구성
     const targets = [];
-    if (targetRegion === 'all' || targetRegion.includes('춘천')) {
+    const isChuncheon = targetRegion === 'all' || targetRegion.includes('춘천') || targetRegion.toLowerCase().includes('chuncheon');
+    const isSeoul = targetRegion === 'all' || targetRegion.includes('서울') || targetRegion.toLowerCase().includes('seoul') || targetRegion.includes('노원');
+
+    if (isChuncheon) {
       targets.push({
         name: '춘천',
         areaCode: '32',
@@ -309,7 +316,7 @@ async function main() {
         description: '강원 춘천시 대표 명소/공원',
       });
     }
-    if (targetRegion === 'all' || targetRegion.includes('서울')) {
+    if (isSeoul) {
       // 서울 노원구(서울여대 인근) 및 서울 주요 명소
       targets.push({
         name: '서울',
@@ -375,6 +382,9 @@ async function main() {
           place_name: title,
           name: title,
           category_name: item.cat3 || item.cat2 || item.cat1 || '',
+          cat1: item.cat1 || '',
+          cat2: item.cat2 || '',
+          cat3: item.cat3 || '',
         });
 
         const regionInfo = inferRegionFromLocation({
@@ -394,9 +404,9 @@ async function main() {
             '지역': determinedRegion,
             '권역/구': determinedSubRegion || '-',
             '스팟명': title,
-            '카테고리': categories.join(', '),
+            '카테고리': categories.join(', ') || '공원·광장',
             '태그수': autoTags.length,
-            '주요 태그': autoTags.slice(0, 3).map((t) => `#${t}`).join(' '),
+            '태그 목록': autoTags.map((t) => `#${t}`).join(' ') || '(없음)',
           });
           continue;
         }
@@ -477,8 +487,8 @@ async function main() {
     console.error('❌ 적재 실패:', err.message);
     process.exitCode = 1;
   } finally {
-    client.release();
-    await pool.end();
+    if (client) client.release();
+    if (!isDryRun) await pool.end();
   }
 }
 
