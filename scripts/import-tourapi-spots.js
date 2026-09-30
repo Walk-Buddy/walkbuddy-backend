@@ -182,26 +182,10 @@ async function fetchPetTourInfo(contentId) {
 // ──────────────────────────────────────────────────────────
 // 4. 데이터 기반 장소 태그 자동 도출 알고리즘
 // ──────────────────────────────────────────────────────────
-function deriveSpotTags({ overview, barrierFree, petTour, categories = [] }) {
+function deriveSpotTags({ overview, barrierFree, petTour }) {
   const tags = new Set();
 
-  // (1) 카테고리 기반 태그
-  for (const cat of categories) {
-    if (cat === '산·등산로') tags.add('산·등산로');
-    if (cat === '공원·광장') tags.add('공원·광장');
-    if (cat === '숲·휴양림') tags.add('숲·휴양림');
-    if (cat === '수목원·정원') tags.add('수목원·정원');
-    if (cat === '강·하천' || cat === '호수·저수지') tags.add('물가·수변');
-    if (cat === '역사·유적') tags.add('역사유적');
-    if (cat === '전시·문화공간') tags.add('문화/예술');
-  }
-
-  // (2) 관광 개요 기반 해설 태그
-  if (overview && overview.length >= 20) {
-    tags.add('관광해설');
-  }
-
-  // (3) 무장애 여행정보(열린관광) 태그
+  // (1) 무장애 여행정보 (KorWithService2 - 열린관광 공식 태그)
   if (barrierFree) {
     tags.add('열린관광');
     const p = barrierFree.physical || {};
@@ -212,17 +196,16 @@ function deriveSpotTags({ overview, barrierFree, petTour, categories = [] }) {
     if (p.wheelchair) tags.add('휠체어접근');
     if (p.route) tags.add('무단차통로');
     if (p.restroom) tags.add('장애인화장실');
-    if (p.parking) tags.add('주차');
+    if (p.parking) tags.add('장애인주차');
     if (p.elevator) tags.add('엘리베이터');
     if (i.stroller) tags.add('유모차대여');
     if (i.lactation_room) tags.add('수유실');
     if (v.braile_block || v.braile_promotion) tags.add('점자안내');
-    if (v.help_dog) tags.add('도우미견가능');
-    if (v.audio_guide) tags.add('음성해설');
+    if (v.help_dog) tags.add('안내견동반');
     if (h.sign_language || h.video_guide) tags.add('수어안내');
   }
 
-  // (4) 반려동물 동반정보 태그
+  // (2) 반려동물 동반정보 (KorPetTourService2 - 반려동물 공식 태그)
   if (petTour) {
     tags.add('반려견동반');
     const size = String(petTour.allowed_pet_size || '');
@@ -239,8 +222,9 @@ function deriveSpotTags({ overview, barrierFree, petTour, categories = [] }) {
     if (fac.includes('놀이터') || fac.includes('운동장') || fac.includes('펜스')) {
       tags.add('반려견놀이터');
     }
-    if (fac.includes('주차')) tags.add('주차');
+    if (fac.includes('주차') || petTour.parking) tags.add('주차가능');
     if (fac.includes('화장실')) tags.add('화장실');
+    if (fac.includes('쉼터') || fac.includes('벤치')) tags.add('벤치·쉼터');
   }
 
   return Array.from(tags);
@@ -403,7 +387,7 @@ async function main() {
         const determinedSubRegion = regionInfo.sub_region || null;
 
         // 3. 데이터 기반 태그 도출
-        const autoTags = deriveSpotTags({ overview, barrierFree, petTour, categories });
+        const autoTags = deriveSpotTags({ overview, barrierFree, petTour });
 
         if (isDryRun) {
           resultRows.push({
