@@ -23,7 +23,7 @@ function resolveApiTheme(groupName, tagName) {
 
 exports.getTags = async () => {
   const { rows } = await pool.query(
-    `SELECT tag_id, name, type, group_name
+    `SELECT tag_id, name, type, group_name, is_review_tag
      FROM tags
      WHERE is_active = TRUE
      ORDER BY type ASC, group_name ASC, name ASC`

@@ -15,8 +15,7 @@
     "import:durunubi": "node scripts/import-durunubi-courses.js",
     "import:tourapi": "node scripts/import-tourapi-spots.js",
     "seed:prewalk-course": "node scripts/create-prewalk-course-via-api.js",
-    "seed:prewalk-reviews": "node scripts/create-prewalk-course-via-api.js --reviews-only",
-    "db:seed": "node db/run-sql.js db/seed.sql"
+    "seed:prewalk-reviews": "node scripts/create-prewalk-course-via-api.js --reviews-only"
   },
   "dependencies": {
 

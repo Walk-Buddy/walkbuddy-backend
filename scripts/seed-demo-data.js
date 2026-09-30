@@ -77,8 +77,7 @@ async function ensureServer() {
 
 async function main() {
   await runNode(['db/run-sql.js', 'db/reset.sql'], 'DB 초기화');
-  await runNode(['db/run-sql.js', 'db/schema.sql'], 'DB 스키마 재구성');
-  await runNode(['db/run-sql.js', 'db/seed.sql'], '기존 seed 데이터 입력');
+  await runNode(['db/run-sql.js', 'db/schema.sql'], 'DB 스키마 및 태그 마스터 구성');
 
   if (includeDurunubi) {
     await runNode(['scripts/import-durunubi-courses.js'], '두루누비 코스 import');

@@ -239,6 +239,11 @@ CREATE TABLE tags (
     -- FALSE: 비활성화 (선택 불가, 목록에서 숨김)
     -- 계절 태그 관리용 (예: #벚꽃 봄 외 시즌 비활성화, #단풍 가을 외 비활성화)
 
+    is_review_tag BOOLEAN       NOT NULL DEFAULT TRUE,
+    -- 후기(리뷰) 작성 시 사용자 선택 허용 여부
+    -- TRUE: 후기 작성 시 사용자가 직접 선택 가능
+    -- FALSE: 시스템/공식 인증 전용 태그 (공식코스, 무장애길, 열린관광, Odii음성해설 등)
+
     created_at  TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
 
     CONSTRAINT pk_tags
@@ -1484,4 +1489,93 @@ CREATE INDEX ix_user_blocks_blocker_id
 -- 나를 차단한 사용자 조회/필터링용
 CREATE INDEX ix_user_blocks_blocked_id
     ON user_blocks (blocked_id);
+
+
+-- ================================================
+-- SEED DATA: tags (공식 표준 태그 마스터)
+-- 프론트엔드(ServerTags.kt) 및 백엔드 로직과 100% 일치하는 정본 태그 목록.
+-- reset.sql -> schema.sql 실행만으로 태그 마스터가 완비됩니다.
+-- ON CONFLICT (name, type) DO UPDATE 로 멱등(Idempotent)하게 동작합니다.
+-- ================================================
+
+-- 1. 표준 코스 태그 (13개)
+INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
+VALUES
+  -- 코스 출처 (시스템 전용, 후기 불가)
+  ('공식코스',   'course', '코스 출처',  TRUE, FALSE),
+  ('사용자코스', 'course', '코스 출처',  TRUE, FALSE),
+
+  -- 추천·종류 (시스템/에디터 추천, 후기 불가)
+  ('추천코스',   'course', '추천·종류',  TRUE, FALSE),
+  ('관광코스',   'course', '추천·종류',  TRUE, FALSE),
+  ('둘레길',     'course', '추천·종류',  TRUE, FALSE),
+  ('춘천 봄내길', 'course', '추천·종류',  TRUE, FALSE),
+
+  -- 분위기 (후기 가능)
+  ('힐링',       'course', '분위기',      TRUE, TRUE),
+  ('노을·야경',  'course', '분위기',      TRUE, TRUE),
+  ('자연·풍경',  'course', '분위기',      TRUE, TRUE),
+  ('역사·문화',  'course', '분위기',      TRUE, TRUE),
+
+  -- 동반·접근성 (무장애길은 인증 전용, 나머지는 후기 가능)
+  ('무장애길',   'course', '동반·접근성', TRUE, FALSE),
+  ('반려동물',   'course', '동반·접근성', TRUE, TRUE),
+  ('아이와함께', 'course', '동반·접근성', TRUE, TRUE)
+ON CONFLICT (name, type) DO UPDATE SET
+  group_name    = EXCLUDED.group_name,
+  is_active     = EXCLUDED.is_active,
+  is_review_tag = EXCLUDED.is_review_tag;
+
+-- 2. 표준 스팟 태그 (37개)
+INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
+VALUES
+  -- 열린관광 (무장애 편의시설)
+  ('열린관광',           'spot', '열린관광',     TRUE, FALSE), -- 인증 대표 태그 (후기 불가)
+  ('무단차통로',         'spot', '열린관광',     TRUE, TRUE),
+  ('휠체어접근',         'spot', '열린관광',     TRUE, TRUE),
+  ('휠체어대여',         'spot', '열린관광',     TRUE, TRUE),
+  ('장애인주차',         'spot', '열린관광',     TRUE, TRUE),
+  ('장애인화장실',       'spot', '열린관광',     TRUE, TRUE),
+  ('엘리베이터',         'spot', '열린관광',     TRUE, TRUE),
+  ('안내견동반',         'spot', '열린관광',     TRUE, TRUE),
+  ('시각장애인음성안내', 'spot', '열린관광',     TRUE, FALSE), -- 전문 시설 (후기 불가)
+  ('점자안내',           'spot', '열린관광',     TRUE, TRUE),
+  ('수어안내',           'spot', '열린관광',     TRUE, TRUE),
+  ('유모차대여',         'spot', '열린관광',     TRUE, TRUE),
+  ('수유실',             'spot', '열린관광',     TRUE, TRUE),
+
+  -- 반려동물
+  ('반려견동반',         'spot', '반려동물',     TRUE, TRUE),
+  ('소형견동반',         'spot', '반려동물',     TRUE, TRUE),
+  ('대형견가능',         'spot', '반려동물',     TRUE, TRUE),
+  ('반려견배변시설',     'spot', '반려동물',     TRUE, TRUE),
+  ('반려견놀이터',       'spot', '반려동물',     TRUE, TRUE),
+
+  -- 시설·편의
+  ('화장실',             'spot', '시설·편의',    TRUE, TRUE),
+  ('주차가능',           'spot', '시설·편의',    TRUE, TRUE),
+  ('식수대',             'spot', '시설·편의',    TRUE, TRUE),
+  ('벤치·쉼터',          'spot', '시설·편의',    TRUE, TRUE),
+  ('카페&식당',          'spot', '시설·편의',    TRUE, TRUE),
+
+  -- 분위기·테마
+  ('Odii음성해설',       'spot', '분위기·테마',  TRUE, FALSE), -- Odii 연동 전용 (후기 불가)
+  ('포토존',             'spot', '분위기·테마',  TRUE, TRUE),
+  ('전통·한옥',          'spot', '분위기·테마',  TRUE, TRUE),
+  ('낮그늘',             'spot', '분위기·테마',  TRUE, TRUE),
+  ('야경명소',           'spot', '분위기·테마',  TRUE, TRUE),
+  ('야간명소',           'spot', '분위기·테마',  TRUE, TRUE),
+  ('야간개방',           'spot', '분위기·테마',  TRUE, TRUE),
+  ('일출명소',           'spot', '분위기·테마',  TRUE, TRUE),
+  ('일몰명소',           'spot', '분위기·테마',  TRUE, TRUE),
+  ('문화/예술',          'spot', '분위기·테마',  TRUE, TRUE),
+  ('실시간축제',         'spot', '분위기·테마',  TRUE, FALSE), -- 실시간 연동 전용 (후기 불가)
+  ('역사유적',           'spot', '분위기·테마',  TRUE, TRUE),
+  ('벚꽃',               'spot', '분위기·테마',  FALSE, TRUE), -- 계절 태그 (봄 외 비활성)
+  ('단풍',               'spot', '분위기·테마',  FALSE, TRUE)  -- 계절 태그 (가을 외 비활성)
+ON CONFLICT (name, type) DO UPDATE SET
+  group_name    = EXCLUDED.group_name,
+  is_active     = EXCLUDED.is_active,
+  is_review_tag = EXCLUDED.is_review_tag;
+
 
