@@ -376,14 +376,25 @@ function inferSpotCategories(place = {}) {
   const categoryName = place.category_name || place.kakao_category_name || '';
   const lastCategory = getLastCategory(categoryName);
 
+  const cat1 = place.cat1 || '';
+  const cat2 = place.cat2 || (categoryName.startsWith('A') ? categoryName.slice(0, 5) : '');
+  const cat3 = place.cat3 || (categoryName.startsWith('A') ? categoryName : '');
+
   if (isExcludedKakaoPlace(place)) {
     return [];
   }
 
   const categories = [];
 
-  // 1. 산·등산로
-  if (['산', '오름', '산봉우리'].includes(lastCategory) || includesAny(placeName, ['불암산', '수락산', '봉의산', '삼악산', '산봉우리', '전망대', '정상', '고개'])) {
+  // 1. 산·등산로 (TourAPI: A01010400 산)
+  if (
+    cat3 === 'A01010400' ||
+    ['산', '오름', '산봉우리'].includes(lastCategory) ||
+    includesAny(placeName, [
+      '불암산', '수락산', '봉의산', '삼악산', '구봉산', '대룡산', '용화산', '검봉산', '금병산',
+      '북한산', '도봉산', '관악산', '인왕산', '아차산', '남산', '산봉우리', '전망대', '정상', '고개'
+    ])
+  ) {
     categories.push('산·등산로');
   }
   if (
@@ -394,49 +405,69 @@ function inferSpotCategories(place = {}) {
     categories.push('산·등산로');
   }
 
-  // 2. 숲·휴양림
-  if (['숲', '자연휴양림'].includes(lastCategory) || includesAny(placeName, ['경춘선숲길', '경춘선 숲길', '자연휴양림', '산림욕장', '치유의숲', '숲길'])) {
+  // 2. 숲·휴양림 (TourAPI: A01010600 자연휴양림, 숲체험)
+  if (
+    cat3 === 'A01010600' ||
+    ['숲', '자연휴양림'].includes(lastCategory) ||
+    includesAny(placeName, ['경춘선숲길', '경춘선 숲길', '자연휴양림', '휴양림', '산림욕장', '치유의숲', '숲체원', '숲체험', '숲길', '숲'])
+  ) {
     categories.push('숲·휴양림');
   }
 
-  // 3. 수목원·정원
-  if (['수목원,식물원', '국가정원'].includes(lastCategory) || includesAny(placeName, ['나비정원', '수목원', '식물원', '화목원', '정원', '제이드가든'])) {
+  // 3. 수목원·정원 (TourAPI: A01010700 수목원)
+  if (
+    cat3 === 'A01010700' ||
+    ['수목원,식물원', '국가정원'].includes(lastCategory) ||
+    includesAny(placeName, ['나비정원', '수목원', '식물원', '화목원', '정원', '제이드가든', '꽃밭'])
+  ) {
     categories.push('수목원·정원');
   }
 
-  // 4. 강·하천
-  if (['강', '하천'].includes(lastCategory) || includesAny(placeName, ['당현천', '중랑천', '공지천', '소양강', '한강', '천변', '수변공원'])) {
+  // 4. 강·하천 (TourAPI: A01011400 강, A01010800 폭포, A01010900 계곡)
+  if (
+    cat3 === 'A01011400' || cat3 === 'A01010800' || cat3 === 'A01010900' ||
+    ['강', '하천'].includes(lastCategory) ||
+    includesAny(placeName, ['당현천', '중랑천', '공지천', '소양강', '북한강', '한강', '천변', '수변공원', '폭포', '계곡'])
+  ) {
     categories.push('강·하천');
   }
 
-  // 5. 호수·저수지
-  if (['호수', '저수지', '연못'].includes(lastCategory) || includesAny(placeName, ['의암호', '소양호', '춘천호', '호수공원', '원터근린공원 연못'])) {
+  // 5. 호수·저수지 (TourAPI: A01011500 호수, A01011600 저수지, A01011700 소양호/댐)
+  if (
+    cat3 === 'A01011500' || cat3 === 'A01011600' || cat3 === 'A01011700' ||
+    ['호수', '저수지', '연못'].includes(lastCategory) ||
+    includesAny(placeName, ['의암호', '소양호', '춘천호', '호수공원', '원터근린공원 연못', '소양강댐', '호수', '저수지', '연못'])
+  ) {
     categories.push('호수·저수지');
   }
 
-  // 6. 공원·광장
-  if (['공원', '도시근린공원', '광장'].includes(lastCategory) || includesAny(placeName, ['공원', '근린공원', '생태공원', '마을마당', '광장'])) {
-    categories.push('공원·광장');
-  }
-
-  // 7. 역사·유적 (TourAPI A0201 연계)
+  // 6. 역사·유적 (TourAPI A0201 역사관광지 전체, A02050200 기념탑/비석/석탑)
   if (
+    cat2 === 'A0201' ||
     ['문화유적', '사찰', '성곽', '유적지', '왕릉'].includes(lastCategory) ||
-    includesAny(placeName, ['궁', '사찰', '청평사', '조계사', '성곽', '유적', '태릉', '강릉', '왕릉', '신숭겸', '생가', '사적지'])
+    includesAny(placeName, [
+      '궁', '사찰', '청평사', '조계사', '성곽', '유적', '태릉', '강릉', '왕릉', '신숭겸',
+      '생가', '사적지', '묘역', '충혼탑', '비석군', '석탑', '비석', '문인석', '처녀상'
+    ])
   ) {
     categories.push('역사·유적');
   }
 
-  // 8. 전시·문화공간 (TourAPI A0206 연계)
+  // 7. 전시·문화공간 (TourAPI A0206 문화시설 전체, A02030400 도예/체험관)
   if (
+    cat2 === 'A0206' ||
     ['박물관', '미술관', '문화시설', '전시관'].includes(lastCategory) ||
-    includesAny(placeName, ['박물관', '미술관', '문학관', '김유정문학촌', '애니메이션박물관', '천문우주과학관', '아트센터', '전시관', '서울시립북서울미술관'])
+    includesAny(placeName, [
+      '박물관', '미술관', '문학관', '김유정문학촌', '애니메이션박물관', '천문우주과학관',
+      '아트센터', '전시관', '서울시립북서울미술관', '도예', '기념관', '과학관'
+    ])
   ) {
     categories.push('전시·문화공간');
   }
 
-  // 9. 카페·맛집 (TourAPI A0502 연계)
+  // 8. 카페·맛집 (TourAPI A0502 음식점/카페)
   if (
+    cat1 === 'A05' || cat2 === 'A0502' ||
     ['카페', '디저트', '음식점', '한식', '전통찻집'].includes(lastCategory) ||
     includesAny(categoryName, ['카페', '음식점', '제과,베이커리']) ||
     includesAny(placeName, ['카페거리', '닭갈비', '막국수', '전통찻집', '베이커리', '공릉동 도깨비'])
@@ -444,12 +475,22 @@ function inferSpotCategories(place = {}) {
     categories.push('카페·맛집');
   }
 
-  // 10. 전통시장·로컬마켓 (TourAPI A0401 연계)
+  // 9. 전통시장·로컬마켓 (TourAPI A0401 시장/쇼핑)
   if (
+    cat1 === 'A04' || cat2 === 'A0401' ||
     ['전통시장', '재래시장', '시장'].includes(lastCategory) ||
     includesAny(placeName, ['풍물시장', '중앙시장', '도깨비시장', '공릉도깨비시장', '상계중앙시장', '전통시장', '5일장', '상점가'])
   ) {
     categories.push('전통시장·로컬마켓');
+  }
+
+  // 10. 공원·광장 (TourAPI A02020700 공원, A02020300 유원지, A02020200 테마공원 등)
+  if (
+    cat3 === 'A02020700' || cat3 === 'A02020300' || cat3 === 'A02020200' ||
+    ['공원', '도시근린공원', '광장'].includes(lastCategory) ||
+    includesAny(placeName, ['공원', '근린공원', '생태공원', '마을마당', '광장', '유원지', '레일파크', '출렁다리'])
+  ) {
+    categories.push('공원·광장');
   }
 
   // 기본 fallback: 공원·광장
@@ -575,9 +616,17 @@ function extractRegionFromAddress(addressOrText = '') {
     return { region: '춘천', sub_region: matchedSub };
   }
 
-  // 2. 서울 확인
+  // 2. 서울 확인 (1단계: '종로구', '노원구' 등 정확한 자치구 명칭 우선)
   for (const district of SEOUL_DISTRICTS) {
-    if (text.includes(district) || text.includes(district.replace('구', ''))) {
+    if (text.includes(district)) {
+      return { region: '서울', sub_region: district };
+    }
+  }
+
+  // 2단계: '구'가 생략된 경우 (예: '서울 강남', '서울 노원')
+  for (const district of SEOUL_DISTRICTS) {
+    const base = district.replace(/구$/, '');
+    if (base !== '중' && new RegExp(`(^|[\\s,])(${base})([\\s,]|\$)`).test(text)) {
       return { region: '서울', sub_region: district };
     }
   }

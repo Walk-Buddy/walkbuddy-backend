@@ -763,7 +763,7 @@ exports.getSpots = async (query) => {
         whereConditions.push(`(s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length} OR s.sub_region ILIKE $${queryValues.length})`);
     }
 
-    // 태그 ID 목록 검색 (UUID) — 열린관광 및 반려견동반 선택 시 하위 태그 자동 포함(Group Expansion)
+    // 태그 ID 목록 검색 (UUID) — 그룹 확장 없이 AND(교집합) 매칭
     if (tag_ids) {
         const tagIdList = (Array.isArray(tag_ids) ? tag_ids.join(',') : tag_ids)
             .split(',').map(t => t.trim()).filter(Boolean);
@@ -774,30 +774,20 @@ exports.getSpots = async (query) => {
         }
         if (tagIdList.length > 0) {
             queryValues.push(tagIdList); const tagIdx = queryValues.length;
+            queryValues.push(tagIdList.length); const countIdx = queryValues.length;
             whereConditions.push(`
                 s.spot_id IN (
                     SELECT tg.target_id FROM taggings tg
                     JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
-                    WHERE tg.target_type = 'spot' AND (
-                        tg.tag_id = ANY($${tagIdx}::UUID[])
-                        OR (
-                            t.group_name = '열린관광' AND EXISTS (
-                                SELECT 1 FROM tags t_p WHERE t_p.name = '열린관광' AND t_p.type = 'spot' AND t_p.tag_id = ANY($${tagIdx}::UUID[])
-                            )
-                        )
-                        OR (
-                            t.group_name = '반려동물' AND EXISTS (
-                                SELECT 1 FROM tags t_p WHERE t_p.name = '반려견동반' AND t_p.type = 'spot' AND t_p.tag_id = ANY($${tagIdx}::UUID[])
-                            )
-                        )
-                    )
+                    WHERE tg.target_type = 'spot' AND tg.tag_id = ANY($${tagIdx}::UUID[])
                     GROUP BY tg.target_id
+                    HAVING COUNT(DISTINCT tg.tag_id) = $${countIdx}
                 )
             `);
         }
     }
 
-    // 태그 이름(tag_name / tag_names) 검색 지원 — 열린관광 및 반려견동반 선택 시 하위 태그 자동 포함
+    // 태그 이름(tag_name / tag_names) 검색 지원 — 그룹 확장 없이 AND(교집합) 매칭
     const targetTagNames = tag_name || tag_names;
     if (targetTagNames) {
         const tagNameList = (Array.isArray(targetTagNames) ? targetTagNames.join(',') : targetTagNames)
@@ -808,17 +798,16 @@ exports.getSpots = async (query) => {
         if (tagNameList.length > 0) {
             queryValues.push(tagNameList);
             const tagIdx = queryValues.length;
+            queryValues.push(tagNameList.length);
+            const countIdx = queryValues.length;
             whereConditions.push(`
                 s.spot_id IN (
                     SELECT tg.target_id
                     FROM taggings tg
                     JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'spot' AND t.is_active = TRUE
-                    WHERE tg.target_type = 'spot' AND (
-                        t.name = ANY($${tagIdx}::TEXT[])
-                        OR ('열린관광' = ANY($${tagIdx}::TEXT[]) AND t.group_name = '열린관광')
-                        OR ('반려견동반' = ANY($${tagIdx}::TEXT[]) AND t.group_name = '반려동물')
-                    )
+                    WHERE tg.target_type = 'spot' AND t.name = ANY($${tagIdx}::TEXT[])
                     GROUP BY tg.target_id
+                    HAVING COUNT(DISTINCT t.name) >= $${countIdx}
                 )
             `);
         }
@@ -845,7 +834,7 @@ exports.getSpots = async (query) => {
         const spotsResult = await pool.query(
         `SELECT
             s.spot_id, s.name, s.address, s.categories, s.region, s.sub_region, s.recommend_pct,
-            s.barrier_free_info, s.is_night_tour,
+            s.barrier_free_info, s.pet_tour_info, s.is_night_tour,
             s.first_image,
             -- 후기 사진 폴백: 이 장소의 후기 중 사진이 있는 가장 최근 후기의 첫 사진 key
             (
@@ -935,7 +924,7 @@ exports.getSpotById = async (spotId) => {
             s.spot_id, s.name, s.address, s.categories, s.kakao_category_name,
             s.region, s.sub_region,
                         s.recommend_pct, s.source, s.content_place, s.content_history, s.content_tour,
-            s.barrier_free_info, s.is_night_tour,
+            s.barrier_free_info, s.pet_tour_info, s.is_night_tour,
             s.first_image,
             ST_X(s.location::GEOMETRY) AS x,
             ST_Y(s.location::GEOMETRY) AS y,
@@ -1255,32 +1244,22 @@ exports.searchSpots = async (query) => {
         )`);
     }
 
-    // 태그 ID 검색 — 열린관광 및 반려견동반 선택 시 하위 태그 자동 포함 & 다중 태그 OR 매칭 지원
+    // 태그 ID 검색 — 그룹 확장 없이 AND(교집합) 매칭
     if (tagIdList.length > 0) {
         queryValues.push(tagIdList); const tagIdx = queryValues.length;
+        queryValues.push(tagIdList.length); const countIdx = queryValues.length;
         whereConditions.push(`
             s.spot_id IN (
                 SELECT tg.target_id FROM taggings tg
                 JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
-                WHERE tg.target_type = 'spot' AND (
-                    tg.tag_id = ANY($${tagIdx}::UUID[])
-                    OR (
-                        t.group_name = '열린관광' AND EXISTS (
-                            SELECT 1 FROM tags t_p WHERE t_p.name = '열린관광' AND t_p.type = 'spot' AND t_p.tag_id = ANY($${tagIdx}::UUID[])
-                        )
-                    )
-                    OR (
-                        t.group_name = '반려동물' AND EXISTS (
-                            SELECT 1 FROM tags t_p WHERE t_p.name = '반려견동반' AND t_p.type = 'spot' AND t_p.tag_id = ANY($${tagIdx}::UUID[])
-                        )
-                    )
-                )
+                WHERE tg.target_type = 'spot' AND tg.tag_id = ANY($${tagIdx}::UUID[])
                 GROUP BY tg.target_id
+                HAVING COUNT(DISTINCT tg.tag_id) = $${countIdx}
             )
         `);
     }
 
-    // 태그 이름(tag_name / tag_names) 검색 지원
+    // 태그 이름(tag_name / tag_names) 검색 지원 — 그룹 확장 없이 AND(교집합) 매칭
     const searchTargetTagNames = query.tag_name || query.tag_names;
     if (searchTargetTagNames) {
         const tagNameList = (Array.isArray(searchTargetTagNames) ? searchTargetTagNames.join(',') : searchTargetTagNames)
@@ -1291,17 +1270,16 @@ exports.searchSpots = async (query) => {
         if (tagNameList.length > 0) {
             queryValues.push(tagNameList);
             const tagIdx = queryValues.length;
+            queryValues.push(tagNameList.length);
+            const countIdx = queryValues.length;
             whereConditions.push(`
                 s.spot_id IN (
                     SELECT tg.target_id
                     FROM taggings tg
                     JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'spot' AND t.is_active = TRUE
-                    WHERE tg.target_type = 'spot' AND (
-                        t.name = ANY($${tagIdx}::TEXT[])
-                        OR ('열린관광' = ANY($${tagIdx}::TEXT[]) AND t.group_name = '열린관광')
-                        OR ('반려견동반' = ANY($${tagIdx}::TEXT[]) AND t.group_name = '반려동물')
-                    )
+                    WHERE tg.target_type = 'spot' AND t.name = ANY($${tagIdx}::TEXT[])
                     GROUP BY tg.target_id
+                    HAVING COUNT(DISTINCT t.name) >= $${countIdx}
                 )
             `);
         }
