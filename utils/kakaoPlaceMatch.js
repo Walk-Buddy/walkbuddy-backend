@@ -50,27 +50,38 @@ function isSamePlaceName(a, b) {
   return !(FACILITY_SUFFIX_PATTERN.test(extra) || /^\d+$/.test(extra));
 }
 
-/**
- * 좌표 주변에서 이름이 같은 카카오 장소를 찾는다. 없으면 null.
- * 이름이 정확히 같은 곳을 우선하고, 그다음 좌표에서 가까운 곳.
- */
-async function findKakaoPlaceNear({ name, x, y, radius = 300, kakaoKey = process.env.KAKAO_REST_API_KEY }) {
-  if (!kakaoKey || !name || !Number.isFinite(Number(x)) || !Number.isFinite(Number(y))) return null;
+// 댐·호수·산처럼 넓은 장소는 좌표가 멀 수 있어, 이름이 정확히 같은 곳만 이 반경까지 찾는다.
+const EXACT_MATCH_RADIUS_M = 2000;
 
-  const query = String(name).replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim();
+async function searchKakao(query, x, y, radius, kakaoKey) {
   const { data } = await axios.get(KAKAO_KEYWORD_URL, {
     headers: { Authorization: `KakaoAK ${kakaoKey}` },
     params: { query, x, y, radius, sort: 'distance', size: 15 },
     timeout: 5000,
   }).catch(() => ({ data: null }));
+  return (data?.documents || []).filter((doc) => !EXCLUDED_KAKAO_CATEGORY_PATTERN.test(String(doc.category_name || '')));
+}
 
-  const matches = (data?.documents || []).filter((doc) => (
-    !EXCLUDED_KAKAO_CATEGORY_PATTERN.test(String(doc.category_name || ''))
-    && isSamePlaceName(name, doc.place_name)
-  ));
-  return matches.find((doc) => normalizePlaceName(doc.place_name) === normalizePlaceName(name))
-    || matches[0]
-    || null;
+/**
+ * 좌표 주변에서 이름이 같은 카카오 장소를 찾는다. 없으면 null.
+ *  1) radius 안에서 이름이 정확히 같은 곳
+ *  2) 없으면 2km 안에서 이름이 정확히 같은 곳 (예: 구봉산 → "구봉산전망대카페거리" 대신 "구봉산")
+ *  3) 없으면 radius 안에서 이름이 포함 관계인 가장 가까운 곳
+ */
+async function findKakaoPlaceNear({ name, x, y, radius = 300, kakaoKey = process.env.KAKAO_REST_API_KEY }) {
+  if (!kakaoKey || !name || !Number.isFinite(Number(x)) || !Number.isFinite(Number(y))) return null;
+
+  const query = String(name).replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim();
+  const isExact = (doc) => normalizePlaceName(doc.place_name) === normalizePlaceName(name);
+
+  const nearby = await searchKakao(query, x, y, radius, kakaoKey);
+  const exactNearby = nearby.find(isExact);
+  if (exactNearby) return exactNearby;
+
+  const exactWide = (await searchKakao(query, x, y, Math.max(radius, EXACT_MATCH_RADIUS_M), kakaoKey)).find(isExact);
+  if (exactWide) return exactWide;
+
+  return nearby.find((doc) => isSamePlaceName(name, doc.place_name)) || null;
 }
 
 module.exports = {
