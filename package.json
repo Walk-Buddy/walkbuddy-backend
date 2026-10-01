@@ -14,6 +14,8 @@
     "generate:durunubi-spot-mappings": "node scripts/generate-durunubi-spot-mappings.js",
     "import:durunubi": "node scripts/import-durunubi-courses.js",
     "import:tourapi": "node scripts/import-tourapi-spots.js",
+    "sync:pet": "node scripts/sync-pet-spots.js",
+    "sync:barrier-free": "node scripts/sync-barrier-free-spots.js",
     "seed:prewalk-course": "node scripts/create-prewalk-course-via-api.js",
     "seed:prewalk-reviews": "node scripts/create-prewalk-course-via-api.js --reviews-only"
   },

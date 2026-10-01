@@ -626,20 +626,14 @@ exports.getCourses = async (query, currentUserId) => {
       conditions.push(`(
         c.sub_region ILIKE $${params.length}
         OR c.region ILIKE $${params.length}
-        OR c.name ILIKE $${params.length}
-        OR c.description ILIKE $${params.length}
       )`);
     }
   }
 
-  // 세부 권역 필터
+  // 세부 권역 필터 — sub_region 컬럼만 매칭 (name/description 매칭 시 다른 구 코스가 혼입됨)
   if (normalizedSubRegion && !['전체', 'all'].includes(normalizedSubRegion.toLowerCase()) && normalizedSubRegion !== '전체') {
     params.push(`%${normalizedSubRegion}%`);
-    conditions.push(`(
-      c.sub_region ILIKE $${params.length}
-      OR c.name ILIKE $${params.length}
-      OR c.description ILIKE $${params.length}
-    )`);
+    conditions.push(`c.sub_region ILIKE $${params.length}`);
   }
 
   // 카테고리 필터

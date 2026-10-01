@@ -570,8 +570,9 @@ exports.getBarrierFreeInfo = async (contentId) => {
 /**
  * 3-1. 실시간 지역별 열린관광(무장애 인증) 스팟 목록 조회 (areaBasedList2)
  */
-exports.getBarrierFreeSpots = async ({ region, contentTypeId, page = 1, limit = 10 } = {}) => {
-  const target = resolveRegion(region) || TARGET_REGIONS.CHUNCHEON;
+exports.getBarrierFreeSpots = async ({ region, sub_region, contentTypeId, page = 1, limit = 10 } = {}) => {
+  const targetRegionInput = sub_region || region;
+  const target = resolveRegion(targetRegionInput) || resolveRegion(region) || TARGET_REGIONS.CHUNCHEON;
 
   const params = {
     areaCode: target.tourApi.areaCode,
@@ -618,14 +619,14 @@ exports.getBarrierFreeSpots = async ({ region, contentTypeId, page = 1, limit = 
 /**
  * 3-2. 실시간 열린관광(무장애) 키워드 검색 (searchKeyword2)
  */
-exports.searchBarrierFreePlaces = async ({ region, keyword, page = 1, limit = 10 } = {}) => {
+exports.searchBarrierFreePlaces = async ({ region, sub_region, keyword, page = 1, limit = 10 } = {}) => {
   if (!keyword || !keyword.trim()) {
     const err = new Error("keyword는 필수입니다.");
     err.status = 400;
     throw err;
   }
 
-  const target = resolveRegion(region);
+  const target = resolveRegion(sub_region || region);
   const params = {
     keyword: keyword.trim(),
     pageNo: page,
@@ -895,14 +896,14 @@ exports.getTourSpots = async ({
 /**
  * 5. 실시간 키워드 관광지 검색 (searchKeyword2)
  */
-exports.searchTourPlaces = async ({ region, keyword, page = 1, limit = 10 } = {}) => {
+exports.searchTourPlaces = async ({ region, sub_region, keyword, page = 1, limit = 10 } = {}) => {
   if (!keyword || !keyword.trim()) {
     const err = new Error("keyword는 필수입니다.");
     err.status = 400;
     throw err;
   }
 
-  const target = resolveRegion(region);
+  const target = resolveRegion(sub_region || region);
   const params = {
     keyword: keyword.trim(),
     pageNo: page,
@@ -1147,8 +1148,9 @@ exports.getPetTourDetail = async (contentId) => {
  * 10. 실시간 지역별 반려동물 동반 관광지 목록 조회 (KorPetTourService2 - areaBasedList2)
  * LBS 미신고 안전: 스마트폰 실시간 GPS 대신 서울(25개 구) / 춘천시 지역코드만 사용
  */
-exports.getPetTourSpots = async ({ region, contentTypeId, page = 1, limit = 10 } = {}) => {
-  const target = resolveRegion(region) || TARGET_REGIONS.CHUNCHEON;
+exports.getPetTourSpots = async ({ region, sub_region, contentTypeId, page = 1, limit = 10 } = {}) => {
+  const targetRegionInput = sub_region || region;
+  const target = resolveRegion(targetRegionInput) || resolveRegion(region) || TARGET_REGIONS.CHUNCHEON;
 
   const params = {
     areaCode: target.tourApi.areaCode,
@@ -1241,14 +1243,14 @@ exports.getPetTourSpots = async ({ region, contentTypeId, page = 1, limit = 10 }
 /**
  * 11. 실시간 반려동물 동반 관광지 키워드 검색 (KorPetTourService2 - searchKeyword2)
  */
-exports.searchPetTourPlaces = async ({ region, keyword, contentTypeId, page = 1, limit = 10 } = {}) => {
+exports.searchPetTourPlaces = async ({ region, sub_region, keyword, contentTypeId, page = 1, limit = 10 } = {}) => {
   if (!keyword || !keyword.trim()) {
     const err = new Error("keyword는 필수입니다.");
     err.status = 400;
     throw err;
   }
 
-  const target = resolveRegion(region);
+  const target = resolveRegion(sub_region || region);
   const params = {
     keyword: keyword.trim(),
     pageNo: page,
