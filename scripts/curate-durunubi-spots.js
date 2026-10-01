@@ -69,13 +69,22 @@ async function fetchDurunubiCourses() {
 
 async function fetchGpxPoints(gpxPath) {
   const { data } = await axios.get(gpxPath, { responseType: 'text', timeout: 30000 });
-  const points = [];
-  const pointRegex = /<(?:trkpt|rtept|wpt)\b[^>]*\blat=["']([-0-9.]+)["'][^>]*\blon=["']([-0-9.]+)["'][^>]*>/gi;
-  let match;
-  while ((match = pointRegex.exec(String(data))) !== null) {
-    points.push({ lat: Number(match[1]), lng: Number(match[2]) });
+  // IMPORTANT: 같은 경로를 트랙(trkpt)과 웨이포인트(wpt)로 두 번 담은 GPX가 있어, 셋을 이어 붙이면 경로가 앞뒤로 오간다.
+  // 트랙이 있으면 트랙만, 없으면 루트, 그것도 없으면 웨이포인트를 쓴다. (import-durunubi-courses.js 와 같은 기준)
+  const read = (tag) => {
+    const points = [];
+    const pointRegex = new RegExp(`<${tag}\\b[^>]*\\blat=["']([-0-9.]+)["'][^>]*\\blon=["']([-0-9.]+)["'][^>]*>`, "gi");
+    let match;
+    while ((match = pointRegex.exec(String(data))) !== null) {
+      points.push({ lat: Number(match[1]), lng: Number(match[2]) });
+    }
+    return points;
+  };
+  for (const tag of ["trkpt", "rtept", "wpt"]) {
+    const points = read(tag);
+    if (points.length >= 2) return points;
   }
-  return points;
+  return [];
 }
 
 // 경로 근처 계산용 평면 근사 (수십 km 범위에서 오차 무시 가능)
@@ -211,7 +220,8 @@ function buildCurated(candidatesPaths, picksPath) {
     const spots = coursePicks.map((pick) => {
       const candidate = byPlaceId.get(String(pick.kakaoPlaceId));
       if (!candidate) throw new Error(`${courseCandidates.courseName}: 후보에 없는 kakaoPlaceId ${pick.kakaoPlaceId}`);
-      if (!candidate.categories?.length) throw new Error(`${candidate.canonicalName}: 앱 카테고리를 추론할 수 없음`);
+      const categories = pick.categories?.length ? pick.categories : candidate.categories;
+      if (!categories?.length) throw new Error(`${candidate.canonicalName}: 앱 카테고리를 추론할 수 없음 (picks 에 categories 지정)`);
       return {
         sourceName: pick.sourceName,
         status: pick.status === 'nearby' ? 'nearby' : 'mapped',
@@ -222,7 +232,7 @@ function buildCurated(candidatesPaths, picksPath) {
           kakaoPlaceId: candidate.kakaoPlaceId,
           canonicalName: pick.canonicalName || candidate.canonicalName,
           kakaoCategoryName: candidate.kakaoCategoryName,
-          categories: candidate.categories,
+          categories,
           address: candidate.address,
           x: candidate.x,
           y: candidate.y,

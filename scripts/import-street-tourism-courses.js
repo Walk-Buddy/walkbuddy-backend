@@ -97,6 +97,8 @@ async function fetchAllStreetTourismItems() {
 // ──────────────────────────────────────────────────────────
 // 2. 지역 및 권역 필터링 (서울, 춘천)
 // ──────────────────────────────────────────────────────────
+// IMPORTANT: 경유 지점 설명(coursInfo)이나 코스명에 "서울"이 들어간 경기도 코스(예: 고양누리길 "서울시계")가
+// 서울 코스로 섞이지 않도록, 관리 기관 이름과 출발·도착 주소로만 지역을 판정한다.
 function filterTargetItems(items) {
   return items.filter((item) => {
     const text = [
@@ -106,13 +108,16 @@ function filterTargetItems(items) {
       item.beginLnmadr,
       item.endRdnmadr,
       item.endLnmadr,
-      item.stretNm,
-      item.coursInfo,
     ]
       .filter(Boolean)
       .join(' ');
 
-    const isSeoul = text.includes('서울');
+    // 관리 기관이 서울(예: 서울특별시 송파구)이면 서울 코스. 관리 기관 정보가 없을 때만 출발 주소로 본다.
+    // (고양누리길 2코스는 출발 주소가 서울이지만 고양시 코스)
+    // (송파구 역사여행삼전도길처럼 도착점이 경기도 남한산성인 서울 코스도 있다)
+    const startAddress = `${item.beginRdnmadr || ''} ${item.beginLnmadr || ''}`.trim();
+    const institution = String(item.insttNm || '').trim();
+    const isSeoul = institution ? /^서울/.test(institution) : /^서울/.test(startAddress);
     const isChuncheon = text.includes('춘천');
 
     if (targetRegionArg === 'seoul') return isSeoul;
@@ -837,8 +842,9 @@ async function main() {
       const lengthRatio = officialLengthM ? route.distanceM / officialLengthM : null;
       const lengthOutOfRange = lengthRatio != null
         && (lengthRatio < OFFICIAL_LENGTH_RATIO_RANGE[0] || lengthRatio > OFFICIAL_LENGTH_RATIO_RANGE[1]);
-      // 큐레이션으로 지점을 확인한 코스는 원본이 틀린 경우(예: 3.1운동길B 원본 1.0km)라 T맵 값을 유지한다.
-      const isCurated = Boolean(CURATED_COURSES[sourceId]);
+      // 원본 거리가 틀린 것으로 확인된 코스(큐레이션 trustRoute, 예: 3.1운동길B 원본 1.0km)는 T맵 값을 유지한다.
+      // IMPORTANT: 큐레이션된 코스 전체에 적용하면 봄내길 같은 산길 코스도 T맵 거리를 써서 틀려진다.
+      const isCurated = Boolean(CURATED_COURSES[sourceId]?.trustRoute);
       const isTrailCourse = TRAIL_COURSE_PATTERN.test(`${courseName} ${item.coursInfo || ''}`);
       const useOfficial = !isCurated && Boolean(officialLengthM)
         && (isTrailCourse || matchedRatio < MIN_MATCHED_STOP_RATIO || lengthOutOfRange);

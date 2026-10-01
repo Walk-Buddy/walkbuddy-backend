@@ -36,8 +36,48 @@ const skipExisting = args.includes('--skip-existing');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// 목욕·찜질 시설 이름 ('스파이더' 같은 이름은 제외하지 않는다)
-const BATH_FACILITY_PATTERN = /찜질|사우나|온천|불가마|목욕탕|스파(?!이)/;
+function isKoreaCoordinate(lat, lng) {
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= 33 && lat <= 39 && lng >= 124 && lng <= 132;
+}
+
+// 카카오 장소 검색으로 좌표 찾기: 이름이 같은 장소만 (주소가 비어 있는 장소용)
+async function findPlaceByName(title, regionName) {
+  if (!title || !process.env.KAKAO_REST_API_KEY) return null;
+  const norm = (v) => String(v || '').replace(/\([^)]*\)/g, '').replace(/\s+/g, '');
+  try {
+    const { data } = await axios.get('https://dapi.kakao.com/v2/local/search/keyword.json', {
+      headers: { Authorization: `KakaoAK ${process.env.KAKAO_REST_API_KEY}` },
+      params: { query: `${regionName} ${norm(title)}`, size: 5 },
+      timeout: 5000,
+    });
+    const doc = (data.documents || []).find((d) => norm(d.place_name) === norm(title)
+      && String(d.address_name || '').startsWith(regionName === '춘천' ? '강원' : regionName));
+    const point = doc ? { lat: Number(doc.y), lng: Number(doc.x) } : null;
+    return point && isKoreaCoordinate(point.lat, point.lng) ? point : null;
+  } catch {
+    return null;
+  }
+}
+
+// 카카오 주소 검색으로 좌표 찾기 (TourAPI 좌표가 잘못된 장소용)
+async function geocodeAddress(address) {
+  if (!address || !process.env.KAKAO_REST_API_KEY) return null;
+  try {
+    const { data } = await axios.get('https://dapi.kakao.com/v2/local/search/address.json', {
+      headers: { Authorization: `KakaoAK ${process.env.KAKAO_REST_API_KEY}` },
+      params: { query: address },
+      timeout: 5000,
+    });
+    const doc = data.documents?.[0];
+    const point = doc ? { lat: Number(doc.y), lng: Number(doc.x) } : null;
+    return point && isKoreaCoordinate(point.lat, point.lng) ? point : null;
+  } catch {
+    return null;
+  }
+}
+
+// 목욕·찜질 시설 이름 ('스파이더', '에스파스 루이비통' 같은 이름은 제외하지 않는다)
+const BATH_FACILITY_PATTERN = /찜질|사우나|온천|불가마|목욕탕|(?<!에)스파(?![이스])/;
 
 // ──────────────────────────────────────────────────────────
 // 2. 서비스 키 및 API 설정
@@ -515,14 +555,21 @@ async function main() {
           if (done.length) continue;
         }
 
-        const lng = Number(item.mapx);
-        const lat = Number(item.mapy);
+        let lng = Number(item.mapx);
+        let lat = Number(item.mapy);
         const title = (item.title || '').trim();
         const address = (item.addr1 || '') + (item.addr2 ? ` ${item.addr2}` : '');
 
-        // 유효하지 않은 좌표 건너뜀
-        if (!Number.isFinite(lng) || !Number.isFinite(lat) || lng === 0 || lat === 0) {
-          continue;
+        // IMPORTANT: TourAPI 좌표가 한국 밖으로 잘못 들어온 장소가 있다 (서울책보고 등이 19.69,117.99).
+        // 그대로 저장하면 지도·반경 검색에서 사라지므로 주소로 좌표를 다시 찾고, 못 찾으면 건너뛴다.
+        if (!isKoreaCoordinate(lat, lng)) {
+          const geocoded = await geocodeAddress(item.addr1 || address) || await findPlaceByName(title, target.name);
+          if (!geocoded) {
+            console.log(`   [제외] 좌표 오류·주소와 이름으로도 못 찾음: ${title} (${item.mapy}, ${item.mapx})`);
+            continue;
+          }
+          console.log(`   [좌표 보정] ${title}: (${item.mapy}, ${item.mapx}) → (${geocoded.lat}, ${geocoded.lng})`);
+          ({ lat, lng } = geocoded);
         }
 
         // 산책 장소가 아닌 목욕·찜질 시설은 제외 (예: 월드온천24)
