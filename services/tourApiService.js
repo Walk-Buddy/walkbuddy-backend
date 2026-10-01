@@ -947,14 +947,14 @@ exports.getPhotosByKeyword = async (keyword, limit = 10) => {
     throw err;
   }
 
-  const cacheKey = `PhotoGalleryService1:galleryList1:${keyword.trim()}:${limit}`;
+  const cacheKey = `PhotoGalleryService1:gallerySearchList1:${keyword.trim()}:${limit}`;
   return tourCache.swr(cacheKey, async () => {
     const serviceKey = getServiceKey();
     if (!serviceKey) {
       throw new Error("TOURAPI_SERVICE_KEY 환경변수가 설정되지 않았습니다.");
     }
 
-    const url = new URL(`${PHOTO_BASE_URL}/galleryList1`);
+    const url = new URL(`${PHOTO_BASE_URL}/gallerySearchList1`);
     url.searchParams.append("serviceKey", serviceKey);
     url.searchParams.append("MobileOS", DEFAULT_MOBILE_OS);
     url.searchParams.append("MobileApp", DEFAULT_MOBILE_APP);
@@ -970,20 +970,20 @@ exports.getPhotosByKeyword = async (keyword, limit = 10) => {
       const header = data?.response?.header;
       if (header?.resultCode && header.resultCode !== "0000") {
         if (header.resultCode === "03") {
-          trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "ok", resultCode: "03", message: "결과 없음", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+          trafficLog.record({ api: "PhotoGalleryService1", pathname: "gallerySearchList1", params: _params, status: "ok", resultCode: "03", message: "결과 없음", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
           return [];
         }
         const err = new Error(header.resultMsg || "관광사진 API 호출 실패");
         err.code = header.resultCode;
         err.status = 502;
-        trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "error", resultCode: header.resultCode, message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+        trafficLog.record({ api: "PhotoGalleryService1", pathname: "gallerySearchList1", params: _params, status: "error", resultCode: header.resultCode, message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
         throw err;
       }
 
       const item = data?.response?.body?.items?.item;
       const rawItems = !item ? [] : Array.isArray(item) ? item : [item];
 
-      trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "ok", resultCode: header?.resultCode || "0000", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+      trafficLog.record({ api: "PhotoGalleryService1", pathname: "gallerySearchList1", params: _params, status: "ok", resultCode: header?.resultCode || "0000", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
 
       return rawItems.map((img) => ({
         thumbnail: img.galWebImageUrl || img.galThumbnailImage || null,
@@ -992,7 +992,7 @@ exports.getPhotosByKeyword = async (keyword, limit = 10) => {
       }));
     } catch (err) {
       if (err.status) throw err;
-      trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "error", message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+      trafficLog.record({ api: "PhotoGalleryService1", pathname: "gallerySearchList1", params: _params, status: "error", message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
       console.error("[PhotoGallery API 오류]", err.message);
       return [];
     }
@@ -1023,25 +1023,72 @@ exports.getSpotPhotos = async (contentId, spotName) => {
         return { source: "detailImage2", photos };
       }
     } catch (err) {
-      console.error("[detailImage2 실패, galleryList1으로 fallback]", err.message);
+      console.error("[detailImage2 실패, gallerySearchList1으로 fallback]", err.message);
     }
   }
 
   if (spotName) {
     const photos = await exports.getPhotosByKeyword(spotName);
-    return { source: "galleryList1", photos };
+    return { source: "gallerySearchList1", photos };
   }
 
   return { source: null, photos: [] };
 };
 
 /**
- * 8. 코스 사진 조회 (galleryList1 키워드 검색)
+ * 8. 코스 사진 조회 (관광사진갤러리 gallerySearchList1 키워드 검색 + 경유지 스팟 폴백)
  */
-exports.getCoursePhotos = async (courseName) => {
-  if (!courseName) return { source: null, photos: [] };
-  const photos = await exports.getPhotosByKeyword(courseName);
-  return { source: "galleryList1", photos };
+exports.getCoursePhotos = async (courseName, spotNames = []) => {
+  if (!courseName && (!spotNames || spotNames.length === 0)) {
+    return { source: null, photos: [] };
+  }
+
+  const photos = [];
+  const seenUrls = new Set();
+
+  const addPhotos = (items) => {
+    for (const img of items) {
+      const url = img.original || img.thumbnail;
+      if (url && !seenUrls.has(url)) {
+        seenUrls.add(url);
+        photos.push(img);
+      }
+    }
+  };
+
+  // 1. 코스 전체 이름으로 검색 (예: "해파랑길 1코스")
+  if (courseName) {
+    const coursePhotos = await exports.getPhotosByKeyword(courseName, 5);
+    addPhotos(coursePhotos);
+
+    // 2. 검색 결과가 없으면 코스 기본 명칭으로 2차 검색 (예: "해파랑길 1코스" -> "해파랑길")
+    if (photos.length < 3) {
+      const baseName = courseName
+        .replace(/\s*\d+([코구]스|구간|길).*$/, '')
+        .replace(/\s*\(.*?\)/, '')
+        .trim();
+      if (baseName && baseName !== courseName && baseName.length >= 2) {
+        const basePhotos = await exports.getPhotosByKeyword(baseName, 5);
+        addPhotos(basePhotos);
+      }
+    }
+  }
+
+  // 3. 코스 자체 사진이 부족하고 경유지 스팟 목록이 있는 경우 각 스팟별 대표 사진 검색 연동
+  if (photos.length < 5 && Array.isArray(spotNames) && spotNames.length > 0) {
+    for (const spotName of spotNames.slice(0, 5)) {
+      if (!spotName || spotName.length < 2) continue;
+      try {
+        const spotPhotos = await exports.getPhotosByKeyword(spotName, 3);
+        addPhotos(spotPhotos);
+        if (photos.length >= 8) break;
+      } catch (err) {
+        // 개별 스팟 사진 조회 실패 무시
+      }
+    }
+  }
+
+  return { source: "gallerySearchList1", photos: photos.slice(0, 10) };
 };
 
 /**

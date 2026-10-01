@@ -324,6 +324,11 @@ function buildCourseDetailDescription(course) {
   return {
     description: sections.summary.join('\n') || sections.content || cleanText(course.description),
     description_sections: sections,
+    summary: sections.summary.length ? sections.summary.join('\n') : null,
+    contents: sections.content || null,
+    tour_info: sections.tour_info.length ? sections.tour_info.join('\n') : null,
+    traveler_info: sections.traveler_info.length ? sections.traveler_info.join('\n') : null,
+    stamp_location: sections.stamp_location || null,
   };
 }
 

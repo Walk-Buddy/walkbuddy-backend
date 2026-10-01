@@ -339,16 +339,70 @@ async function ensureCourseTag(client) {
   return rows[0].tag_id;
 }
 
+const PROV_MAP = {
+  '서울': '서울', '서울특별시': '서울',
+  '부산': '부산', '부산광역시': '부산',
+  '대구': '대구', '대구광역시': '대구',
+  '인천': '인천', '인천광역시': '인천',
+  '광주': '광주', '광주광역시': '광주',
+  '대전': '대전', '대전광역시': '대전',
+  '울산': '울산', '울산광역시': '울산',
+  '세종': '세종', '세종특별자치시': '세종',
+  '경기': '경기', '경기도': '경기',
+  '강원': '강원', '강원도': '강원', '강원특별자치도': '강원',
+  '충북': '충북', '충청북도': '충북',
+  '충남': '충남', '충청남도': '충남',
+  '전북': '전북', '전라북도': '전북', '전북특별자치도': '전북',
+  '전남': '전남', '전라남도': '전남',
+  '경북': '경북', '경상북도': '경북',
+  '경남': '경남', '경상남도': '경남',
+  '제주': '제주', '제주도': '제주', '제주특별자치도': '제주',
+};
+
+function extractRegionFromSigun(sigun, points, name) {
+  const text = String(sigun || '').trim();
+  const parts = text.split(/\s+/);
+  const prov = parts[0] || '';
+  const dist = parts[1] || null;
+
+  if (prov && PROV_MAP[prov]) {
+    return {
+      region: PROV_MAP[prov],
+      sub_region: dist,
+    };
+  }
+
+  const regionInfo = inferRegionFromLocation({
+    lat: points[0]?.lat,
+    lng: points[0]?.lng,
+    address: `${sigun} ${name}`,
+  });
+
+  return {
+    region: regionInfo.region || '서울',
+    sub_region: regionInfo.sub_region || null,
+  };
+}
+
 async function insertWaypoints(client, courseId, points, spotWaypoints = []) {
-  const lastPointIndex = Math.max(1, points.length - 1);
-  const pinRows = points.map((point, index) => ({
-    type: 'pin',
-    progress: index / lastPointIndex,
-    spotId: null,
-    lat: point.lat,
-    lng: point.lng,
-  }));
-  const spotRows = spotWaypoints
+  const startPoint = points[0];
+  const endPoint = points[points.length - 1];
+
+  const rows = [];
+
+  // 1. 출발점 (핀)
+  if (startPoint) {
+    rows.push({
+      type: 'pin',
+      progress: 0,
+      spotId: null,
+      lat: startPoint.lat,
+      lng: startPoint.lng,
+    });
+  }
+
+  // 2. 중간 등록된 경유지 스팟들
+  const validSpots = (spotWaypoints || [])
     .filter((spot) => spot.spotId && Number.isFinite(spot.routeProgress))
     .map((spot) => ({
       type: 'spot',
@@ -357,10 +411,23 @@ async function insertWaypoints(client, courseId, points, spotWaypoints = []) {
       lat: null,
       lng: null,
     }));
-  const rows = [...pinRows, ...spotRows].sort((a, b) => (
-    a.progress - b.progress
-    || (a.type === 'spot' ? -1 : 1)
-  ));
+
+  rows.push(...validSpots);
+
+  // 3. 도착점 (핀)
+  if (endPoint && (endPoint.lat !== startPoint?.lat || endPoint.lng !== startPoint?.lng || rows.length === 1)) {
+    rows.push({
+      type: 'pin',
+      progress: 1,
+      spotId: null,
+      lat: endPoint.lat,
+      lng: endPoint.lng,
+    });
+  }
+
+  // 정렬: routeProgress 순서 (출발 0 -> 경유지들 -> 도착 1)
+  rows.sort((a, b) => a.progress - b.progress || (a.type === 'pin' ? -1 : 1));
+
   const seqs = rows.map((_, index) => index + 1);
   const types = rows.map((row) => row.type);
   const spotIds = rows.map((row) => row.spotId);
@@ -539,11 +606,7 @@ async function importCourse(client, item, ownerId, tagId) {
   const description = buildDescription(item);
 
   const sigun = pick(item, ['sigun']) || '';
-  const regionInfo = inferRegionFromLocation({
-    lat: points[0]?.lat,
-    lng: points[0]?.lng,
-    address: `${sigun} ${name}`,
-  });
+  const regionInfo = extractRegionFromSigun(sigun, points, name);
   const region = regionInfo.region || '서울';
   const subRegion = regionInfo.sub_region || null;
 

@@ -88,7 +88,7 @@ exports.deleteCourse = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// 코스 사진 조회 (관광사진 API - galleryList1 키워드 검색)
+// 코스 사진 조회 (관광사진 API - gallerySearchList1 키워드 검색 + 경유지 스팟 연동)
 exports.getCoursePhotos = async (req, res, next) => {
   try {
     const { course_id } = req.params;
@@ -104,7 +104,18 @@ exports.getCoursePhotos = async (req, res, next) => {
     }
 
     const { name } = rows[0];
-    const result = await tourApiService.getCoursePhotos(name);
+
+    // 코스 경유지 스팟 이름들 조회
+    const { rows: waypointSpots } = await pool.query(
+      `SELECT DISTINCT s.name
+       FROM course_waypoints cw
+       JOIN spots s ON s.spot_id = cw.spot_id
+       WHERE cw.course_id = $1 AND cw.type = 'spot' AND s.name IS NOT NULL`,
+      [course_id]
+    );
+    const spotNames = waypointSpots.map((r) => r.name);
+
+    const result = await tourApiService.getCoursePhotos(name, spotNames);
 
     return res.json({ success: true, course_id, course_name: name, ...result });
   } catch (err) { next(err); }
