@@ -52,7 +52,15 @@ exports.searchSpots = async (req, res, next) => {
 
 exports.getAiContents = async (req, res, next) => {
     try {
-        const result = await aiContentService.getAiContents(req.params.spot_id);
+        // ?types=tour 처럼 필요한 해설 테마만 요청할 수 있다. (캐시가 없는 장소는 테마마다 AI 생성이 필요해 3종 전부는 느림)
+        const VALID_TYPES = ['place', 'history', 'tour'];
+        const types = String(req.query.types || '')
+            .split(',')
+            .map((t) => (t.trim() === 'tourism' ? 'tour' : t.trim()))
+            .filter((t) => VALID_TYPES.includes(t));
+        const result = types.length
+            ? await aiContentService.getAiContentsByTypes(req.params.spot_id, [...new Set(types)])
+            : await aiContentService.getAiContents(req.params.spot_id);
         return res.json({ success: true, ...result });
     } catch (err) { next(err); }
 };

@@ -282,6 +282,7 @@ CREATE TABLE spots (
     -- 사용자가 카카오 검색 결과에서 장소를 선택했을 때,
     -- 같은 장소가 spots에 중복 INSERT 되지 않도록 판단하는 기준
     -- 관리자 직접 등록 장소는 카카오 ID가 없을 수 있으므로 NULL 허용
+    -- 실제 카카오 번호(숫자)만 허용 (chk_spots_kakao_place_id). TourAPI 번호는 tour_content_id 에 넣는다
 
 
     name                VARCHAR(100)    NOT NULL,
@@ -371,6 +372,16 @@ CREATE TABLE spots (
     -- source = 'kakao'인 장소를 다시 보강/동기화할 때 사용
     -- 관리자 직접 등록 장소는 NULL 가능
 
+    tour_enriched_at    TIMESTAMPTZ     NULL,
+    -- TourAPI(개요·무장애·반려동물)·Odii 보강을 마지막으로 마친 시각
+    -- TOUR_ENRICH_REFRESH_DAYS(기본 30일) 안이면 재저장 시 보강 호출 생략
+    -- 일일 한도 초과로 보강이 불완전하면 기록하지 않음
+
+    tour_content_id     VARCHAR(20)     NULL,
+    -- 장소의 TourAPI contentId (TourAPI에 없는 장소면 NULL)
+    -- 같은 장소 중복 저장 방지 기준 (uix_spots_tour_content_id) — utils/spotIdentity.js
+    -- 다시 보강할 때 위치·키워드 매칭 검색을 생략하는 데 사용
+
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
 
@@ -427,6 +438,14 @@ CREATE UNIQUE INDEX uix_spots_kakao_place_id
 -- 카카오 장소 중복 저장 방지
 -- PostgreSQL UNIQUE는 NULL을 서로 다른 값으로 보므로,
 -- kakao_place_id가 NULL인 관리자 직접 등록 장소는 여러 개 저장 가능
+
+ALTER TABLE spots ADD CONSTRAINT chk_spots_kakao_place_id
+    CHECK (kakao_place_id IS NULL OR kakao_place_id ~ '^[0-9]+$');
+-- 실제 카카오 번호만 허용 (예전 'tour_123'·'tour:123' 임시값 때문에 같은 장소를 알아보지 못했다)
+
+CREATE UNIQUE INDEX uix_spots_tour_content_id
+    ON spots (tour_content_id) WHERE tour_content_id IS NOT NULL;
+-- TourAPI 장소 중복 저장 방지. 장소를 넣기 전 utils/spotIdentity.js findExistingSpot 으로 확인한다
 
 CREATE INDEX ix_spots_categories
     ON spots USING GIN (categories);
@@ -529,6 +548,12 @@ CREATE TABLE courses (
     -- 'hidden': 신고 누적으로 자동 숨김
     -- 'deleted': 삭제 (소프트 딜리트)
 
+    photo_cache         JSONB           NULL,
+    -- 관광사진(TourAPI) 검색 결과 캐시 { source, photos } (GET /api/courses/:id/photos)
+
+    photo_cached_at     TIMESTAMPTZ     NULL,
+    -- 사진 캐시 저장 시각: 사진이 있으면 7일, 없으면 1일 동안 재사용
+
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
 
@@ -628,6 +653,11 @@ CREATE TABLE course_waypoints (
     lng         DECIMAL(9,6)    NULL,
     -- type = 'pin' 일 때만 사용: 경도
     -- type = 'spot' 일 때 NULL (좌표는 spots.location 에서 조회)
+
+    name        VARCHAR(100)    NULL,
+    -- 경유지 표시 이름 (주로 type = 'pin' 에서 사용)
+    -- 카카오에 없는 옛터·표지석 등을 이름 있는 핀으로 저장 (예: '손병희 집 터')
+    -- type = 'spot' 은 spots.name 을 우선 사용
 
     CONSTRAINT pk_course_waypoints
         PRIMARY KEY (course_id, seq),
@@ -1580,5 +1610,58 @@ ON CONFLICT (name, type) DO UPDATE SET
   group_name    = EXCLUDED.group_name,
   is_active     = EXCLUDED.is_active,
   is_review_tag = EXCLUDED.is_review_tag;
+
+-- 태그는 위 정본 목록만 허용한다. (import 코드가 모르는 이름으로 태그를 자동 생성해 중복이 생겼던 문제 방지)
+-- 태그를 추가·변경할 때는 위 시드와 이 제약을 함께 바꾸고, 운영 DB용 migration 을 추가한다.
+ALTER TABLE tags DROP CONSTRAINT IF EXISTS chk_tags_master;
+ALTER TABLE tags ADD CONSTRAINT chk_tags_master CHECK (
+  (type, group_name, name) IN (
+    ('course', '코스 출처', '공식코스'),
+    ('course', '코스 출처', '사용자코스'),
+    ('course', '추천·종류', '추천코스'),
+    ('course', '추천·종류', '둘레길'),
+    ('course', '추천·종류', '춘천 봄내길'),
+    ('course', '분위기', '힐링'),
+    ('course', '분위기', '노을·야경'),
+    ('course', '분위기', '자연·풍경'),
+    ('course', '분위기', '역사·문화'),
+    ('course', '동반·접근성', '무장애길'),
+    ('course', '동반·접근성', '반려동물'),
+    ('course', '동반·접근성', '아이와함께'),
+    ('spot', '열린관광', '무단차통로'),
+    ('spot', '열린관광', '휠체어접근'),
+    ('spot', '열린관광', '휠체어대여'),
+    ('spot', '열린관광', '장애인주차'),
+    ('spot', '열린관광', '장애인화장실'),
+    ('spot', '열린관광', '엘리베이터'),
+    ('spot', '열린관광', '안내견동반'),
+    ('spot', '열린관광', '시각장애인음성안내'),
+    ('spot', '열린관광', '점자안내'),
+    ('spot', '열린관광', '수어안내'),
+    ('spot', '열린관광', '유모차대여'),
+    ('spot', '열린관광', '수유실'),
+    ('spot', '반려동물', '반려동물'),
+    ('spot', '반려동물', '소형견동반'),
+    ('spot', '반려동물', '대형견 동반'),
+    ('spot', '반려동물', '반려견배변시설'),
+    ('spot', '반려동물', '반려견놀이터'),
+    ('spot', '시설·편의', '화장실'),
+    ('spot', '시설·편의', '주차가능'),
+    ('spot', '시설·편의', '식수대'),
+    ('spot', '시설·편의', '벤치·쉼터'),
+    ('spot', '분위기·테마', 'Odii음성해설'),
+    ('spot', '분위기·테마', '실시간축제'),
+    ('spot', '분위기·테마', '포토존'),
+    ('spot', '분위기·테마', '전통·한옥'),
+    ('spot', '분위기·테마', '낮그늘'),
+    ('spot', '분위기·테마', '밤산책'),
+    ('spot', '분위기·테마', '일출명소'),
+    ('spot', '분위기·테마', '일몰명소'),
+    ('spot', '분위기·테마', '문화/예술'),
+    ('spot', '분위기·테마', '역사유적'),
+    ('spot', '분위기·테마', '벚꽃'),
+    ('spot', '분위기·테마', '단풍')
+  )
+);
 
 

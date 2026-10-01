@@ -1,0 +1,534 @@
+{
+  "courses": {
+    "T_CRS_MNG0000005130": {
+      "courseName": "남파랑길 15코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "통영타워",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보 '신거제대교 가기 전 통영타워 카페' - 전망대 본체로 연결",
+          "mapping": {
+            "kakaoPlaceId": "26387071",
+            "canonicalName": "통영타워",
+            "kakaoCategoryName": "여행 > 관광,명소 > 전망대",
+            "categories": [
+              "전망대"
+            ],
+            "address": "경남 통영시 용남면 남해안대로 21",
+            "x": "128.47376697906435",
+            "y": "34.88979493525023",
+            "routeDistance": 32,
+            "routeProgress": 0.489919,
+            "distanceFromStartM": 7779
+          }
+        },
+        {
+          "sourceName": "신거제대교",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보: 다리를 직접 걸어서 건넘",
+          "mapping": {
+            "kakaoPlaceId": "7973731",
+            "canonicalName": "신거제대교",
+            "kakaoCategoryName": "교통,수송 > 도로시설 > 교량,다리 > 대교",
+            "categories": [
+              "교량,다리"
+            ],
+            "address": "경남 거제시 사등면 덕호리 44-11",
+            "x": "128.4796748684115",
+            "y": "34.888272969550286",
+            "routeDistance": 13,
+            "routeProgress": 0.54435,
+            "distanceFromStartM": 8643
+          }
+        },
+        {
+          "sourceName": "청곡리 지석묘",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "설명에 없음. 경로 220m 이내 문화유적으로 보강",
+          "mapping": {
+            "kakaoPlaceId": "12643707",
+            "canonicalName": "청곡리 지석묘",
+            "kakaoCategoryName": "여행 > 관광,명소 > 문화유적 > 릉,묘,총",
+            "categories": [
+              "문화유적"
+            ],
+            "address": "경남 거제시 사등면 청곡리 20-3",
+            "x": "128.510586376957",
+            "y": "34.9010704751933",
+            "routeDistance": 220,
+            "routeProgress": 0.847691,
+            "distanceFromStartM": 13459
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000005131": {
+      "courseName": "남파랑길 16코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "성포항",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "설명의 '작은 어촌마을' 구간, 출발 직후 항구",
+          "mapping": {
+            "kakaoPlaceId": "745853702",
+            "canonicalName": "성포항",
+            "kakaoCategoryName": "교통,수송 > 교통시설 > 항구,포구",
+            "categories": [
+              "항구,포구"
+            ],
+            "address": "경남 거제시 사등면 성포로3길 33",
+            "x": "128.525930867339",
+            "y": "34.9210675587311",
+            "routeDistance": 9,
+            "routeProgress": 0.040441,
+            "distanceFromStartM": 536
+          }
+        },
+        {
+          "sourceName": "거제사등성",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보 '거제사등성' - 카카오 등록명 사등성지",
+          "mapping": {
+            "kakaoPlaceId": "12736142",
+            "canonicalName": "사등성지",
+            "kakaoCategoryName": "여행 > 관광,명소 > 문화유적 > 산성,성곽",
+            "categories": [
+              "문화유적"
+            ],
+            "address": "경남 거제시 사등면 사등리 2300",
+            "x": "128.551170945763",
+            "y": "34.9042148054461",
+            "routeDistance": 41,
+            "routeProgress": 0.386339,
+            "distanceFromStartM": 5123
+          }
+        },
+        {
+          "sourceName": "사곡해수욕장",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보: 노을 명소",
+          "mapping": {
+            "kakaoPlaceId": "27055020",
+            "canonicalName": "사곡해수욕장",
+            "kakaoCategoryName": "여행 > 관광,명소 > 해수욕장,해변",
+            "categories": [
+              "해수욕장,해변"
+            ],
+            "address": "경남 거제시 사등면 사곡리 757-1",
+            "x": "128.57215177848857",
+            "y": "34.898807870021884",
+            "routeDistance": 14,
+            "routeProgress": 0.563404,
+            "distanceFromStartM": 7472
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000005118": {
+      "courseName": "남파랑길 3코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "영도대교",
+          "status": "mapped",
+          "endpoint": "start",
+          "note": "시점 '영도대교 입구'",
+          "mapping": {
+            "kakaoPlaceId": "8008973",
+            "canonicalName": "영도대교",
+            "kakaoCategoryName": "교통,수송 > 도로시설 > 교량,다리 > 대교",
+            "categories": [
+              "교량,다리"
+            ],
+            "address": "부산 영도구 대교동1가 190-1",
+            "x": "129.0364786611536",
+            "y": "35.0955088868829",
+            "routeDistance": 126,
+            "routeProgress": 0,
+            "distanceFromStartM": 0
+          }
+        },
+        {
+          "sourceName": "용두산공원",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보",
+          "mapping": {
+            "kakaoPlaceId": "11339636",
+            "canonicalName": "용두산공원",
+            "kakaoCategoryName": "여행 > 공원 > 도시근린공원",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "부산 중구 용두산길 37-55",
+            "x": "129.03244338014895",
+            "y": "35.10093050445418",
+            "routeDistance": 71,
+            "routeProgress": 0.066434,
+            "distanceFromStartM": 980
+          }
+        },
+        {
+          "sourceName": "국제시장",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보",
+          "mapping": {
+            "kakaoPlaceId": "20543715",
+            "canonicalName": "국제시장",
+            "kakaoCategoryName": "가정,생활 > 시장",
+            "categories": [
+              "전통시장·로컬마켓"
+            ],
+            "address": "부산 중구 신창동4가 56-4",
+            "x": "129.02818525258604",
+            "y": "35.101319053986096",
+            "routeDistance": 151,
+            "routeProgress": 0.131833,
+            "distanceFromStartM": 1945
+          }
+        },
+        {
+          "sourceName": "자갈치 수산시장",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보 '자갈치 수산시장' - 카카오 등록명 자갈치시장",
+          "mapping": {
+            "kakaoPlaceId": "11168886",
+            "canonicalName": "자갈치시장",
+            "kakaoCategoryName": "가정,생활 > 시장",
+            "categories": [
+              "전통시장·로컬마켓"
+            ],
+            "address": "부산 중구 자갈치해안로 52",
+            "x": "129.03057978534403",
+            "y": "35.09661988021089",
+            "routeDistance": 73,
+            "routeProgress": 0.183468,
+            "distanceFromStartM": 2707
+          }
+        },
+        {
+          "sourceName": "송도해상케이블카",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "요약에 언급된 대표 명소 (송도해수욕장 쪽 정류장)",
+          "mapping": {
+            "kakaoPlaceId": "1878852238",
+            "canonicalName": "송도해상케이블카",
+            "kakaoCategoryName": "여행 > 관광,명소 > 케이블카",
+            "categories": [
+              "케이블카"
+            ],
+            "address": "부산 서구 송도해변로 171",
+            "x": "129.02339870312",
+            "y": "35.076643702635",
+            "routeDistance": 70,
+            "routeProgress": 0.368325,
+            "distanceFromStartM": 5434
+          }
+        },
+        {
+          "sourceName": "송도해수욕장",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보: 우리나라 제1호 해수욕장",
+          "mapping": {
+            "kakaoPlaceId": "25041637",
+            "canonicalName": "송도해수욕장",
+            "kakaoCategoryName": "여행 > 관광,명소 > 해수욕장,해변",
+            "categories": [
+              "해수욕장,해변"
+            ],
+            "address": "부산 서구 암남동 135-5",
+            "x": "129.016954361828",
+            "y": "35.0759454359851",
+            "routeDistance": 3,
+            "routeProgress": 0.424606,
+            "distanceFromStartM": 6265
+          }
+        },
+        {
+          "sourceName": "암남공원",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보",
+          "mapping": {
+            "kakaoPlaceId": "8497179",
+            "canonicalName": "암남공원",
+            "kakaoCategoryName": "여행 > 공원 > 도시근린공원",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "부산 서구 암남동 산 193-4",
+            "x": "129.015681238627",
+            "y": "35.0585918147655",
+            "routeDistance": 77,
+            "routeProgress": 0.613183,
+            "distanceFromStartM": 9047
+          }
+        },
+        {
+          "sourceName": "두도전망대",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보 '두도전망대까지 이어지는 숲과 해안절경'",
+          "mapping": {
+            "kakaoPlaceId": "128471064",
+            "canonicalName": "두도전망대",
+            "kakaoCategoryName": "여행 > 관광,명소 > 전망대",
+            "categories": [
+              "산·등산로"
+            ],
+            "address": "부산 서구 암남동 산 193-4",
+            "x": "129.0144926758272",
+            "y": "35.053307197230026",
+            "routeDistance": 20,
+            "routeProgress": 0.656414,
+            "distanceFromStartM": 9685
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000005119": {
+      "courseName": "남파랑길 4코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "몰운대",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "요약: 국가지질공원 몰운대",
+          "mapping": {
+            "kakaoPlaceId": "27017999",
+            "canonicalName": "몰운대",
+            "kakaoCategoryName": "여행 > 관광,명소 > 유원지",
+            "categories": [
+              "유원지"
+            ],
+            "address": "부산 사하구 다대동 144",
+            "x": "128.970163221996",
+            "y": "35.0420081784678",
+            "routeDistance": 201,
+            "routeProgress": 0.508838,
+            "distanceFromStartM": 11541
+          }
+        },
+        {
+          "sourceName": "꿈의낙조분수",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보: 야간관광 명소",
+          "mapping": {
+            "kakaoPlaceId": "11486664",
+            "canonicalName": "다대포꿈의낙조분수",
+            "kakaoCategoryName": "여행 > 공원시설물",
+            "categories": [
+              "공원시설물"
+            ],
+            "address": "부산 사하구 몰운대1길 14",
+            "x": "128.967309944834",
+            "y": "35.0471300207867",
+            "routeDistance": 117,
+            "routeProgress": 0.535904,
+            "distanceFromStartM": 12155
+          }
+        },
+        {
+          "sourceName": "다대포 해수욕장",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보",
+          "mapping": {
+            "kakaoPlaceId": "8214103",
+            "canonicalName": "다대포해수욕장",
+            "kakaoCategoryName": "여행 > 관광,명소 > 해수욕장,해변",
+            "categories": [
+              "해수욕장,해변"
+            ],
+            "address": "부산 사하구 다대동",
+            "x": "128.962741189119",
+            "y": "35.0465263488422",
+            "routeDistance": 160,
+            "routeProgress": 0.550567,
+            "distanceFromStartM": 12488
+          }
+        },
+        {
+          "sourceName": "아미산 전망대",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보: 낙동강 하구 일몰 명소",
+          "mapping": {
+            "kakaoPlaceId": "12664720",
+            "canonicalName": "아미산전망대",
+            "kakaoCategoryName": "여행 > 관광,명소 > 전망대",
+            "categories": [
+              "산·등산로"
+            ],
+            "address": "부산 사하구 다대낙조2길 77",
+            "x": "128.96075764613",
+            "y": "35.0526649308885",
+            "routeDistance": 42,
+            "routeProgress": 0.603905,
+            "distanceFromStartM": 13698
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000005124": {
+      "courseName": "남파랑길 9코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "장복산조각공원",
+          "status": "mapped",
+          "endpoint": "start",
+          "note": "시점 '진해드림로드 입구' 바로 옆",
+          "mapping": {
+            "kakaoPlaceId": "25019785",
+            "canonicalName": "장복산조각공원",
+            "kakaoCategoryName": "여행 > 공원 > 도시근린공원",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경남 창원시 진해구 태백동 산 84-3",
+            "x": "128.654685053604",
+            "y": "35.1730364440991",
+            "routeDistance": 121,
+            "routeProgress": 0.008969,
+            "distanceFromStartM": 134
+          }
+        },
+        {
+          "sourceName": "봉암교",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "요약: 봉암교를 지나 마산항으로",
+          "mapping": {
+            "kakaoPlaceId": "153322549",
+            "canonicalName": "봉암교",
+            "kakaoCategoryName": "교통,수송 > 도로시설 > 교량,다리 > 대교",
+            "categories": [
+              "교량,다리"
+            ],
+            "address": "경남 창원시 성산구 양곡동 847-11",
+            "x": "128.619529743695",
+            "y": "35.2127820088082",
+            "routeDistance": 10,
+            "routeProgress": 0.539664,
+            "distanceFromStartM": 8081
+          }
+        },
+        {
+          "sourceName": "임항선 그린웨이",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보",
+          "mapping": {
+            "kakaoPlaceId": "1807508528",
+            "canonicalName": "임항선 그린웨이",
+            "kakaoCategoryName": "여행 > 공원",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경남 창원시 마산합포구 성호동3길 2-1",
+            "x": "128.570560422142",
+            "y": "35.2101594119602",
+            "routeDistance": 3,
+            "routeProgress": 0.870217,
+            "distanceFromStartM": 13031
+          }
+        },
+        {
+          "sourceName": "가고파 꼬부랑길 벽화마을",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보",
+          "mapping": {
+            "kakaoPlaceId": "25038393",
+            "canonicalName": "가고파 꼬부랑길벽화마을",
+            "kakaoCategoryName": "여행 > 관광,명소 > 테마거리",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경남 창원시 마산합포구 성호서7길 15-8",
+            "x": "128.569820183456",
+            "y": "35.2078149803765",
+            "routeDistance": 122,
+            "routeProgress": 0.886641,
+            "distanceFromStartM": 13277
+          }
+        },
+        {
+          "sourceName": "창원시립마산문신미술관",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보 - 카카오 등록명 창원시립문신미술관",
+          "mapping": {
+            "kakaoPlaceId": "7874727",
+            "canonicalName": "창원시립문신미술관",
+            "kakaoCategoryName": "문화,예술 > 문화시설 > 미술관",
+            "categories": [
+              "전시·문화공간"
+            ],
+            "address": "경남 창원시 마산합포구 문신길 147",
+            "x": "128.568983145071",
+            "y": "35.2063153567667",
+            "routeDistance": 182,
+            "routeProgress": 0.905515,
+            "distanceFromStartM": 13560
+          }
+        },
+        {
+          "sourceName": "창원시립마산박물관",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "요약에 언급",
+          "mapping": {
+            "kakaoPlaceId": "27353149",
+            "canonicalName": "창원시립마산박물관",
+            "kakaoCategoryName": "문화,예술 > 문화시설 > 박물관",
+            "categories": [
+              "전시·문화공간"
+            ],
+            "address": "경남 창원시 마산합포구 문신길 105",
+            "x": "128.56891929363204",
+            "y": "35.205679008685834",
+            "routeDistance": 147,
+            "routeProgress": 0.912477,
+            "distanceFromStartM": 13664
+          }
+        },
+        {
+          "sourceName": "315의거기념비",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보 '315의거기념비' - 경로 48m의 3.15의거탑으로 연결",
+          "mapping": {
+            "kakaoPlaceId": "8508562",
+            "canonicalName": "3.15의거탑",
+            "kakaoCategoryName": "여행 > 관광,명소 > 문화유적 > 탑,비석",
+            "categories": [
+              "문화유적"
+            ],
+            "address": "경남 창원시 마산합포구 서성동 84-325",
+            "x": "128.56924908185306",
+            "y": "35.20313053723303",
+            "routeDistance": 48,
+            "routeProgress": 0.925883,
+            "distanceFromStartM": 13865
+          }
+        }
+      ]
+    }
+  }
+}

@@ -140,14 +140,15 @@ function getTotalCount(data) {
  * @param {number} [options.page]   - 페이지 번호 (기본 1)
  * @param {number} [options.limit]  - 페이지당 결과 수 (기본 10)
  */
-exports.getDurunubiCourses = async ({ region, brdDiv, page = 1, limit = 10 } = {}) => {
+exports.getDurunubiCourses = async ({ region, sub_region, brdDiv, page = 1, limit = 10 } = {}) => {
   if (!region) {
     const err = new Error('region 파라미터가 필요합니다. (예: 서울, 강남구, 춘천)');
     err.status = 400;
     throw err;
   }
 
-  const target = resolveRegion(region);
+  const effectiveSubRegion = sub_region && !['전체', 'all', '전국'].includes(String(sub_region).toLowerCase()) ? String(sub_region).trim() : null;
+  const target = resolveRegion(effectiveSubRegion) || resolveRegion(region);
   if (!target) {
     const err = new Error(
       `지원하지 않는 지역입니다: "${region}". 서울(구 이름 포함) 또는 춘천을 입력해주세요.`
@@ -166,23 +167,31 @@ exports.getDurunubiCourses = async ({ region, brdDiv, page = 1, limit = 10 } = {
   const data = await requestDurunubi('courseList', params);
   const rawItems = getItems(data);
 
-  // 지역 필터링 (sigun 필드에 타겟 지역명이 포함되어 있는지 확인)
+  // 지역 필터링 (sigun, 코스명, 개요 필드 확인)
   let filtered = rawItems.filter((item) => {
-    if (!item.sigun) return false;
+    const sigun = item.sigun || '';
+    const name = item.crsKorNm || item.crskorNm || '';
+    const summary = item.crsSummary || '';
+    const combined = `${sigun} ${name} ${summary}`;
+
+    if (effectiveSubRegion) {
+      return combined.includes(effectiveSubRegion) || (target.name && combined.includes(target.name));
+    }
+
     return (
-      item.sigun.includes(target.name) ||
-      item.sigun.includes(target.durunubi.sigun) ||
-      (target.fullName && item.sigun.includes(target.fullName))
+      (sigun && sigun.includes(target.name)) ||
+      (sigun && target.durunubi?.sigun && sigun.includes(target.durunubi.sigun)) ||
+      (target.fullName && sigun && sigun.includes(target.fullName))
     );
   });
 
   // 두루누비 140개 전국 둘레길 API 중 춘천시 단독 둘레길이 없을 경우 강원도 지역(강릉, 철원, 화천, 양구 등) 둘레길로 확장 제공
-  if (filtered.length === 0 && (target.name.includes('춘천') || (target.fullName && target.fullName.includes('강원')))) {
+  if (filtered.length === 0 && !effectiveSubRegion && (target.name.includes('춘천') || (target.fullName && target.fullName.includes('강원')))) {
     filtered = rawItems.filter((item) => item.sigun && (item.sigun.includes('강원') || item.sigun.includes('춘천')));
   }
 
-  // 전체 검색이거나 필터링 결과가 비어있을 경우 전국 주요 둘레길 제공
-  if (filtered.length === 0) {
+  // 전체 검색일 경우에만 전국 주요 둘레길 제공 (특정 시/군/구 필터 시 결과가 없으면 빈 목록 반환)
+  if (filtered.length === 0 && (!region || ['전국', '전체', 'all'].includes(region.toLowerCase()))) {
     filtered = rawItems;
   }
 
@@ -267,7 +276,7 @@ exports.getDurunubiCourseSpots = async (crsIdx) => {
   }
 
   const detail = await exports.getDurunubiCourseDetail(crsIdx);
-  const mappings = getDurunubiCourseSpotMappings(detail.crs_name);
+  const mappings = getDurunubiCourseSpotMappings(detail.crs_name, detail.crs_idx);
 
   const spots = mappings.map((m, idx) => ({
     order: m.order || idx + 1,

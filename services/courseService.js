@@ -312,7 +312,25 @@ function normalizeDifficulty(value) {
 // 두루누비 description 섹션 파싱은 utils/courseDescription.js 로 이전됨
 // (courseService · backfill 스크립트가 공용으로 사용)
 
+// 전국길관광정보 코스 설명에 import가 붙였던 항목 중 상세 화면에 이미 보이는 정보
+// (경유지 타임라인, 출발→도착, 소요시간 박스)는 산책로 소개에서 뺀다.
+const STREET_TOURISM_DUPLICATE_PARAGRAPH = /^(📌\s*경유 경로|🚩\s*출발|⏱️?\s*소요 시간)\s*:/;
+
+function stripStreetTourismDuplicates(description) {
+  if (!description) return description;
+  return String(description)
+    .split(/\n{2,}/)
+    .filter((paragraph) => !STREET_TOURISM_DUPLICATE_PARAGRAPH.test(paragraph.trim()))
+    .join('\n\n');
+}
+
 function buildCourseDetailDescription(course) {
+  if (course.data_source === '행정안전부_전국길관광정보표준데이터') {
+    return {
+      description: cleanText(stripStreetTourismDuplicates(course.description)),
+    };
+  }
+
   if (course.data_source !== '한국관광공사_두루누비') {
     return {
       description: cleanText(course.description),
@@ -608,20 +626,14 @@ exports.getCourses = async (query, currentUserId) => {
       conditions.push(`(
         c.sub_region ILIKE $${params.length}
         OR c.region ILIKE $${params.length}
-        OR c.name ILIKE $${params.length}
-        OR c.description ILIKE $${params.length}
       )`);
     }
   }
 
-  // 세부 권역 필터
+  // 세부 권역 필터 — sub_region 컬럼만 매칭 (name/description 매칭 시 다른 구 코스가 혼입됨)
   if (normalizedSubRegion && !['전체', 'all'].includes(normalizedSubRegion.toLowerCase()) && normalizedSubRegion !== '전체') {
     params.push(`%${normalizedSubRegion}%`);
-    conditions.push(`(
-      c.sub_region ILIKE $${params.length}
-      OR c.name ILIKE $${params.length}
-      OR c.description ILIKE $${params.length}
-    )`);
+    conditions.push(`c.sub_region ILIKE $${params.length}`);
   }
 
   // 카테고리 필터
@@ -994,6 +1006,20 @@ exports.getMyCourses = async (userId, query) => {
 exports.getCourseById = async (courseId, userId) => {
   const client = await pool.connect();
   try {
+    // 예전 앱은 두루누비 코스를 원본 ID(예: T_CRS_MNG0000005118)로 열었다.
+    // UUID가 아니면 import된 코스의 원본 ID(source_id)로 찾는다. (북마크·공유 링크 호환)
+    if (!UUID_PATTERN.test(String(courseId))) {
+      const { rows: [bySource] } = await client.query(
+        `SELECT course_id FROM courses WHERE source_id = $1 AND status != 'deleted' LIMIT 1`,
+        [String(courseId)]
+      );
+      if (!bySource) {
+        const err = new Error('코스를 찾을 수 없습니다.');
+        err.status = 404; throw err;
+      }
+      courseId = bySource.course_id;
+    }
+
     // 코스 기본 정보
     const { rows: [course] } = await client.query(
       `SELECT
@@ -1036,6 +1062,7 @@ exports.getCourseById = async (courseId, userId) => {
       `SELECT
          cw.seq, cw.type, cw.spot_id,
          cw.lat, cw.lng,
+         cw.name,
          s.name AS spot_name,
          ST_Y(s.location::geometry) AS spot_lat,
          ST_X(s.location::geometry) AS spot_lng,

@@ -4,7 +4,7 @@
  * ─────────────────────────────────────────────────────────────
  * 한국관광공사 반려동물 동반여행(KorPetTourService2) API를 호출하여
  * 지역별 반려동물 관광지를 DB spots에 등록/동기화하고,
- * 세부 태그(#반려견동반, #대형견가능, #소형견동반, #반려견배변시설 등)를 taggings에 적재한다.
+ * 세부 태그(#반려동물, #대형견 동반, #소형견동반, #반려견배변시설 등)를 taggings에 적재한다.
  *
  * 사용법:
  *   node scripts/sync-pet-spots.js                # 춘천 기본 동기화
@@ -14,6 +14,7 @@
 require('dotenv').config();
 const pool = require('../config/db');
 const tourApiService = require('../services/tourApiService');
+const { findExistingSpot, linkExternalIds } = require('../utils/spotIdentity');
 
 const REGION = (() => {
   const arg = process.argv.find((a) => a.startsWith('--region='));
@@ -84,14 +85,15 @@ async function attachTagsToSpot(spotId, tagNames, userId) {
         }
       }
 
-      const summaryTags = detail?.summary_tags || ['#반려견동반'];
+      const summaryTags = detail?.summary_tags || ['#반려동물'];
       const petDetails = detail?.details || null;
 
-      // 2. DB 존재 여부 확인 (이름 기준)
-      const { rows: existing } = await pool.query(
-        `SELECT spot_id, name, pet_tour_info FROM spots WHERE name = $1 AND status = 'active' LIMIT 1`,
-        [item.title]
-      );
+      // 2. 이미 있는 장소인지 TourAPI 번호 → 같은 이름 + 300m 로 확인 (utils/spotIdentity.js)
+      const matched = await findExistingSpot(pool, {
+        tourContentId: item.content_id, name: item.title, lat: item.y, lng: item.x,
+      });
+      const existing = matched ? [matched] : [];
+      if (matched) await linkExternalIds(pool, matched.spot_id, { tourContentId: item.content_id });
 
       let targetSpotId = null;
 
@@ -110,10 +112,10 @@ async function attachTagsToSpot(spotId, tagNames, userId) {
         const { rows: inserted } = await pool.query(
           `INSERT INTO spots (
             name, location, address, categories, kakao_category_name, source,
-            content_place, content_tour, first_image, pet_tour_info, region, status
+            content_place, content_tour, first_image, pet_tour_info, region, status, tour_content_id
           ) VALUES (
             $1, ST_Point($2, $3)::GEOGRAPHY, $4, ARRAY['공원·광장']::TEXT[], '여행 > 관광,명소', 'admin',
-            $5, $6, $7, $8, $9, 'active'
+            $5, $6, $7, $8, $9, 'active', $10
           ) RETURNING spot_id`,
           [
             item.title,
@@ -125,6 +127,7 @@ async function attachTagsToSpot(spotId, tagNames, userId) {
             item.image_url,
             petDetails ? JSON.stringify(petDetails) : null,
             REGION,
+            item.content_id ? String(item.content_id) : null,
           ]
         );
         targetSpotId = inserted[0].spot_id;

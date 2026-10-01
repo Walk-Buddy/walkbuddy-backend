@@ -2,11 +2,14 @@ require('dotenv').config();
 
 const axios = require('axios');
 const pool = require('../config/db');
+const { requireTagId } = require('../constants/tagAliases');
 const spotService = require('../services/spotService');
+const { installDataGoKrKeyFallback } = require('../services/dataGoKrKey');
 const courseTagService = require('../services/courseTagService');
-const { getDurunubiCourseSpotMappings } = require('../constants/durunubiSpotMappings');
-const { inferRegionFromLocation } = require('../constants/spotCategoryRules');
+const { getDurunubiCourseSpotMappings, CURATED_DURUNUBI_SPOT_MAPPINGS } = require('../constants/durunubiSpotMappings');
+const { inferRegionFromLocation, resolveChuncheonArea } = require('../constants/spotCategoryRules');
 const { parseDescriptionSections } = require('../utils/courseDescription');
+const { WALK_METERS_PER_MINUTE } = require('../constants/courseConstants');
 
 const BASE_URL = 'http://apis.data.go.kr/B551011/Durunubi';
 const DATA_SOURCE = '한국관광공사_두루누비';
@@ -15,6 +18,10 @@ const DEFAULT_MOBILE_OS = 'ETC';
 const DEFAULT_MOBILE_APP = 'WalkBuddy';
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_WAYPOINTS = 1200;
+// 경로에서 이 거리 이내인 스팟만 코스 경유지로 연결 (그 밖은 스팟만 저장 → 코스 상세 nearby_spots)
+const WAYPOINT_RADIUS = toInt(process.env.DURUNUBI_WAYPOINT_RADIUS, 300);
+// 출발/도착점에서 이 거리 이내인 스팟은 별도 경유지 대신 출발/도착 지점 자체로 사용
+const ENDPOINT_MERGE_RADIUS = toInt(process.env.DURUNUBI_ENDPOINT_MERGE_RADIUS, 100);
 
 const serviceKey =
   process.env.DURUNUBI_SERVICE_KEY ||
@@ -25,26 +32,23 @@ const serviceKey =
 const mobileOS = process.env.DURUNUBI_MOBILE_OS || DEFAULT_MOBILE_OS;
 const mobileApp = process.env.DURUNUBI_MOBILE_APP || DEFAULT_MOBILE_APP;
 const brdDiv = process.env.DURUNUBI_BRD_DIV || '';
-const maxImport = toInt(process.argv[2] || process.env.DURUNUBI_MAX_IMPORT, 0);
-const startIndex = Math.max(0, toInt(process.argv[3] || process.env.DURUNUBI_START_INDEX, 0));
+// 위치 인자: [최대 개수] [시작 위치]. --curated-only 는 큐레이션 파일에 있는 코스만 import (대표 코스 선별용)
+const positionalArgs = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
+const curatedOnly = process.argv.includes('--curated-only');
+const maxImport = toInt(positionalArgs[0] || process.env.DURUNUBI_MAX_IMPORT, 0);
+const startIndex = Math.max(0, toInt(positionalArgs[1] || process.env.DURUNUBI_START_INDEX, 0));
 const maxWaypoints = toInt(process.env.DURUNUBI_MAX_WAYPOINTS, DEFAULT_MAX_WAYPOINTS);
 
-const http = axios.create({
+const http = installDataGoKrKeyFallback(axios.create({
   timeout: 30000,
   headers: {
     'User-Agent': 'WalkBuddy-Durunubi-Importer/1.0',
   },
-});
+}));
 
 function toInt(value, fallback) {
   const n = Number.parseInt(value, 10);
   return Number.isFinite(n) ? n : fallback;
-}
-
-function toNumber(value) {
-  if (value == null || value === '') return null;
-  const n = Number(String(value).replace(/,/g, ''));
-  return Number.isFinite(n) ? n : null;
 }
 
 function requireEnv() {
@@ -136,7 +140,10 @@ async function fetchAllCourses() {
     courses.push(...page.items);
   }
 
-  const selectedCourses = startIndex > 0 ? courses.slice(startIndex) : courses;
+  const candidates = curatedOnly
+    ? courses.filter((course) => CURATED_DURUNUBI_SPOT_MAPPINGS.courses[String(pick(course, ['crsIdx']))])
+    : courses;
+  const selectedCourses = startIndex > 0 ? candidates.slice(startIndex) : candidates;
   return maxImport > 0 ? selectedCourses.slice(0, maxImport) : selectedCourses;
 }
 
@@ -320,23 +327,15 @@ async function findAvailableNickname(client, baseName) {
   throw new Error('두루누비 관리자 계정에 사용할 수 있는 닉네임을 만들지 못했습니다.');
 }
 
+// 정본 태그만 쓴다 (태그를 새로 만들지 않는다 — DB 정본 태그 — constants/tagAliases.js)
 async function ensureCourseTag(client) {
-  // 프론트 정본(ServerTags.DEFAULT_COURSE_TAGS_BY_GROUP)과 일치하도록
-  // group_name='추천·종류', is_review_tag=FALSE 를 명시한다.
-  // (기존 시드 태그가 있으면 group_name/is_review_tag 를 올바른 값으로 보정)
-  const { rows } = await client.query(
-    `INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
-     VALUES ($1, 'course', '추천·종류', TRUE, FALSE)
-     ON CONFLICT (name, type)
-     DO UPDATE SET
-       group_name    = EXCLUDED.group_name,
-       is_active     = TRUE,
-       is_review_tag = EXCLUDED.is_review_tag
-     RETURNING tag_id`,
-    [COURSE_TAG_NAME]
-  );
+  return requireTagId(client, COURSE_TAG_NAME, 'course');
+}
 
-  return rows[0].tag_id;
+// 서버에서 넣는 공공데이터 코스는 항상 '공식코스' 태그를 붙인다.
+// (자동 태그 단계가 실패해도 빠지지 않도록 코스 저장과 같은 트랜잭션에서 직접 연결)
+async function ensureOfficialCourseTag(client) {
+  return requireTagId(client, '공식코스', 'course');
 }
 
 const PROV_MAP = {
@@ -353,7 +352,7 @@ const PROV_MAP = {
   '충북': '충북', '충청북도': '충북',
   '충남': '충남', '충청남도': '충남',
   '전북': '전북', '전라북도': '전북', '전북특별자치도': '전북',
-  '전남': '전남', '전라남도': '전남',
+  '전남': '전남', '전라남도': '전남', '전남광주통합특별시': '전남',
   '경북': '경북', '경상북도': '경북',
   '경남': '경남', '경상남도': '경남',
   '제주': '제주', '제주도': '제주', '제주특별자치도': '제주',
@@ -384,54 +383,118 @@ function extractRegionFromSigun(sigun, points, name) {
   };
 }
 
+// 전남광주통합특별시의 광주 쪽 자치구 (출발 좌표가 여기면 광주로 분류)
+const GWANGJU_DISTRICTS = new Set(['동구', '서구', '남구', '북구', '광산구']);
+
+/**
+ * 코스 지역은 두루누비 sigun 표기 대신 GPX 출발 좌표로 판정한다.
+ * (예: "DMZ 평화의 길 19-1코스"는 sigun이 "서울 강동구"지만 실제 경로는 철원·화천)
+ *  1) 춘천 권역이면 앱의 춘천 세부 권역(의암호·공지천권 등)
+ *  2) 그 외는 카카오 좌표→행정구역 변환으로 시·도 / 시·군·구
+ *  3) 변환 실패 시 기존 sigun 표기 사용
+ */
+async function resolveCourseRegion(points, sigun, name) {
+  const start = points[0];
+  if (start) {
+    const chuncheonArea = resolveChuncheonArea(start.lat, start.lng);
+    if (chuncheonArea) return { region: '춘천', sub_region: chuncheonArea, source: 'gpx' };
+
+    const kakaoKey = process.env.KAKAO_REST_API_KEY;
+    if (kakaoKey) {
+      try {
+        const { data } = await http.get('https://dapi.kakao.com/v2/local/geo/coord2regioncode.json', {
+          params: { x: start.lng, y: start.lat },
+          headers: { Authorization: `KakaoAK ${kakaoKey}` },
+          timeout: 5000,
+        });
+        const doc = (data?.documents || []).find((d) => d.region_type === 'H') || data?.documents?.[0];
+        const prov = doc?.region_1depth_name;
+        const district = doc?.region_2depth_name || null;
+        if (prov && PROV_MAP[prov]) {
+          const region = prov === '전남광주통합특별시' && GWANGJU_DISTRICTS.has(district) ? '광주' : PROV_MAP[prov];
+          return { region, sub_region: district, source: 'gpx' };
+        }
+      } catch (err) {
+        console.warn(`  - 좌표 지역 판정 실패(sigun 사용): ${err.message}`);
+      }
+    }
+  }
+
+  return { ...extractRegionFromSigun(sigun, points, name), source: 'sigun' };
+}
+
+function haversineMeters(a, b) {
+  const R = 6371000;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+// 출발/도착점 근처 스팟 중 가장 가까운 것 (없으면 null)
+function findEndpointSpot(spots, point, excludeSpotId = null) {
+  if (!point) return null;
+  let best = null;
+  for (const spot of spots) {
+    if (spot.spotId === excludeSpotId || !Number.isFinite(spot.lat) || !Number.isFinite(spot.lng)) continue;
+    const distance = haversineMeters(point, spot);
+    if (distance <= ENDPOINT_MERGE_RADIUS && (!best || distance < best.distance)) {
+      best = { spot, distance };
+    }
+  }
+  return best?.spot || null;
+}
+
 async function insertWaypoints(client, courseId, points, spotWaypoints = []) {
   const startPoint = points[0];
   const endPoint = points[points.length - 1];
+  const isLoop = Boolean(startPoint && endPoint
+    && endPoint.lat === startPoint.lat && endPoint.lng === startPoint.lng);
 
-  const rows = [];
-
-  // 1. 출발점 (핀)
-  if (startPoint) {
-    rows.push({
-      type: 'pin',
-      progress: 0,
-      spotId: null,
-      lat: startPoint.lat,
-      lng: startPoint.lng,
-    });
-  }
-
-  // 2. 중간 등록된 경유지 스팟들 (중복 방지)
+  // 등록된 경유지 스팟들 (중복 방지)
   const seenSpotIds = new Set();
   const validSpots = [];
   for (const spot of spotWaypoints || []) {
     if (spot.spotId && Number.isFinite(spot.routeProgress) && !seenSpotIds.has(spot.spotId)) {
       seenSpotIds.add(spot.spotId);
-      validSpots.push({
-        type: 'spot',
-        progress: spot.routeProgress,
-        spotId: spot.spotId,
-        lat: null,
-        lng: null,
-      });
+      validSpots.push(spot);
     }
   }
 
-  rows.push(...validSpots);
+  // 출발/도착점과 거의 겹치는 스팟은 이름 없는 핀 대신 그 스팟을 출발/도착 지점으로 쓴다.
+  // (타임라인에 "출발(이름 없음) → 경유 1 ○○항"처럼 같은 위치가 두 번 나오지 않게)
+  // 큐레이션에서 endpoint로 지정한 스팟이 있으면 거리와 상관없이 우선 사용
+  const startSpot = validSpots.find((spot) => spot.endpoint === 'start')
+    || findEndpointSpot(validSpots, startPoint);
+  const endSpot = isLoop
+    ? null
+    : validSpots.find((spot) => spot.endpoint === 'end' && spot.spotId !== startSpot?.spotId)
+      || findEndpointSpot(validSpots, endPoint, startSpot?.spotId);
 
-  // 3. 도착점 (핀)
-  if (endPoint && (endPoint.lat !== startPoint?.lat || endPoint.lng !== startPoint?.lng || rows.length === 1)) {
-    rows.push({
-      type: 'pin',
-      progress: 1,
-      spotId: null,
-      lat: endPoint.lat,
-      lng: endPoint.lng,
-    });
+  const rows = [];
+
+  // 1. 출발점
+  if (startSpot) {
+    rows.push({ type: 'spot', progress: 0, spotId: startSpot.spotId, lat: null, lng: null });
+  } else if (startPoint) {
+    rows.push({ type: 'pin', progress: 0, spotId: null, lat: startPoint.lat, lng: startPoint.lng });
   }
 
-  // 정렬: routeProgress 순서 (출발 0 -> 경유지들 -> 도착 1)
-  rows.sort((a, b) => a.progress - b.progress || (a.type === 'pin' ? -1 : 1));
+  // 2. 중간 경유지 스팟들 (routeProgress 순서)
+  validSpots.sort((a, b) => a.routeProgress - b.routeProgress);
+  for (const spot of validSpots) {
+    if (spot.spotId === startSpot?.spotId || spot.spotId === endSpot?.spotId) continue;
+    rows.push({ type: 'spot', progress: spot.routeProgress, spotId: spot.spotId, lat: null, lng: null });
+  }
+
+  // 3. 도착점
+  if (endSpot) {
+    rows.push({ type: 'spot', progress: 1, spotId: endSpot.spotId, lat: null, lng: null });
+  } else if (endPoint && (!isLoop || rows.length === 1)) {
+    rows.push({ type: 'pin', progress: 1, spotId: null, lat: endPoint.lat, lng: endPoint.lng });
+  }
 
   const seqs = rows.map((_, index) => index + 1);
   const types = rows.map((row) => row.type);
@@ -515,12 +578,13 @@ function buildDurunubiSpotCandidate(spotName, mapping) {
 
 async function importDurunubiSpotsForCourse(client, item, courseId, ownerId) {
   const courseName = pick(item, ['crsKorNm']) || '';
-  const spotEntries = getDurunubiCourseSpotMappings(courseName);
+  const spotEntries = getDurunubiCourseSpotMappings(courseName, pick(item, ['crsIdx']));
   const result = {
     candidates: spotEntries.length,
     saved: 0,
     skipped: 0,
     failed: 0,
+    nearby: 0,
     details: [],
     waypointSpots: [],
   };
@@ -552,7 +616,14 @@ async function importDurunubiSpotsForCourse(client, item, courseId, ownerId) {
             : Number(candidate.distance_from_start_m),
         }
         : await getRoutePositionFromCourseRoute(client, courseId, candidate);
+      // 경로에서 멀리 떨어진 스팟은 경유지로 연결하지 않고 주변 볼거리로만 남긴다.
+      // 큐레이션 항목은 사람이 정한 status를 그대로 따른다.
+      const isNearRoute = entry.selection === 'curated'
+        ? entry.status !== 'nearby'
+        : candidate.route_distance == null || candidate.route_distance <= WAYPOINT_RADIUS;
+      if (!isNearRoute) result.nearby += 1;
       if (
+        isNearRoute &&
         saved.spot?.spot_id &&
         routePosition &&
         Number.isFinite(routePosition.routeProgress) &&
@@ -562,6 +633,9 @@ async function importDurunubiSpotsForCourse(client, item, courseId, ownerId) {
           spotId: saved.spot.spot_id,
           routeProgress: routePosition.routeProgress,
           distanceFromStartM: routePosition.distanceFromStartM,
+          lat: Number(candidate.y),
+          lng: Number(candidate.x),
+          endpoint: entry.endpoint || null,
           sourceName: spotName,
           savedName: saved.spot.name,
         });
@@ -571,6 +645,8 @@ async function importDurunubiSpotsForCourse(client, item, courseId, ownerId) {
         spotName,
         order: entry.order,
         status: saved.is_created ? 'created' : 'existing',
+        isWaypoint: isNearRoute,
+        selection: entry.selection || 'tour_info',
         savedName: saved.spot.name,
         routeDistance: candidate.route_distance == null ? null : Math.round(candidate.route_distance),
         routeProgress: routePosition?.routeProgress ?? null,
@@ -586,7 +662,7 @@ async function importDurunubiSpotsForCourse(client, item, courseId, ownerId) {
   return result;
 }
 
-async function importCourse(client, item, ownerId, tagId) {
+async function importCourse(client, item, ownerId, tagIds) {
   const routeIdx = pick(item, ['routeIdx']);
   const crsIdx = pick(item, ['crsIdx']);
   const sourceId = crsIdx || routeIdx;
@@ -603,20 +679,24 @@ async function importCourse(client, item, ownerId, tagId) {
   }
 
   const wkt = toWkt(points);
-  const distanceFromApi = toNumber(pick(item, ['crsDstnc']));
-  const durationFromApi = toNumber(pick(item, ['crsTotlRqrmHour']));
 
   const { rows: [stats] } = await client.query(
     `SELECT GREATEST(1, ROUND(ST_Length($1::geography))::int) AS distance`,
     [wkt]
   );
 
-  const totalDistance = distanceFromApi ? Math.max(1, Math.round(distanceFromApi * 1000)) : stats.distance;
-  const estimatedDuration = durationFromApi || Math.max(1, Math.ceil(stats.distance / 1.1 / 60));
+  // 거리·소요시간: 두루누비 원본(crsDstnc, crsTotlRqrmHour) 대신 지도에 그리는 GPX 경로 기준.
+  // 소요시간은 전국길관광(T맵 도보 경로)과 같은 도보 속도로 계산해 코스 간 비교가 되게 한다.
+  const totalDistance = stats.distance;
+  const estimatedDuration = Math.max(1, Math.round(totalDistance / WALK_METERS_PER_MINUTE));
   const description = buildDescription(item);
 
   const sigun = pick(item, ['sigun']) || '';
-  const regionInfo = extractRegionFromSigun(sigun, points, name);
+  const regionInfo = await resolveCourseRegion(points, sigun, name);
+  const sigunRegion = extractRegionFromSigun(sigun, points, name);
+  if (regionInfo.source === 'gpx' && sigunRegion.region !== regionInfo.region) {
+    console.log(`  - 지역 보정: sigun "${sigun}" → GPX 출발 좌표 기준 ${regionInfo.region} ${regionInfo.sub_region || ''}`);
+  }
   const region = regionInfo.region || '서울';
   const subRegion = regionInfo.sub_region || null;
 
@@ -651,11 +731,12 @@ async function importCourse(client, item, ownerId, tagId) {
   );
 
   await insertWaypoints(client, course.course_id, points);
+  // 코스 기본 태그: 둘레길 + 공식코스
   await client.query(
     `INSERT INTO taggings (tag_id, target_id, target_type, user_id)
-     VALUES ($1, $2, 'course', $3)
+     SELECT unnest($1::uuid[]), $2, 'course', $3
      ON CONFLICT DO NOTHING`,
-    [tagId, course.course_id, ownerId]
+    [tagIds, course.course_id, ownerId]
   );
 
   return { status: 'imported', name, courseId: course.course_id, pointCount: points.length, points, description, region, subRegion };
@@ -679,14 +760,14 @@ async function main() {
 
   try {
     const ownerId = await ensureAdminUser(client);
-    const tagId = await ensureCourseTag(client);
+    const tagIds = [await ensureCourseTag(client), await ensureOfficialCourseTag(client)];
 
     for (const [index, item] of courses.entries()) {
       const label = pick(item, ['crsKorNm']) || pick(item, ['crsIdx']) || `row-${index + 1}`;
 
       try {
         await client.query('BEGIN');
-        const result = await importCourse(client, item, ownerId, tagId);
+        const result = await importCourse(client, item, ownerId, tagIds);
         await client.query('COMMIT');
 
         if (result.status === 'imported') {
@@ -704,9 +785,12 @@ async function main() {
               .filter((detail) => detail.status === 'created' || detail.status === 'existing')
               .map((detail) => {
                 const distanceLabel = detail.routeDistance == null ? 'mapped' : `${detail.routeDistance}m`;
-                return `${detail.savedName}(${detail.status}, ${distanceLabel})`;
+                const roleLabel = !detail.isWaypoint ? ', 주변'
+                  : detail.selection === 'route_nearby' ? ', 보강'
+                    : detail.selection === 'curated' ? ', 큐레이션' : '';
+                return `${detail.savedName}(${detail.status}, ${distanceLabel}${roleLabel})`;
               });
-            console.log(`  - tour_info 스팟: 후보 ${spotResult.candidates}개, 신규 ${spotResult.saved}개, 제외 ${spotResult.skipped}개, 실패 ${spotResult.failed}개`);
+            console.log(`  - tour_info 스팟: 후보 ${spotResult.candidates}개, 신규 ${spotResult.saved}개, 주변 ${spotResult.nearby}개, 제외 ${spotResult.skipped}개, 실패 ${spotResult.failed}개`);
             if (savedLabels.length > 0) {
               console.log(`  - 저장/확인: ${savedLabels.join(', ')}`);
             }

@@ -1,5 +1,6 @@
 const axios = require('axios');
 const trafficLog = require('./tourTrafficLog');
+const { installDataGoKrKeyFallback } = require('./dataGoKrKey');
 
 const BASE_URL = 'https://apis.data.go.kr/B551011/Odii';
 const DEFAULT_MOBILE_OS = 'ETC';
@@ -16,12 +17,12 @@ function getServiceKey() {
   );
 }
 
-const http = axios.create({
+const http = installDataGoKrKeyFallback(axios.create({
   timeout: 5000, // 5초 타임아웃 (빠른 Fallback 전환을 위해)
   headers: {
     'User-Agent': 'WalkBuddy-Odii-Client/1.0',
   },
-});
+}));
 
 function buildUrl(pathname, params = {}) {
   const serviceKey = getServiceKey();
