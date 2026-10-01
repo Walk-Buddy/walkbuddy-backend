@@ -10,27 +10,47 @@ function isMissing(value) {
 exports.createCourseReview = async (userId, courseId, body) => {
   const { walk_record_id, description, difficulty, rating, is_public = true, tag_ids = [] } = body;
 
-  // walk_record_id 유효성 확인 (본인 산책 기록 + 해당 코스)
-  const { rows: walkRows } = await pool.query(
-    `SELECT walk_record_id FROM walk_records
-     WHERE walk_record_id = $1 AND user_id = $2 AND course_id = $3 AND ended_at IS NOT NULL`,
-    [walk_record_id, userId, courseId]
-  );
-  if (!walkRows.length) {
-    const err = new Error('유효한 산책 기록이 없습니다.');
-    err.status = 400; throw err;
-  }
-
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // 산책을 마친 뒤에는 후기 작성을 항상 허용한다.
+    //  - 본인의 이 코스 산책 기록이면, 서버 종료 처리(endWalk)가 실패해 열려 있어도 여기서 종료 처리한다.
+    //  - 산책 기록 ID가 없거나 맞지 않으면(산책 시작 기록 생성 실패 등) 후기용 산책 기록을 만들어 연결한다.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let walkRecordId = null;
+    if (walk_record_id && UUID_RE.test(String(walk_record_id))) {
+      const { rows: [walk] } = await client.query(
+        `SELECT walk_record_id, ended_at FROM walk_records
+         WHERE walk_record_id = $1 AND user_id = $2 AND course_id = $3`,
+        [walk_record_id, userId, courseId]
+      );
+      if (walk) {
+        walkRecordId = walk.walk_record_id;
+        if (!walk.ended_at) {
+          await client.query(
+            `UPDATE walk_records SET ended_at = GREATEST(NOW(), started_at), is_completed = TRUE WHERE walk_record_id = $1`,
+            [walkRecordId]
+          );
+        }
+      }
+    }
+    if (!walkRecordId) {
+      const { rows: [created] } = await client.query(
+        `INSERT INTO walk_records (user_id, course_id, started_at, ended_at, is_completed)
+         VALUES ($1, $2, NOW(), NOW(), TRUE)
+         RETURNING walk_record_id`,
+        [userId, courseId]
+      );
+      walkRecordId = created.walk_record_id;
+    }
 
     const { rows: [review] } = await client.query(
       `INSERT INTO course_reviews
          (user_id, course_id, walk_record_id, description, difficulty, rating, is_public)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING course_review_id, course_id, rating, created_at`,
-      [userId, courseId, walk_record_id, description || null, difficulty || null, rating || null, is_public]
+       RETURNING course_review_id, course_id, walk_record_id, rating, created_at`,
+      [userId, courseId, walkRecordId, description || null, difficulty || null, rating || null, is_public]
     );
 
     // 태그 저장
