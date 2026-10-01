@@ -683,7 +683,7 @@ exports.getCourses = async (query, currentUserId) => {
     conditions.push(`(c.data_source IS NOT NULL OR u.role = 'admin')`);
   }
 
-  // 코스 태그 ID 필터
+  // 코스 태그 ID 필터 (코스 자체 및 경유지 스팟 태그 통합 AND 교집합 매칭)
   if (courseTagIds.length > 0) {
     params.push(courseTagIds);
     const tagIdsParamIndex = params.length;
@@ -692,21 +692,25 @@ exports.getCourses = async (query, currentUserId) => {
 
     conditions.push(`
       c.course_id IN (
-        SELECT tg.target_id
-        FROM taggings tg
-        JOIN tags t
-          ON t.tag_id = tg.tag_id
-         AND t.type = 'course'
-         AND t.is_active = TRUE
-        WHERE tg.target_type = 'course'
-          AND tg.tag_id = ANY($${tagIdsParamIndex}::uuid[])
-        GROUP BY tg.target_id
-        HAVING COUNT(DISTINCT tg.tag_id) = $${tagCountParamIndex}
+        SELECT course_id FROM (
+          SELECT tg.target_id AS course_id, tg.tag_id
+          FROM taggings tg
+          JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+          WHERE tg.target_type = 'course' AND tg.tag_id = ANY($${tagIdsParamIndex}::uuid[])
+          UNION
+          SELECT cw.course_id, tg.tag_id
+          FROM course_waypoints cw
+          JOIN taggings tg ON tg.target_type = 'spot' AND tg.target_id = cw.spot_id
+          JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+          WHERE cw.type = 'spot' AND tg.tag_id = ANY($${tagIdsParamIndex}::uuid[])
+        ) combined_course_tag_ids
+        GROUP BY course_id
+        HAVING COUNT(DISTINCT tag_id) >= $${tagCountParamIndex}
       )
     `);
   }
 
-  // 코스 태그명 필터
+  // 코스 태그명 필터 (코스 자체 및 경유지 스팟 태그명 통합 AND 교집합 매칭)
   if (tagNameList.length > 0) {
     params.push(tagNameList);
     const tagNamesParamIndex = params.length;
@@ -715,11 +719,20 @@ exports.getCourses = async (query, currentUserId) => {
 
     conditions.push(`
       c.course_id IN (
-        SELECT tg.target_id
-        FROM taggings tg
-        JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'course' AND t.is_active = TRUE
-        WHERE tg.target_type = 'course' AND t.name = ANY($${tagNamesParamIndex}::TEXT[])
-        GROUP BY tg.target_id HAVING COUNT(DISTINCT t.name) >= $${tagCountParamIndex}
+        SELECT course_id FROM (
+          SELECT tg.target_id AS course_id, t.name
+          FROM taggings tg
+          JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+          WHERE tg.target_type = 'course' AND t.name = ANY($${tagNamesParamIndex}::TEXT[])
+          UNION
+          SELECT cw.course_id, t.name
+          FROM course_waypoints cw
+          JOIN taggings tg ON tg.target_type = 'spot' AND tg.target_id = cw.spot_id
+          JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+          WHERE cw.type = 'spot' AND t.name = ANY($${tagNamesParamIndex}::TEXT[])
+        ) combined_course_tag_names
+        GROUP BY course_id
+        HAVING COUNT(DISTINCT name) >= $${tagCountParamIndex}
       )
     `);
   }
