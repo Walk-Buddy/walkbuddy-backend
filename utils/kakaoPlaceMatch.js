@@ -12,8 +12,8 @@ const KAKAO_KEYWORD_URL = 'https://dapi.kakao.com/v2/local/search/keyword.json';
 // 레거시 스팟 ID: tour_123, tour_with_123, tour:123
 const LEGACY_PLACE_ID_PATTERN = /^tour(?:_with)?[_:](\d+)$/;
 
-// 장소 자체가 아닌 부속시설·상업시설로 잘못 매칭되는 카카오 카테고리
-const EXCLUDED_KAKAO_CATEGORY_PATTERN = /편의점|주차장|화장실|충전소|숙박|매표소|퀵서비스|식품판매|입출구|^부동산 > (?!빌딩)|^의료,건강/;
+// 장소 자체가 아닌 부속시설·상업시설로 잘못 매칭되는 카카오 카테고리 (예: 구봉산 → 구봉산카페쉼터)
+const EXCLUDED_KAKAO_CATEGORY_PATTERN = /편의점|주차장|화장실|충전소|숙박|매표소|퀵서비스|식품판매|입출구|^부동산 > (?!빌딩)|^음식점|^의료,건강/;
 
 // 원래 이름 뒤에 붙으면 부속시설인 단어 (예: 석촌동고분군 관리사무소, 독산근린공원 운동장1)
 const FACILITY_SUFFIX_PATTERN = /(관리사무소|사무소|관리소|운동장|체육시설|주차장|화장실|매표소|매점|출입구|입구|정류장|안내소|안내센터|휴게소|게이트|점)\d*$/;
