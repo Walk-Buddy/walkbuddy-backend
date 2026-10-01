@@ -5,8 +5,8 @@ const pool = require('../config/db');
 const spotService = require('../services/spotService');
 const { installDataGoKrKeyFallback } = require('../services/dataGoKrKey');
 const courseTagService = require('../services/courseTagService');
-const { getDurunubiCourseSpotMappings } = require('../constants/durunubiSpotMappings');
-const { inferRegionFromLocation } = require('../constants/spotCategoryRules');
+const { getDurunubiCourseSpotMappings, CURATED_DURUNUBI_SPOT_MAPPINGS } = require('../constants/durunubiSpotMappings');
+const { inferRegionFromLocation, resolveChuncheonArea } = require('../constants/spotCategoryRules');
 const { parseDescriptionSections } = require('../utils/courseDescription');
 const { WALK_METERS_PER_MINUTE } = require('../constants/courseConstants');
 
@@ -31,8 +31,11 @@ const serviceKey =
 const mobileOS = process.env.DURUNUBI_MOBILE_OS || DEFAULT_MOBILE_OS;
 const mobileApp = process.env.DURUNUBI_MOBILE_APP || DEFAULT_MOBILE_APP;
 const brdDiv = process.env.DURUNUBI_BRD_DIV || '';
-const maxImport = toInt(process.argv[2] || process.env.DURUNUBI_MAX_IMPORT, 0);
-const startIndex = Math.max(0, toInt(process.argv[3] || process.env.DURUNUBI_START_INDEX, 0));
+// 위치 인자: [최대 개수] [시작 위치]. --curated-only 는 큐레이션 파일에 있는 코스만 import (대표 코스 선별용)
+const positionalArgs = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
+const curatedOnly = process.argv.includes('--curated-only');
+const maxImport = toInt(positionalArgs[0] || process.env.DURUNUBI_MAX_IMPORT, 0);
+const startIndex = Math.max(0, toInt(positionalArgs[1] || process.env.DURUNUBI_START_INDEX, 0));
 const maxWaypoints = toInt(process.env.DURUNUBI_MAX_WAYPOINTS, DEFAULT_MAX_WAYPOINTS);
 
 const http = installDataGoKrKeyFallback(axios.create({
@@ -136,7 +139,10 @@ async function fetchAllCourses() {
     courses.push(...page.items);
   }
 
-  const selectedCourses = startIndex > 0 ? courses.slice(startIndex) : courses;
+  const candidates = curatedOnly
+    ? courses.filter((course) => CURATED_DURUNUBI_SPOT_MAPPINGS.courses[String(pick(course, ['crsIdx']))])
+    : courses;
+  const selectedCourses = startIndex > 0 ? candidates.slice(startIndex) : candidates;
   return maxImport > 0 ? selectedCourses.slice(0, maxImport) : selectedCourses;
 }
 
@@ -353,7 +359,7 @@ const PROV_MAP = {
   '충북': '충북', '충청북도': '충북',
   '충남': '충남', '충청남도': '충남',
   '전북': '전북', '전라북도': '전북', '전북특별자치도': '전북',
-  '전남': '전남', '전라남도': '전남',
+  '전남': '전남', '전라남도': '전남', '전남광주통합특별시': '전남',
   '경북': '경북', '경상북도': '경북',
   '경남': '경남', '경상남도': '경남',
   '제주': '제주', '제주도': '제주', '제주특별자치도': '제주',
@@ -382,6 +388,46 @@ function extractRegionFromSigun(sigun, points, name) {
     region: regionInfo.region || '서울',
     sub_region: regionInfo.sub_region || null,
   };
+}
+
+// 전남광주통합특별시의 광주 쪽 자치구 (출발 좌표가 여기면 광주로 분류)
+const GWANGJU_DISTRICTS = new Set(['동구', '서구', '남구', '북구', '광산구']);
+
+/**
+ * 코스 지역은 두루누비 sigun 표기 대신 GPX 출발 좌표로 판정한다.
+ * (예: "DMZ 평화의 길 19-1코스"는 sigun이 "서울 강동구"지만 실제 경로는 철원·화천)
+ *  1) 춘천 권역이면 앱의 춘천 세부 권역(의암호·공지천권 등)
+ *  2) 그 외는 카카오 좌표→행정구역 변환으로 시·도 / 시·군·구
+ *  3) 변환 실패 시 기존 sigun 표기 사용
+ */
+async function resolveCourseRegion(points, sigun, name) {
+  const start = points[0];
+  if (start) {
+    const chuncheonArea = resolveChuncheonArea(start.lat, start.lng);
+    if (chuncheonArea) return { region: '춘천', sub_region: chuncheonArea, source: 'gpx' };
+
+    const kakaoKey = process.env.KAKAO_REST_API_KEY;
+    if (kakaoKey) {
+      try {
+        const { data } = await http.get('https://dapi.kakao.com/v2/local/geo/coord2regioncode.json', {
+          params: { x: start.lng, y: start.lat },
+          headers: { Authorization: `KakaoAK ${kakaoKey}` },
+          timeout: 5000,
+        });
+        const doc = (data?.documents || []).find((d) => d.region_type === 'H') || data?.documents?.[0];
+        const prov = doc?.region_1depth_name;
+        const district = doc?.region_2depth_name || null;
+        if (prov && PROV_MAP[prov]) {
+          const region = prov === '전남광주통합특별시' && GWANGJU_DISTRICTS.has(district) ? '광주' : PROV_MAP[prov];
+          return { region, sub_region: district, source: 'gpx' };
+        }
+      } catch (err) {
+        console.warn(`  - 좌표 지역 판정 실패(sigun 사용): ${err.message}`);
+      }
+    }
+  }
+
+  return { ...extractRegionFromSigun(sigun, points, name), source: 'sigun' };
 }
 
 function haversineMeters(a, b) {
@@ -653,7 +699,11 @@ async function importCourse(client, item, ownerId, tagId) {
   const description = buildDescription(item);
 
   const sigun = pick(item, ['sigun']) || '';
-  const regionInfo = extractRegionFromSigun(sigun, points, name);
+  const regionInfo = await resolveCourseRegion(points, sigun, name);
+  const sigunRegion = extractRegionFromSigun(sigun, points, name);
+  if (regionInfo.source === 'gpx' && sigunRegion.region !== regionInfo.region) {
+    console.log(`  - 지역 보정: sigun "${sigun}" → GPX 출발 좌표 기준 ${regionInfo.region} ${regionInfo.sub_region || ''}`);
+  }
   const region = regionInfo.region || '서울';
   const subRegion = regionInfo.sub_region || null;
 

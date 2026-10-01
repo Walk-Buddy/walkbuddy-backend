@@ -28,6 +28,9 @@ const isDryRun = args.includes('--dry-run');
 const withSpots = !args.includes('--no-spots'); // 기본적으로 스팟 등록 활성화
 const targetRegionArg = (getArg('region', process.env.STREET_TOURISM_REGION || 'all')).toLowerCase();
 const limitArg = Number.parseInt(getArg('limit', process.env.STREET_TOURISM_LIMIT || '0'), 10);
+// 대상 코스 중 몇 번째부터 처리할지 (0부터). 하루 T맵·TourAPI 한도에 맞춰 나눠 넣을 때 사용
+// 예: --region=seoul --start=0 --limit=90, 다음 날 --region=seoul --start=90
+const startArg = Math.max(0, Number.parseInt(getArg('start', '0'), 10) || 0);
 
 const serviceKey =
   process.env.TOURAPI_SERVICE_KEY ||
@@ -599,6 +602,7 @@ async function main() {
   console.log(`- 대상 지역: ${targetRegionArg.toUpperCase()}`);
   console.log(`- 경유지 스팟 등록: ${withSpots ? 'ON (TourAPI 관광정보 연동)' : 'OFF (단순 핀 좌표만)'}`);
   console.log(`- 드라이런 모드: ${isDryRun ? 'ON (DB 저장 안함)' : 'OFF (DB 직접 적재)'}`);
+  if (startArg > 0) console.log(`- 시작 위치: ${startArg + 1}번째 코스부터`);
   if (limitArg > 0) console.log(`- 제한 수량: ${limitArg}개`);
 
   const allItems = await fetchAllStreetTourismItems();
@@ -606,9 +610,9 @@ async function main() {
 
   console.log(`\n🔍 서울 및 춘천 필터링 결과: 총 ${targetItems.length}건 발굴`);
 
-  if (limitArg > 0) {
-    targetItems = targetItems.slice(0, limitArg);
-    console.log(`- 제한 적용 후: ${targetItems.length}건 처리 예정`);
+  if (startArg > 0 || limitArg > 0) {
+    targetItems = targetItems.slice(startArg, limitArg > 0 ? startArg + limitArg : undefined);
+    console.log(`- 범위 적용 후: ${startArg + 1}번째부터 ${targetItems.length}건 처리 예정`);
   }
 
   const client = isDryRun ? null : await pool.connect();

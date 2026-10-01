@@ -13,6 +13,7 @@ const tourApiService = require('./tourApiService');
 const odiiService = require('./odiiService');
 const trafficLog = require('./tourTrafficLog');
 const { getQuotaErrorCount } = require('./dataGoKrKey');
+const { isLegacyPlaceId, legacyContentId, findKakaoPlaceNear } = require('../utils/kakaoPlaceMatch');
 
 const TOUR_API_BASE_URL = 'https://apis.data.go.kr/B551011/KorService2';
 const TOUR_API_MATCH_RADIUS = Number(process.env.TOUR_API_MATCH_RADIUS || 300);
@@ -29,6 +30,35 @@ function sanitizeText(text) {
         .replace(/[\r\t]+/g, ' ')         // 탭/개행 정규화
         .replace(/\s{2,}/g, ' ')          // 다중 공백 단일화
         .trim();
+}
+
+/**
+ * 앱은 카카오 ID가 없는 TourAPI 장소를 kakao_place_id = "tour:<contentId>" 로 저장 요청한다.
+ * 이대로 저장하면 같은 장소가 카카오 스팟과 따로 생기므로, 같은 위치의 카카오 장소를 찾아 카카오 ID로 바꾼다.
+ * 찾지 못하면 요청 그대로 저장한다. (contentId 는 tour_api_content_id 로 넘겨 TourAPI 보강에 쓴다)
+ */
+async function normalizeLegacyPlaceId(body) {
+    if (!isLegacyPlaceId(body.kakao_place_id) || body.kakao_place_id == null) return body;
+
+    const contentId = legacyContentId(body.kakao_place_id);
+    const doc = await findKakaoPlaceNear({ name: body.name, x: body.x, y: body.y, kakaoKey: getKakaoRestApiKey() })
+        .catch(() => null);
+    if (!doc) {
+        return { ...body, tour_api_content_id: body.tour_api_content_id || contentId };
+    }
+
+    const categories = inferSpotCategoriesWithFallback(doc);
+    return {
+        ...body,
+        kakao_place_id: String(doc.id),
+        name: doc.place_name,
+        kakao_category_name: doc.category_name || body.kakao_category_name || null,
+        categories: categories.length ? categories : body.categories,
+        address: doc.road_address_name || doc.address_name || body.address,
+        x: doc.x,
+        y: doc.y,
+        tour_api_content_id: body.tour_api_content_id || contentId,
+    };
 }
 
 function getTourApiServiceKey() {
@@ -1045,7 +1075,8 @@ exports.createSpot = async (body) => {
 // ──────────────────────────────────────────────────────────────────────
 // 카카오 스팟 저장
 // ──────────────────────────────────────────────────────────────────────
-exports.saveKakaoSpot = async (body, userId) => {
+exports.saveKakaoSpot = async (rawBody, userId) => {
+    const body = await normalizeLegacyPlaceId(rawBody);
     const {
         kakao_place_id,
         name,
