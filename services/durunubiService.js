@@ -16,6 +16,7 @@ const axios = require('axios');
 const trafficLog = require('./tourTrafficLog');
 const { resolveRegion } = require('../constants/spotCategoryRules');
 const { getDurunubiCourseSpotMappings } = require('../constants/durunubiSpotMappings');
+const { cleanText } = require('../utils/courseDescription');
 
 const BASE_URL = 'http://apis.data.go.kr/B551011/Durunubi';
 const DEFAULT_MOBILE_OS = process.env.DURUNUBI_MOBILE_OS || 'ETC';
@@ -198,7 +199,7 @@ exports.getDurunubiCourses = async ({ region, brdDiv, page = 1, limit = 10 } = {
     crs_time: item.crsTotlRqrmHour || item.crsTime || null,
     sigun: item.sigun || null,
     image_url: item.imgUrl || null,
-    summary: item.crsSummary || null,
+    summary: cleanText(item.crsSummary),
   }));
 
   return {
@@ -244,10 +245,10 @@ exports.getDurunubiCourseDetail = async (crsIdx) => {
     crs_time: item.crsTime || item.crsTotlRqrmHour || null,
     crs_cycle: item.crsCycle || null,
     sigun: item.sigun || null,
-    summary: item.crsSummary || null,
-    contents: item.crsContents || null,
-    tour_info: item.crsTourInfo || null,
-    traveler_info: item.travelerinfo || item.travelerInfo || null,
+    summary: cleanText(item.crsSummary),
+    contents: cleanText(item.crsContents),
+    tour_info: cleanText(item.crsTourInfo),
+    traveler_info: cleanText(item.travelerinfo || item.travelerInfo),
     image_url: item.imgUrl || null,
     gpx: item.gpxpath || item.gpxPath || null,
   };

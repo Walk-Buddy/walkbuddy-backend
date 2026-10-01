@@ -1,6 +1,6 @@
 const pool = require('../config/db');
 const { extractRegionFromAddress, inferRegionFromLocation } = require('../constants/spotCategoryRules');
-const { parseDescriptionSections } = require('../utils/courseDescription');
+const { parseDescriptionSections, cleanText } = require('../utils/courseDescription');
 const courseTagService = require('./courseTagService');
 
 const WALK_SPEED_MPS = 1.1; // 도보 평균 4km/h
@@ -315,14 +315,14 @@ function normalizeDifficulty(value) {
 function buildCourseDetailDescription(course) {
   if (course.data_source !== '한국관광공사_두루누비') {
     return {
-      description: course.description,
+      description: cleanText(course.description),
     };
   }
 
   const sections = parseDescriptionSections(course.description);
 
   return {
-    description: sections.summary.join('\n') || sections.content || course.description,
+    description: sections.summary.join('\n') || sections.content || cleanText(course.description),
     description_sections: sections,
   };
 }
