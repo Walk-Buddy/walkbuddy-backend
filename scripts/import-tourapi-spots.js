@@ -36,6 +36,9 @@ const skipExisting = args.includes('--skip-existing');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// 목욕·찜질 시설 이름 ('스파이더' 같은 이름은 제외하지 않는다)
+const BATH_FACILITY_PATTERN = /찜질|사우나|온천|불가마|목욕탕|스파(?!이)/;
+
 // ──────────────────────────────────────────────────────────
 // 2. 서비스 키 및 API 설정
 // ──────────────────────────────────────────────────────────
@@ -519,6 +522,12 @@ async function main() {
 
         // 유효하지 않은 좌표 건너뜀
         if (!Number.isFinite(lng) || !Number.isFinite(lat) || lng === 0 || lat === 0) {
+          continue;
+        }
+
+        // 산책 장소가 아닌 목욕·찜질 시설은 제외 (예: 월드온천24)
+        if (BATH_FACILITY_PATTERN.test(title)) {
+          console.log(`   [제외] 목욕·찜질 시설: ${title}`);
           continue;
         }
 
