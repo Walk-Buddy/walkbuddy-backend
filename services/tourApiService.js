@@ -1185,8 +1185,7 @@ exports.getPetTourSpots = async ({ region, sub_region, contentTypeId, page = 1, 
     region: target.name,
     is_pet_friendly: true,
     tags: [
-      { tag_id: "pet", name: "반려견동반" },
-      { tag_id: "pet2", name: "반려동물" },
+      { tag_id: "pet", name: "반려동물" },
     ],
   }));
 
@@ -1284,8 +1283,7 @@ exports.searchPetTourPlaces = async ({ region, sub_region, keyword, contentTypeI
     region: target ? target.name : "전체",
     is_pet_friendly: true,
     tags: [
-      { tag_id: "pet", name: "반려견동반" },
-      { tag_id: "pet2", name: "반려동물" },
+      { tag_id: "pet", name: "반려동물" },
     ],
   }));
 

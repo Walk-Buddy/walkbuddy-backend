@@ -4,7 +4,7 @@
  * ─────────────────────────────────────────────────────────────
  * 한국관광공사 반려동물 동반여행(KorPetTourService2) API를 호출하여
  * 지역별 반려동물 관광지를 DB spots에 등록/동기화하고,
- * 세부 태그(#반려견동반, #대형견가능, #소형견동반, #반려견배변시설 등)를 taggings에 적재한다.
+ * 세부 태그(#반려동물, #대형견 동반, #소형견동반, #반려견배변시설 등)를 taggings에 적재한다.
  *
  * 사용법:
  *   node scripts/sync-pet-spots.js                # 춘천 기본 동기화
@@ -84,7 +84,7 @@ async function attachTagsToSpot(spotId, tagNames, userId) {
         }
       }
 
-      const summaryTags = detail?.summary_tags || ['#반려견동반'];
+      const summaryTags = detail?.summary_tags || ['#반려동물'];
       const petDetails = detail?.details || null;
 
       // 2. DB 존재 여부 확인 (이름 기준)
