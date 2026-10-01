@@ -267,7 +267,7 @@ exports.getDurunubiCourseSpots = async (crsIdx) => {
   }
 
   const detail = await exports.getDurunubiCourseDetail(crsIdx);
-  const mappings = getDurunubiCourseSpotMappings(detail.crs_name);
+  const mappings = getDurunubiCourseSpotMappings(detail.crs_name, detail.crs_idx);
 
   const spots = mappings.map((m, idx) => ({
     order: m.order || idx + 1,

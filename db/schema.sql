@@ -371,6 +371,15 @@ CREATE TABLE spots (
     -- source = 'kakao'인 장소를 다시 보강/동기화할 때 사용
     -- 관리자 직접 등록 장소는 NULL 가능
 
+    tour_enriched_at    TIMESTAMPTZ     NULL,
+    -- TourAPI(개요·무장애·반려동물)·Odii 보강을 마지막으로 마친 시각
+    -- TOUR_ENRICH_REFRESH_DAYS(기본 30일) 안이면 재저장 시 보강 호출 생략
+    -- 일일 한도 초과로 보강이 불완전하면 기록하지 않음
+
+    tour_content_id     VARCHAR(20)     NULL,
+    -- 보강 때 매칭된 TourAPI contentId (TourAPI에 없는 장소면 NULL)
+    -- 다시 보강할 때 위치·키워드 매칭 검색을 생략하는 데 사용
+
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
 

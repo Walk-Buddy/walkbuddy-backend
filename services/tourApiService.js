@@ -3,6 +3,7 @@ const { resolveRegion, TARGET_REGIONS, inferSpotCategories, inferSpotCategoriesW
 const pool = require("../config/db");
 const trafficLog = require("./tourTrafficLog");
 const tourCache = require("./tourCache");
+const { installDataGoKrKeyFallback } = require("./dataGoKrKey");
 
 const BASE_URL = "https://apis.data.go.kr/B551011/KorService2";
 const WITH_TOUR_BASE_URL = "https://apis.data.go.kr/B551011/KorWithService2"; // 무장애 여행정보 API
@@ -40,12 +41,13 @@ function getPetTourServiceKey() {
   return getServiceKey();
 }
 
-const http = axios.create({
+// 일일 한도 초과 시 보조 인증키(TOURAPI_SERVICE_KEY_FALLBACK)로 전환
+const http = installDataGoKrKeyFallback(axios.create({
   timeout: 15000,
   headers: {
     "User-Agent": "WalkBuddy-TourAPI-Client/1.0",
   },
-});
+}));
 
 /**
  * OpenAPI를 실제로 호출하고 응답 상태·소요시간을 함께 돌려준다.
