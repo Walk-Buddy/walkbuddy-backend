@@ -70,6 +70,9 @@ async function mergeSpot(client, from, to) {
   await client.query(`UPDATE notifications SET target_id = $2 WHERE target_type = 'spot' AND target_id = $1`, [from.spot_id, to.spot_id]);
 
   // 대상 스팟에 비어 있는 정보는 레거시 스팟 값으로 채운다.
+  // TourAPI 번호는 중복 금지(uix_spots_tour_content_id)라 레거시 행에서 먼저 뺀다.
+  const fromTourContentId = from.tour_content_id || legacyContentId(from.kakao_place_id);
+  await client.query(`UPDATE spots SET tour_content_id = NULL WHERE spot_id = $1`, [from.spot_id]);
   await client.query(
     `UPDATE spots t SET
        first_image       = COALESCE(t.first_image, f.first_image),
@@ -80,7 +83,7 @@ async function mergeSpot(client, from, to) {
        tour_content_id   = COALESCE(t.tour_content_id, $3)
      FROM spots f
      WHERE t.spot_id = $2 AND f.spot_id = $1`,
-    [from.spot_id, to.spot_id, legacyContentId(from.kakao_place_id)]
+    [from.spot_id, to.spot_id, fromTourContentId]
   );
 
   await client.query(`DELETE FROM spots WHERE spot_id = $1`, [from.spot_id]);
@@ -99,7 +102,7 @@ async function convertSpot(client, spot, doc) {
 
 async function main() {
   const { rows: legacySpots } = await pool.query(
-    `SELECT spot_id, name, kakao_place_id,
+    `SELECT spot_id, name, kakao_place_id, tour_content_id,
             ST_X(location::geometry) AS x, ST_Y(location::geometry) AS y
      FROM spots
      WHERE ${LEGACY_CONDITION}

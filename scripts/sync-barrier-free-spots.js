@@ -16,6 +16,7 @@
 require('dotenv').config();
 const pool = require('../config/db');
 const tourApiService = require('../services/tourApiService');
+const { findExistingSpot, linkExternalIds } = require('../utils/spotIdentity');
 const { findTags } = require('../constants/tagAliases');
 const {
   resolveRegion,
@@ -154,14 +155,10 @@ async function syncRegion(regionName, taggerId) {
       continue;
     }
 
-    // DB 존재 여부 확인 (1차: kakao_place_id 'tour_with_' 기준, 2차: name 기준)
-    const kakaoPlaceId = `tour_with_${contentId}`;
-    const { rows: existing } = await pool.query(
-      `SELECT spot_id, name, barrier_free_info FROM spots
-       WHERE kakao_place_id = $1 OR (name = $2 AND status = 'active')
-       LIMIT 1`,
-      [kakaoPlaceId, item.title]
-    );
+    // 이미 있는 장소인지 TourAPI 번호 → 같은 이름 + 300m 로 확인 (utils/spotIdentity.js)
+    const matched = await findExistingSpot(pool, { tourContentId: contentId, name: item.title, lat: item.y, lng: item.x });
+    const existing = matched ? [matched] : [];
+    if (matched) await linkExternalIds(pool, matched.spot_id, { tourContentId: contentId });
 
     let targetSpotId = null;
 
@@ -206,14 +203,14 @@ async function syncRegion(regionName, taggerId) {
 
       const { rows: inserted } = await pool.query(
         `INSERT INTO spots (
-          kakao_place_id, name, location, address, categories, kakao_category_name, source,
+          tour_content_id, name, location, address, categories, kakao_category_name, source,
           content_place, content_tour, first_image, barrier_free_info, region, sub_region, status, last_synced_at
         ) VALUES (
           $1, $2, ST_Point($3, $4)::GEOGRAPHY, $5, $6::TEXT[], $7, 'admin',
           $8, $9, $10, $11, $12, $13, 'active', NOW()
         ) RETURNING spot_id`,
         [
-          kakaoPlaceId,
+          String(contentId),
           item.title,
           lng,
           lat,

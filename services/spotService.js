@@ -14,6 +14,7 @@ const odiiService = require('./odiiService');
 const trafficLog = require('./tourTrafficLog');
 const { getQuotaErrorCount } = require('./dataGoKrKey');
 const { isLegacyPlaceId, legacyContentId, findKakaoPlaceNear } = require('../utils/kakaoPlaceMatch');
+const { findExistingSpot, linkExternalIds, toKakaoPlaceId, toTourContentId } = require('../utils/spotIdentity');
 const { findTags } = require('../constants/tagAliases');
 
 const TOUR_API_BASE_URL = 'https://apis.data.go.kr/B551011/KorService2';
@@ -683,7 +684,13 @@ async function enrichKakaoSpotTourContent(spot, userId) {
         // 일일 한도 초과로 일부 호출이 실패했다면 기록하지 않아 다음 저장 때 다시 시도한다.
         if (getQuotaErrorCount() === quotaErrorsBefore) {
             await pool.query(
-                `UPDATE spots SET tour_enriched_at = NOW(), tour_content_id = $2 WHERE spot_id = $1`,
+                // 다른 장소가 이미 가진 TourAPI 번호는 넣지 않는다 (uix_spots_tour_content_id)
+                `UPDATE spots SET tour_enriched_at = NOW(),
+                        tour_content_id = CASE
+                            WHEN $2::text IS NULL THEN tour_content_id
+                            WHEN EXISTS (SELECT 1 FROM spots o WHERE o.tour_content_id = $2 AND o.spot_id <> $1) THEN tour_content_id
+                            ELSE $2 END
+                  WHERE spot_id = $1`,
                 [updatedSpot.spot_id, matched?.contentid ? String(matched.contentid) : null]
             );
         } else {
@@ -1029,6 +1036,15 @@ exports.createSpot = async (body) => {
     const determinedRegion = region || regionInfo.region || '서울';
     const determinedSubRegion = sub_region || regionInfo.sub_region || null;
 
+    // 같은 이름의 장소가 300m 안에 이미 있으면 새로 만들지 않는다 (utils/spotIdentity.js)
+    const duplicate = await findExistingSpot(pool, { name, lat, lng });
+    if (duplicate) {
+        const err = new Error(`이미 등록된 장소입니다: ${duplicate.name}`);
+        err.status = 409;
+        err.spot_id = duplicate.spot_id;
+        throw err;
+    }
+
     const result = await pool.query(
         `INSERT INTO spots (
             name, location, address, categories,
@@ -1099,16 +1115,26 @@ exports.saveKakaoSpot = async (rawBody, userId) => {
     const determinedRegion = region || regionInfo.region || '서울';
     const determinedSubRegion = sub_region || regionInfo.sub_region || null;
 
-    const createdResult = await pool.query(
-        `INSERT INTO spots (kakao_place_id, name, location, address, categories, kakao_category_name, source, region, sub_region, last_synced_at)
-         VALUES ($1, $2, ST_Point($3, $4)::GEOGRAPHY, $5, $6::TEXT[], $7, 'kakao', $8, $9, NOW())
-         ON CONFLICT (kakao_place_id) DO NOTHING
+    // 이미 있는 장소인지 TourAPI 번호 → 카카오 번호 → 같은 이름 + 300m 순서로 확인 (utils/spotIdentity.js)
+    const kakaoPlaceId = toKakaoPlaceId(kakao_place_id);
+    const matchedSpot = await findExistingSpot(pool, {
+        tourContentId: tour_api_content_id, kakaoPlaceId, name, lat, lng,
+    });
+    if (matchedSpot) {
+        await linkExternalIds(pool, matchedSpot.spot_id, { tourContentId: tour_api_content_id, kakaoPlaceId });
+    }
+
+    const createdResult = matchedSpot ? { rows: [] } : await pool.query(
+        `INSERT INTO spots (kakao_place_id, tour_content_id, name, location, address, categories, kakao_category_name, source, region, sub_region, last_synced_at)
+         VALUES ($1, $10, $2, ST_Point($3, $4)::GEOGRAPHY, $5, $6::TEXT[], $7, 'kakao', $8, $9, NOW())
+         ON CONFLICT DO NOTHING
          RETURNING spot_id, kakao_place_id, name, address, categories, kakao_category_name,
                    region, sub_region,
                    recommend_pct, content_tour,
                    ST_X(location::GEOMETRY) AS x,
                    ST_Y(location::GEOMETRY) AS y`,
-        [kakao_place_id, name, lng, lat, selectedAddress, normalizedCategories, kakao_category_name || null, determinedRegion, determinedSubRegion]
+        [kakaoPlaceId, name, lng, lat, selectedAddress, normalizedCategories, kakao_category_name || null, determinedRegion, determinedSubRegion,
+         toTourContentId(tour_api_content_id)]
     );
 
     if (createdResult.rows.length > 0) {
@@ -1132,8 +1158,8 @@ exports.saveKakaoSpot = async (rawBody, userId) => {
                 tour_enriched_at > NOW() - ($2::int * INTERVAL '1 day') AS is_recently_enriched,
                 ST_X(location::GEOMETRY) AS x,
                 ST_Y(location::GEOMETRY) AS y
-         FROM spots WHERE kakao_place_id = $1`,
-        [kakao_place_id, TOUR_ENRICH_REFRESH_DAYS]
+         FROM spots WHERE ${matchedSpot ? 'spot_id = $1' : 'kakao_place_id = $1'}`,
+        [matchedSpot ? matchedSpot.spot_id : kakaoPlaceId, TOUR_ENRICH_REFRESH_DAYS]
     );
 
     const existingSpot = existingResult.rows[0];

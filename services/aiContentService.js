@@ -6,6 +6,8 @@ const s3 = require('../config/s3'); // 기본 자격증명 체인(EC2 IAM Role �
 const axios = require('axios');
 const odiiService = require('./odiiService');
 const tourApiService = require('./tourApiService');
+const { findExistingSpot } = require('../utils/spotIdentity');
+const { inferSpotCategoriesWithFallback } = require('../constants/spotCategoryRules');
 
 const S3_BUCKET = process.env.S3_BUCKET_NAME;
 // 예: https://<bucket>.s3.<region>.amazonaws.com/tts/<spotId>/place.mp3
@@ -341,13 +343,16 @@ async function getAiContentsByTypes(rawSpotId, contentTypes = ['place', 'history
       try {
         const tourDetail = await tourApiService.getSpotDetail(spotId);
         if (tourDetail) {
-          // 동일 이름으로 이미 등록된 스팟이 있는지 확인
-          const { rows: existingRows } = await pool.query(
+          // 이미 등록된 장소인지 TourAPI 번호 → 같은 이름 + 300m 로 확인 (utils/spotIdentity.js)
+          const matched = await findExistingSpot(pool, {
+            tourContentId: spotId, name: tourDetail.title, lat: tourDetail.y, lng: tourDetail.x,
+          });
+          const { rows: existingRows } = matched ? await pool.query(
             `SELECT spot_id, name, address, ST_X(location::geometry) AS x, ST_Y(location::geometry) AS y,
                     content_place, content_history, content_tour, barrier_free_info
-             FROM spots WHERE name = $1 AND status = 'active' LIMIT 1`,
-            [tourDetail.title]
-          );
+             FROM spots WHERE spot_id = $1 AND status = 'active'`,
+            [matched.spot_id]
+          ) : { rows: [] };
 
           if (existingRows.length) {
             spot = existingRows[0];
@@ -358,11 +363,12 @@ async function getAiContentsByTypes(rawSpotId, contentTypes = ['place', 'history
             const posY = tourDetail.y || 37.5665;
             const overviewText = tourDetail.overview || null;
             const { rows: newSpotRows } = await pool.query(
-              `INSERT INTO spots (name, address, location, source, content_place, content_tour, categories)
-               VALUES ($1, $2, ST_SetSRID(ST_Point($3, $4), 4326)::geography, 'tour', $5, $5, ARRAY['관광·명소'])
+              `INSERT INTO spots (name, address, location, source, content_place, content_tour, categories, tour_content_id)
+               VALUES ($1, $2, ST_SetSRID(ST_Point($3, $4), 4326)::geography, 'tour', $5, $5, $6::TEXT[], $7)
                RETURNING spot_id, name, address, ST_X(location::geometry) AS x, ST_Y(location::geometry) AS y,
                          content_place, content_history, content_tour, barrier_free_info`,
-              [tourDetail.title, tourDetail.address, posX, posY, overviewText]
+              [tourDetail.title, tourDetail.address, posX, posY, overviewText,
+               inferSpotCategoriesWithFallback({ place_name: tourDetail.title, category_name: tourDetail.cat3 || '' }), spotId]
             );
             if (newSpotRows.length) {
               spot = newSpotRows[0];

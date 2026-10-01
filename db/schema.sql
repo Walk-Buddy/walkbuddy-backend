@@ -282,6 +282,7 @@ CREATE TABLE spots (
     -- 사용자가 카카오 검색 결과에서 장소를 선택했을 때,
     -- 같은 장소가 spots에 중복 INSERT 되지 않도록 판단하는 기준
     -- 관리자 직접 등록 장소는 카카오 ID가 없을 수 있으므로 NULL 허용
+    -- 실제 카카오 번호(숫자)만 허용 (chk_spots_kakao_place_id). TourAPI 번호는 tour_content_id 에 넣는다
 
 
     name                VARCHAR(100)    NOT NULL,
@@ -377,7 +378,8 @@ CREATE TABLE spots (
     -- 일일 한도 초과로 보강이 불완전하면 기록하지 않음
 
     tour_content_id     VARCHAR(20)     NULL,
-    -- 보강 때 매칭된 TourAPI contentId (TourAPI에 없는 장소면 NULL)
+    -- 장소의 TourAPI contentId (TourAPI에 없는 장소면 NULL)
+    -- 같은 장소 중복 저장 방지 기준 (uix_spots_tour_content_id) — utils/spotIdentity.js
     -- 다시 보강할 때 위치·키워드 매칭 검색을 생략하는 데 사용
 
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
@@ -436,6 +438,14 @@ CREATE UNIQUE INDEX uix_spots_kakao_place_id
 -- 카카오 장소 중복 저장 방지
 -- PostgreSQL UNIQUE는 NULL을 서로 다른 값으로 보므로,
 -- kakao_place_id가 NULL인 관리자 직접 등록 장소는 여러 개 저장 가능
+
+ALTER TABLE spots ADD CONSTRAINT chk_spots_kakao_place_id
+    CHECK (kakao_place_id IS NULL OR kakao_place_id ~ '^[0-9]+$');
+-- 실제 카카오 번호만 허용 (예전 'tour_123'·'tour:123' 임시값 때문에 같은 장소를 알아보지 못했다)
+
+CREATE UNIQUE INDEX uix_spots_tour_content_id
+    ON spots (tour_content_id) WHERE tour_content_id IS NOT NULL;
+-- TourAPI 장소 중복 저장 방지. 장소를 넣기 전 utils/spotIdentity.js findExistingSpot 으로 확인한다
 
 CREATE INDEX ix_spots_categories
     ON spots USING GIN (categories);

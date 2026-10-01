@@ -9,6 +9,7 @@ const {
 const trafficLog = require('../services/tourTrafficLog');
 const { findTags } = require('../constants/tagAliases');
 const tourApiService = require('../services/tourApiService');
+const { findExistingSpot, linkExternalIds } = require('../utils/spotIdentity');
 
 // ──────────────────────────────────────────────────────────
 // 1. CLI 옵션 파싱
@@ -493,10 +494,9 @@ async function main() {
       for (let i = 0; i < items.length; i += 1) {
         const item = items[i];
         const contentId = String(item.contentid);
-        const kakaoPlaceId = `tour_${contentId}`;
 
-        if (seenPlaceIds.has(kakaoPlaceId)) continue;
-        seenPlaceIds.add(kakaoPlaceId);
+        if (seenPlaceIds.has(contentId)) continue;
+        seenPlaceIds.add(contentId);
 
         const lng = Number(item.mapx);
         const lat = Number(item.mapy);
@@ -575,48 +575,53 @@ async function main() {
           continue;
         }
 
-        // 5. DB spots 테이블에 영구 저장 (INSERT ... ON CONFLICT DO UPDATE)
-        const { rows } = await client.query(
-          `INSERT INTO spots (
-             kakao_place_id, name, location, address, categories,
-             kakao_category_name, source, region, sub_region,
-             content_tour, first_image, barrier_free_info, pet_tour_info, is_night_tour, last_synced_at
-           ) VALUES (
-             $1, $2, ST_Point($3, $4)::GEOGRAPHY, $5, $6::TEXT[],
-             $7, 'admin', $8, $9,
-             $10, $11, $12, $13, $14, NOW()
-           )
-           ON CONFLICT (kakao_place_id) DO UPDATE SET
-             name = EXCLUDED.name,
-             address = COALESCE(EXCLUDED.address, spots.address),
-             categories = EXCLUDED.categories,
-             region = EXCLUDED.region,
-             sub_region = EXCLUDED.sub_region,
-             content_tour = COALESCE(EXCLUDED.content_tour, spots.content_tour),
-             first_image = COALESCE(EXCLUDED.first_image, spots.first_image),
-             barrier_free_info = COALESCE(EXCLUDED.barrier_free_info, spots.barrier_free_info),
-             pet_tour_info = COALESCE(EXCLUDED.pet_tour_info, spots.pet_tour_info),
-             is_night_tour = EXCLUDED.is_night_tour,
-             last_synced_at = NOW(),
-             updated_at = NOW()
-           RETURNING spot_id`,
-          [
-            kakaoPlaceId,
-            title,
-            lng,
-            lat,
-            address || null,
-            categories,
-            item.cat3 || item.cat2 || item.cat1 || null,
-            determinedRegion,
-            determinedSubRegion,
-            overview || null,
-            firstImage,
-            barrierFree ? JSON.stringify(barrierFree) : null,
-            petTour ? JSON.stringify(petTour) : null,
-            isNightTour,
-          ]
-        );
+        // 5. DB spots 저장 — 이미 있는 장소면 업데이트, 없으면 새로 만든다
+        //    확인 순서: TourAPI 번호 → 같은 이름 + 300m (utils/spotIdentity.js)
+        const matched = await findExistingSpot(client, { tourContentId: contentId, name: title, lat, lng });
+        const values = {
+          address: address || null,
+          categories,
+          kakaoCategory: item.cat3 || item.cat2 || item.cat1 || null,
+          overview: overview || null,
+          firstImage,
+          barrierFree: barrierFree ? JSON.stringify(barrierFree) : null,
+          petTour: petTour ? JSON.stringify(petTour) : null,
+        };
+        let rows;
+        if (matched) {
+          await linkExternalIds(client, matched.spot_id, { tourContentId: contentId });
+          // 이미 있는 장소는 이름·좌표·카테고리를 바꾸지 않고 정보만 보강한다
+          ({ rows } = await client.query(
+            `UPDATE spots SET
+               address = COALESCE(address, $2),
+               content_tour = COALESCE($3, content_tour),
+               first_image = COALESCE($4, first_image),
+               barrier_free_info = COALESCE($5, barrier_free_info),
+               pet_tour_info = COALESCE($6, pet_tour_info),
+               is_night_tour = is_night_tour OR $7,
+               last_synced_at = NOW()
+             WHERE spot_id = $1
+             RETURNING spot_id`,
+            [matched.spot_id, values.address, values.overview, values.firstImage,
+             values.barrierFree, values.petTour, isNightTour]
+          ));
+        } else {
+          ({ rows } = await client.query(
+            `INSERT INTO spots (
+               tour_content_id, name, location, address, categories,
+               kakao_category_name, source, region, sub_region,
+               content_tour, first_image, barrier_free_info, pet_tour_info, is_night_tour, last_synced_at
+             ) VALUES (
+               $1, $2, ST_Point($3, $4)::GEOGRAPHY, $5, $6::TEXT[],
+               $7, 'admin', $8, $9,
+               $10, $11, $12, $13, $14, NOW()
+             )
+             RETURNING spot_id`,
+            [contentId, title, lng, lat, values.address, values.categories,
+             values.kakaoCategory, determinedRegion, determinedSubRegion,
+             values.overview, values.firstImage, values.barrierFree, values.petTour, isNightTour]
+          ));
+        }
 
         const spotId = rows[0]?.spot_id;
 
