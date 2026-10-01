@@ -9,6 +9,7 @@ const {
 const trafficLog = require('../services/tourTrafficLog');
 const { findTags } = require('../constants/tagAliases');
 const tourApiService = require('../services/tourApiService');
+const { installDataGoKrKeyFallback } = require('../services/dataGoKrKey');
 const { findExistingSpot, linkExternalIds } = require('../utils/spotIdentity');
 
 // ──────────────────────────────────────────────────────────
@@ -28,6 +29,10 @@ const isAll = args.includes('--all');
 const limitPerRegion = isAll ? 500 : Number.parseInt(getArg('limit', process.env.TOUARPI_IMPORT_LIMIT || '15'), 10);
 const targetRegion = (getArg('region', 'all') || 'all').trim();
 const sleepMs = Number.parseInt(getArg('sleep', isAll ? '150' : '200'), 10);
+// 콘텐츠 유형: 12 관광지, 14 문화시설 (기본 둘 다)
+const contentTypeIds = String(getArg('types', '12,14')).split(',').map((t) => t.trim()).filter(Boolean);
+// 이미 TourAPI 정보로 저장된 장소는 상세 호출 없이 건너뛴다 (중간에 멈췄다 다시 돌릴 때 호출 절약)
+const skipExisting = args.includes('--skip-existing');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -54,10 +59,11 @@ function requireEnv() {
   }
 }
 
-const http = axios.create({
+// 공공데이터 인증키 일일 한도 초과 시 보조 키(TOURAPI_SERVICE_KEY_FALLBACK)로 자동 전환
+const http = installDataGoKrKeyFallback(axios.create({
   timeout: 15000,
   headers: { 'User-Agent': 'WalkBuddy-TourAPI-Importer/1.0' },
-});
+}));
 
 async function callOpenApi(baseUrl, pathname, params, apiName) {
   const serviceKey = getServiceKey();
@@ -457,14 +463,6 @@ async function main() {
       });
     }
     if (isSeoul) {
-      // 서울 노원구(서울여대 인근) 및 서울 주요 명소
-      targets.push({
-        name: '서울',
-        areaCode: '1',
-        sigunguCode: '9', // 노원구 우선
-        description: '서울 노원구 및 주요 명소',
-      });
-      // 서울 전역 추가 (다양한 스팟 확보용)
       targets.push({
         name: '서울',
         areaCode: '1',
@@ -479,16 +477,26 @@ async function main() {
     for (const target of targets) {
       console.log(`📍 [${target.name}] 목록 조회 중... (${target.description})`);
 
-      const params = {
-        areaCode: target.areaCode,
-        numOfRows: limitPerRegion,
-        pageNo: 1,
-        arrange: 'O', // 인기/제목순
-        contentTypeId: 12, // 관광지
-      };
-      if (target.sigunguCode) params.sigunguCode = target.sigunguCode;
-
-      const items = await callOpenApi(BASE_URL, 'areaBasedList2', params, 'KorService2');
+      // 콘텐츠 유형별로 페이지를 넘기며 지역 전체(최대 limitPerRegion)를 받는다
+      const items = [];
+      for (const contentTypeId of contentTypeIds) {
+        const typeItems = [];
+        for (let pageNo = 1; typeItems.length < limitPerRegion; pageNo += 1) {
+          const params = {
+            areaCode: target.areaCode,
+            numOfRows: Math.min(100, limitPerRegion),
+            pageNo,
+            arrange: 'O', // 인기/제목순
+            contentTypeId,
+          };
+          if (target.sigunguCode) params.sigunguCode = target.sigunguCode;
+          const pageItems = await callOpenApi(BASE_URL, 'areaBasedList2', params, 'KorService2');
+          typeItems.push(...pageItems);
+          if (pageItems.length < params.numOfRows) break;
+        }
+        console.log(`   - 유형 ${contentTypeId}: ${Math.min(typeItems.length, limitPerRegion)}개`);
+        items.push(...typeItems.slice(0, limitPerRegion));
+      }
       console.log(`   총 ${items.length}개 후보 확인. 세부 정보 및 태그 분석 중...`);
 
       for (let i = 0; i < items.length; i += 1) {
@@ -497,6 +505,12 @@ async function main() {
 
         if (seenPlaceIds.has(contentId)) continue;
         seenPlaceIds.add(contentId);
+
+        if (skipExisting && !isDryRun) {
+          const { rows: done } = await client.query(
+            'SELECT 1 FROM spots WHERE tour_content_id = $1 AND content_tour IS NOT NULL', [contentId]);
+          if (done.length) continue;
+        }
 
         const lng = Number(item.mapx);
         const lat = Number(item.mapy);
