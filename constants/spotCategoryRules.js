@@ -501,13 +501,54 @@ function inferSpotCategories(place = {}) {
   return [...new Set(categories)];
 }
 
+// 이름·세부 분류로 못 정한 장소를 카카오 분류 경로로 앱 카테고리에 대응시킨다.
+// IMPORTANT: 예전엔 카카오 분류 이름("문화유적", "불교", "교량,다리" 등)을 그대로 카테고리로 저장해
+// 앱 카테고리 필터 어디에도 걸리지 않는 장소가 생겼다. 반드시 SPOT_CATEGORIES 값만 돌려준다.
+const KAKAO_PATH_CATEGORY_RULES = [
+  { category: '역사·유적', keywords: ['문화유적', '종교', '국립묘지', '고궁', '궁궐', '사적지'] },
+  { category: '전시·문화공간', keywords: ['문화시설', '박물관', '미술관', '기념관', '전시관', '공연장'] },
+  { category: '카페·맛집', keywords: ['음식점', '카페'] },
+  { category: '전통시장·로컬마켓', keywords: ['시장'] },
+  { category: '강·하천', keywords: ['교량,다리', '하천', '강'] },
+  {
+    category: '공원·광장',
+    keywords: ['공원', '공원시설물', '광장', '관광,명소', '관광·명소', '유원지', '테마파크', '테마거리', '전망대', '해수욕장', '해변', '케이블카', '항구,포구'],
+  },
+];
+
+// 카카오 분류가 없는 장소(TourAPI 등)는 이름으로 한 번 더 본다
+const NAME_CATEGORY_RULES = [
+  { category: '카페·맛집', keywords: ['카페', '식당'] },
+  { category: '전시·문화공간', keywords: ['극장', '공연장', '문화원'] },
+];
+
+function mapKakaoPathToAppCategory(categoryName = '') {
+  const parts = String(categoryName).split('>').map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+  // 세부 분류부터 본다 (예: "여행 > 관광,명소 > 문화유적 > 릉,묘,총" → 문화유적)
+  for (const part of [...parts].reverse()) {
+    const rule = KAKAO_PATH_CATEGORY_RULES.find((r) => r.keywords.includes(part));
+    if (rule) return rule.category;
+  }
+  return null;
+}
+
 function inferSpotCategoriesWithFallback(place = {}) {
   const appCategories = inferSpotCategories(place);
   if (appCategories.length > 0) return appCategories;
   if (isExcludedKakaoPlace(place)) return [];
 
-  const fallbackCategory = getFallbackCategory(place.category_name || '');
-  return fallbackCategory ? [fallbackCategory] : ['공원·광장'];
+  const categoryName = place.category_name || place.kakao_category_name || '';
+  const mapped = mapKakaoPathToAppCategory(categoryName);
+  if (mapped) return [mapped];
+
+  const placeName = place.place_name || place.name || place.title || '';
+  const byName = NAME_CATEGORY_RULES.find((r) => includesAny(placeName, r.keywords));
+  if (byName) return [byName.category];
+
+  // 카카오 분류가 있는데 대응되는 앱 카테고리가 없으면(마을회관·학교·단체 등) 분류하지 않는다.
+  // 카카오 분류가 없는 장소(TourAPI 관광지 등)는 기존처럼 공원·광장으로 둔다.
+  return categoryName.includes('>') ? [] : ['공원·광장'];
 }
 
 // ── 서울 25개 자치구 목록 ──────────────────────────────────────────
@@ -719,5 +760,6 @@ module.exports = {
   getFallbackCategory,
   inferSpotCategories,
   inferSpotCategoriesWithFallback,
+  mapKakaoPathToAppCategory,
 };
 
