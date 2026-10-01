@@ -8,6 +8,7 @@ const {
 } = require('../constants/spotCategoryRules');
 const trafficLog = require('../services/tourTrafficLog');
 const { findTags } = require('../constants/tagAliases');
+const tourApiService = require('../services/tourApiService');
 
 // ──────────────────────────────────────────────────────────
 // 1. CLI 옵션 파싱
@@ -177,25 +178,11 @@ async function fetchSpotIntro(contentId) {
   };
 }
 
+// 반려동물 동반 정보는 앱이 읽는 형식(tourApiService.getPetTourDetail 의 details)으로 저장한다.
+// IMPORTANT: 예전엔 여기서 다른 키(notes·parking)로 따로 만들어 앱 장소 상세에 동반 안내가 빠졌다.
 async function fetchPetTourInfo(contentId) {
-  const items = await callOpenApi(PET_TOUR_BASE_URL, 'detailPetTour2', { contentId }, 'KorPetTourService2');
-  const item = items[0];
-  if (!item) return null;
-
-  const hasPet = Boolean(
-    item.relaAcmdFee || item.relaPosesFclty || item.relaFrnPrvt ||
-    item.etcAcmFclty || item.relaRntlPrn || item.acmCheckList ||
-    item.acmpyPsblCpam || item.acmpyTypeCd
-  );
-  if (!hasPet) return null;
-
-  return {
-    allowed_pet_size: item.acmCheckList || item.acmpyPsblCpam || null,
-    facilities: item.relaPosesFclty || null,
-    notes: item.etcAcmFclty || item.etcAcmpyInfo || null,
-    parking: item.relaFrnPrvt || null,
-    acmpyTypeCd: item.acmpyTypeCd || null,
-  };
+  const result = await tourApiService.getPetTourDetail(contentId);
+  return result?.has_pet_info ? result.details : null;
 }
 
 // ──────────────────────────────────────────────────────────
@@ -360,10 +347,10 @@ function deriveSpotTags({ title = '', categories = [], overview = '', barrierFre
       tags.add('소형견동반');
     }
 
-    const fac = `${petTour.facilities || ''} ${petTour.notes || ''}`;
+    const fac = `${petTour.facilities || ''} ${petTour.need_items || ''} ${petTour.etc_info || ''}`;
     if (/배변|봉투|수거함/.test(fac)) tags.add('반려견배변시설');
     if (/놀이터|운동장|펜스/.test(fac)) tags.add('반려견놀이터');
-    if (petTour.parking) tags.add('주차가능');
+    if (/주차/.test(petTour.facilities || '')) tags.add('주차가능');
   }
 
   // (4) 지형 및 시설물 팩트 기반 패턴 매칭 (정밀 방어)
@@ -407,11 +394,9 @@ async function attachTags(client, spotId, tagNames, ownerId) {
   if (!spotId || !Array.isArray(tagNames) || tagNames.length === 0) return [];
   const attached = [];
 
-  // 시스템(관리자) 기존 태깅 최신화 (사용자 후기 태그는 보존)
-  await client.query(
-    `DELETE FROM taggings WHERE target_id = $1 AND target_type = 'spot' AND user_id = $2`,
-    [spotId, ownerId]
-  ).catch(() => {});
+  // IMPORTANT: 기존 태그는 지우지 않고 추가만 한다.
+  // 예전엔 같은 관리자 계정의 태그를 모두 지운 뒤 이번에 도출한 태그만 붙여, 다른 경로(레거시 병합·백필)로
+  // 붙은 무장애·편의시설 태그가 다시 실행할 때마다 사라졌다.
 
   // 정본 태그만 붙인다 (정본에 없는 이름으로 태그를 새로 만들지 않는다 — constants/tagAliases.js)
   const tags = await findTags(client, tagNames, 'spot');
