@@ -14,6 +14,7 @@ const odiiService = require('./odiiService');
 const trafficLog = require('./tourTrafficLog');
 const { getQuotaErrorCount } = require('./dataGoKrKey');
 const { isLegacyPlaceId, legacyContentId, findKakaoPlaceNear } = require('../utils/kakaoPlaceMatch');
+const { findCanonicalTags } = require('../constants/tagMaster');
 
 const TOUR_API_BASE_URL = 'https://apis.data.go.kr/B551011/KorService2';
 const TOUR_API_MATCH_RADIUS = Number(process.env.TOUR_API_MATCH_RADIUS || 300);
@@ -426,29 +427,10 @@ async function attachTagsToSpot(spotId, tagNames, userId) {
             return;
         }
 
-        // 1. 기존 태그 확인
-        const { rows: existingTags } = await pool.query(
-            `SELECT tag_id, name FROM tags WHERE name = ANY($1::TEXT[]) AND type = 'spot'`,
-            [cleanNames]
-        );
+        // 1. 정본 태그만 붙인다 (정본에 없는 이름으로 태그를 새로 만들지 않는다 — constants/tagMaster.js)
+        const tagsToAttach = await findCanonicalTags(pool, cleanNames, 'spot');
 
-        const existingNames = new Set(existingTags.map(r => r.name));
-        const tagsToAttach = [...existingTags];
-
-        // 2. 누락된 태그는 tags 테이블에 안전하게 자동 등록
-        const missingNames = cleanNames.filter(n => !existingNames.has(n));
-        for (const name of missingNames) {
-            const { rows } = await pool.query(
-                `INSERT INTO tags (name, type, group_name, is_active)
-                 VALUES ($1, 'spot', '기타', TRUE)
-                 ON CONFLICT (name, type) DO UPDATE SET is_active = TRUE
-                 RETURNING tag_id, name`,
-                [name]
-            );
-            if (rows[0]) tagsToAttach.push(rows[0]);
-        }
-
-        // 3. taggings 테이블에 일괄 등록
+        // 2. taggings 테이블에 일괄 등록
         for (const tag of tagsToAttach) {
             await pool.query(
                 `INSERT INTO taggings (tag_id, target_id, target_type, user_id)

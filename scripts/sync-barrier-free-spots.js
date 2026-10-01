@@ -4,7 +4,7 @@
  * ─────────────────────────────────────────────────────────────
  * 한국관광공사 열린관광(KorWithService2) API를 호출하여
  * 지역별 무장애 인증 관광지를 DB spots에 등록/동기화하고,
- * 세부 태그(#열린관광, #무단차통로, #휠체어접근, #장애인화장실, #점자안내 등)를 taggings에 적재한다.
+ * 세부 태그(#무단차통로, #휠체어접근, #장애인화장실, #점자안내 등)를 taggings에 적재한다.
  *
  * 사용법:
  *   node scripts/sync-barrier-free-spots.js                  # 춘천 기본 동기화
@@ -16,6 +16,7 @@
 require('dotenv').config();
 const pool = require('../config/db');
 const tourApiService = require('../services/tourApiService');
+const { findCanonicalTags } = require('../constants/tagMaster');
 const {
   resolveRegion,
   inferRegionFromLocation,
@@ -60,27 +61,11 @@ async function ensureSystemTaggerId() {
 // ── 태그 생성 및 스팟 부착 ────────────────────────────────────
 async function attachTagsToSpot(spotId, tagNames, userId) {
   if (!tagNames || tagNames.length === 0) return;
-  const cleanNames = tagNames.map((n) => String(n).replace(/^#/, '').trim()).filter(Boolean);
-  if (cleanNames.length === 0) return;
-
-  // 1. 누락된 태그는 tags 테이블에 자동 등록
-  for (const name of cleanNames) {
-    await pool.query(
-      `INSERT INTO tags (name, type, group_name, is_active)
-       VALUES ($1, 'spot', '열린관광', TRUE)
-       ON CONFLICT (name, type) DO UPDATE SET is_active = TRUE`,
-      [name]
-    );
-  }
-
-  // 2. tag_id 조회
-  const { rows: tags } = await pool.query(
-    `SELECT tag_id, name FROM tags WHERE name = ANY($1::TEXT[]) AND type = 'spot' AND is_active = TRUE`,
-    [cleanNames]
-  );
+  // 정본 태그만 붙인다 (정본에 없는 이름으로 태그를 새로 만들지 않는다 — constants/tagMaster.js)
+  const tags = await findCanonicalTags(pool, tagNames, 'spot');
   if (!tags.length) return;
 
-  // 3. taggings 등록
+  // taggings 등록
   for (const t of tags) {
     await pool.query(
       `INSERT INTO taggings (tag_id, target_type, target_id, user_id)
@@ -93,7 +78,8 @@ async function attachTagsToSpot(spotId, tagNames, userId) {
 
 // ── 세부 무장애 태그 자동 도출 ────────────────────────────────
 function extractBarrierFreeTags(barrierFreeData) {
-  const tags = new Set(['열린관광', '무장애']);
+  // 열린관광 여부는 barrier_free_info 로 판단하므로 세부 편의시설 태그만 붙인다
+  const tags = new Set();
 
   if (!barrierFreeData || !barrierFreeData.details) {
     return Array.from(tags);

@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const pool = require('../config/db');
+const { requireCanonicalTagId } = require('../constants/tagMaster');
 const spotService = require('../services/spotService');
 const courseTagService = require('../services/courseTagService');
 const { WALK_METERS_PER_MINUTE } = require('../constants/courseConstants');
@@ -14,7 +15,7 @@ const {
 
 const API_BASE_URL = 'https://api.data.go.kr/openapi/tn_pubr_public_stret_tursm_info_api';
 const DATA_SOURCE = '행정안전부_전국길관광정보표준데이터';
-const COURSE_TAG_NAME = '관광코스';
+const COURSE_TAG_NAME = '추천코스'; // 정본 태그 (constants/tagMaster.js). 코스 분류(category)는 '관광코스' 그대로
 const DEFAULT_PAGE_SIZE = 100;
 
 // CLI 옵션 파싱
@@ -558,34 +559,15 @@ async function ensureAdminUser(client) {
   return created[0].user_id;
 }
 
+// 정본 태그만 쓴다 (태그를 새로 만들지 않는다 — constants/tagMaster.js, npm run sync:tags)
 async function ensureCourseTag(client) {
-  // 프론트 정본(ServerTags.DEFAULT_COURSE_TAGS_BY_GROUP)과 일치하도록
-  // group_name='추천·종류', is_review_tag=FALSE 를 명시한다.
-  // (기존 코드의 '추천·테마'는 프론트 정본과 불일치 → 필터에서 숨겨지는 원인)
-  const { rows } = await client.query(
-    `INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
-     VALUES ($1, 'course', '추천·종류', TRUE, FALSE)
-     ON CONFLICT (name, type)
-     DO UPDATE SET
-       group_name    = EXCLUDED.group_name,
-       is_active     = TRUE,
-       is_review_tag = EXCLUDED.is_review_tag
-     RETURNING tag_id`,
-    [COURSE_TAG_NAME]
-  );
-  return rows[0].tag_id;
+  return requireCanonicalTagId(client, COURSE_TAG_NAME, 'course');
 }
 
 // 서버에서 넣는 공공데이터 코스는 항상 '공식코스' 태그를 붙인다.
 // (자동 태그 단계가 실패해도 빠지지 않도록 코스 저장과 같은 트랜잭션에서 직접 연결)
 async function ensureOfficialCourseTag(client) {
-  const { rows } = await client.query(
-    `INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
-     VALUES ('공식코스', 'course', '코스 출처', TRUE, FALSE)
-     ON CONFLICT (name, type) DO UPDATE SET is_active = TRUE
-     RETURNING tag_id`
-  );
-  return rows[0].tag_id;
+  return requireCanonicalTagId(client, '공식코스', 'course');
 }
 
 function buildCourseDescription(item) {
@@ -922,7 +904,7 @@ async function main() {
       // 경유지(Waypoints) 및 스팟 연결 저장
       await insertCourseWaypoints(client, course.course_id, courseWaypointsList);
 
-      // 코스 기본 태그: 관광코스 + 공식코스
+      // 코스 기본 태그: 추천코스 + 공식코스
       await client.query(
         `INSERT INTO taggings (tag_id, target_id, target_type, user_id)
          SELECT unnest($1::uuid[]), $2, 'course', $3

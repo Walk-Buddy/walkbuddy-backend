@@ -83,9 +83,9 @@ const COURSE_REVIEW_TEMPLATES = [
 
 // ── 스팟 후기 템플릿 ────────────────────────────────────────────
 const SPOT_REVIEW_TEMPLATES = [
-  { is_recommended: true,  tagNames: ['포토존', '야경명소'],   text: '사진 찍기 정말 좋은 곳이에요. 저녁에 조명 켜지면 분위기가 최고입니다.' },
+  { is_recommended: true,  tagNames: ['포토존', '밤산책'],     text: '사진 찍기 정말 좋은 곳이에요. 저녁에 조명 켜지면 분위기가 최고입니다.' },
   { is_recommended: true,  tagNames: ['벤치·쉼터'],            text: '쉴 곳이 잘 마련돼 있어서 잠깐 앉아 쉬기 좋았어요. 경치도 좋습니다.' },
-  { is_recommended: true,  tagNames: ['카페&식당'],            text: '주변에 카페가 있어서 산책 후 커피 한 잔 하기 딱 좋았어요.' },
+  { is_recommended: true,  tagNames: ['낮그늘'],               text: '그늘이 많아서 한낮에도 걷기 편했어요. 산책 후 근처 카페에 들르기도 좋아요.' },
   { is_recommended: true,  tagNames: ['역사유적', '문화/예술'],text: '역사적인 장소라 그냥 지나치기 아까웠어요. 천천히 둘러보길 추천합니다.' },
   { is_recommended: false, tagNames: ['벤치·쉼터'],            text: '사람이 많아서 붐비는 편이에요. 한적한 시간대를 노리는 걸 추천합니다.' },
   { is_recommended: true,  tagNames: ['주차가능'],             text: '주차 공간이 있어서 접근이 편했어요. 가족 나들이로도 괜찮습니다.' },

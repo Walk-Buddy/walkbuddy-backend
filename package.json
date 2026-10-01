@@ -18,6 +18,7 @@
     "import:street-tourism": "node scripts/import-street-tourism-courses.js",
     "merge:legacy-spots": "node scripts/merge-legacy-spots.js",
     "normalize:spot-categories": "node scripts/normalize-spot-categories.js",
+    "sync:tags": "node scripts/sync-tag-master.js",
     "sync:pet": "node scripts/sync-pet-spots.js",
     "sync:barrier-free": "node scripts/sync-barrier-free-spots.js",
     "seed:prewalk-course": "node scripts/create-prewalk-course-via-api.js",

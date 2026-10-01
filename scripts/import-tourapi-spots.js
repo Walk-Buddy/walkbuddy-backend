@@ -7,6 +7,7 @@ const {
   inferSpotCategoriesWithFallback,
 } = require('../constants/spotCategoryRules');
 const trafficLog = require('../services/tourTrafficLog');
+const { findCanonicalTags } = require('../constants/tagMaster');
 
 // ──────────────────────────────────────────────────────────
 // 1. CLI 옵션 파싱
@@ -412,31 +413,17 @@ async function attachTags(client, spotId, tagNames, ownerId) {
     [spotId, ownerId]
   ).catch(() => {});
 
-  for (const rawName of tagNames) {
-    const name = String(rawName).trim().replace(/^#/, '');
-    if (!name) continue;
-
+  // 정본 태그만 붙인다 (정본에 없는 이름으로 태그를 새로 만들지 않는다 — constants/tagMaster.js)
+  const tags = await findCanonicalTags(client, tagNames, 'spot');
+  for (const tag of tags) {
     try {
-      // 1. tags 테이블에 태그가 없으면 자동 등록
-      const { rows } = await client.query(
-        `INSERT INTO tags (name, type, group_name, is_active)
-         VALUES ($1, 'spot', '기타', TRUE)
-         ON CONFLICT (name, type) DO UPDATE SET is_active = TRUE
-         RETURNING tag_id`,
-        [name]
+      await client.query(
+        `INSERT INTO taggings (tag_id, target_id, target_type, user_id)
+         VALUES ($1, $2, 'spot', $3)
+         ON CONFLICT DO NOTHING`,
+        [tag.tag_id, spotId, ownerId]
       );
-      const tagId = rows[0]?.tag_id;
-
-      // 2. taggings 매핑 테이블에 연결
-      if (tagId) {
-        await client.query(
-          `INSERT INTO taggings (tag_id, target_id, target_type, user_id)
-           VALUES ($1, $2, 'spot', $3)
-           ON CONFLICT DO NOTHING`,
-          [tagId, spotId, ownerId]
-        );
-        attached.push(name);
-      }
+      attached.push(tag.name);
     } catch (err) {
       // 태그 실패 시 다음 태그 계속 진행
     }
