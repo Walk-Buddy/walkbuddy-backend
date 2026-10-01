@@ -345,6 +345,18 @@ async function ensureCourseTag(client) {
   return rows[0].tag_id;
 }
 
+// 서버에서 넣는 공공데이터 코스는 항상 '공식코스' 태그를 붙인다.
+// (자동 태그 단계가 실패해도 빠지지 않도록 코스 저장과 같은 트랜잭션에서 직접 연결)
+async function ensureOfficialCourseTag(client) {
+  const { rows } = await client.query(
+    `INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
+     VALUES ('공식코스', 'course', '코스 출처', TRUE, FALSE)
+     ON CONFLICT (name, type) DO UPDATE SET is_active = TRUE
+     RETURNING tag_id`
+  );
+  return rows[0].tag_id;
+}
+
 const PROV_MAP = {
   '서울': '서울', '서울특별시': '서울',
   '부산': '부산', '부산광역시': '부산',
@@ -669,7 +681,7 @@ async function importDurunubiSpotsForCourse(client, item, courseId, ownerId) {
   return result;
 }
 
-async function importCourse(client, item, ownerId, tagId) {
+async function importCourse(client, item, ownerId, tagIds) {
   const routeIdx = pick(item, ['routeIdx']);
   const crsIdx = pick(item, ['crsIdx']);
   const sourceId = crsIdx || routeIdx;
@@ -738,11 +750,12 @@ async function importCourse(client, item, ownerId, tagId) {
   );
 
   await insertWaypoints(client, course.course_id, points);
+  // 코스 기본 태그: 둘레길 + 공식코스
   await client.query(
     `INSERT INTO taggings (tag_id, target_id, target_type, user_id)
-     VALUES ($1, $2, 'course', $3)
+     SELECT unnest($1::uuid[]), $2, 'course', $3
      ON CONFLICT DO NOTHING`,
-    [tagId, course.course_id, ownerId]
+    [tagIds, course.course_id, ownerId]
   );
 
   return { status: 'imported', name, courseId: course.course_id, pointCount: points.length, points, description, region, subRegion };
@@ -766,14 +779,14 @@ async function main() {
 
   try {
     const ownerId = await ensureAdminUser(client);
-    const tagId = await ensureCourseTag(client);
+    const tagIds = [await ensureCourseTag(client), await ensureOfficialCourseTag(client)];
 
     for (const [index, item] of courses.entries()) {
       const label = pick(item, ['crsKorNm']) || pick(item, ['crsIdx']) || `row-${index + 1}`;
 
       try {
         await client.query('BEGIN');
-        const result = await importCourse(client, item, ownerId, tagId);
+        const result = await importCourse(client, item, ownerId, tagIds);
         await client.query('COMMIT');
 
         if (result.status === 'imported') {

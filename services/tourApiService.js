@@ -1132,6 +1132,8 @@ exports.getPetTourDetail = async (contentId) => {
       pet_tour_info: item.petTursmInfo || null,
       accident_risk: item.relaAcdntRiskMtr || null,
       accompany_type: item.acmpyTypeCd || null,
+      // 동반 시 필요사항 (예: "목줄 착용")
+      need_items: item.acmpyNeedMtr || null,
       facilities: item.relaPosesFclty || null,
       furnished_items: item.relaFrnshPrdlst || null,
       purchasable_items: item.relaPurcPrdlst || null,

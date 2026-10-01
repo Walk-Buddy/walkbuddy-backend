@@ -576,6 +576,18 @@ async function ensureCourseTag(client) {
   return rows[0].tag_id;
 }
 
+// 서버에서 넣는 공공데이터 코스는 항상 '공식코스' 태그를 붙인다.
+// (자동 태그 단계가 실패해도 빠지지 않도록 코스 저장과 같은 트랜잭션에서 직접 연결)
+async function ensureOfficialCourseTag(client) {
+  const { rows } = await client.query(
+    `INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
+     VALUES ('공식코스', 'course', '코스 출처', TRUE, FALSE)
+     ON CONFLICT (name, type) DO UPDATE SET is_active = TRUE
+     RETURNING tag_id`
+  );
+  return rows[0].tag_id;
+}
+
 function buildCourseDescription(item) {
   const parts = [];
   // 경유 경로·출발/도착·소요 시간은 코스 상세 화면(타임라인, 출발→도착, 소요시간 박스)에
@@ -635,11 +647,11 @@ async function main() {
 
   const client = isDryRun ? null : await pool.connect();
   let ownerId = null;
-  let tagId = null;
+  let tagIds = [];
 
   if (client) {
     ownerId = await ensureAdminUser(client);
-    tagId = await ensureCourseTag(client);
+    tagIds = [await ensureCourseTag(client), await ensureOfficialCourseTag(client)];
   }
 
   const stats = {
@@ -910,12 +922,12 @@ async function main() {
       // 경유지(Waypoints) 및 스팟 연결 저장
       await insertCourseWaypoints(client, course.course_id, courseWaypointsList);
 
-      // 코스 기본 태깅 (관광코스)
+      // 코스 기본 태그: 관광코스 + 공식코스
       await client.query(
         `INSERT INTO taggings (tag_id, target_id, target_type, user_id)
-         VALUES ($1, $2, 'course', $3)
+         SELECT unnest($1::uuid[]), $2, 'course', $3
          ON CONFLICT DO NOTHING`,
-        [tagId, course.course_id, ownerId]
+        [tagIds, course.course_id, ownerId]
       );
 
       // 코스 태그 최대 연결: 카테고리·설명·경유지 스팟 태그를 코스 태그로 승격

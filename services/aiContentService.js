@@ -43,10 +43,18 @@ async function toPlayableAudioUrl(rawUrl) {
 }
 
 /** 콘텐츠 배열의 audio_url을 일괄 재생 가능한 URL로 변환 */
+// 음성 출처: 자체 S3에 올린 TTS는 AI 해설, 그 밖의 공개 URL(ktcdn.co.kr)은 한국관광공사 Odii 해설
+function getAudioSource(rawUrl) {
+  if (!rawUrl || String(rawUrl).includes('example.com')) return 'ai';
+  return S3_URL_PATTERN.test(String(rawUrl)) ? 'ai' : 'odii';
+}
+
 function signContents(contents) {
   return Promise.all(
     contents.map(async (c) =>
-      c && c.audio_url ? { ...c, audio_url: await toPlayableAudioUrl(c.audio_url) } : c
+      c && c.audio_url
+        ? { ...c, source: getAudioSource(c.audio_url), audio_url: await toPlayableAudioUrl(c.audio_url) }
+        : c
     )
   );
 }
