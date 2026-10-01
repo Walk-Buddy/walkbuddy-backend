@@ -401,16 +401,21 @@ async function insertWaypoints(client, courseId, points, spotWaypoints = []) {
     });
   }
 
-  // 2. 중간 등록된 경유지 스팟들
-  const validSpots = (spotWaypoints || [])
-    .filter((spot) => spot.spotId && Number.isFinite(spot.routeProgress))
-    .map((spot) => ({
-      type: 'spot',
-      progress: spot.routeProgress,
-      spotId: spot.spotId,
-      lat: null,
-      lng: null,
-    }));
+  // 2. 중간 등록된 경유지 스팟들 (중복 방지)
+  const seenSpotIds = new Set();
+  const validSpots = [];
+  for (const spot of spotWaypoints || []) {
+    if (spot.spotId && Number.isFinite(spot.routeProgress) && !seenSpotIds.has(spot.spotId)) {
+      seenSpotIds.add(spot.spotId);
+      validSpots.push({
+        type: 'spot',
+        progress: spot.routeProgress,
+        spotId: spot.spotId,
+        lat: null,
+        lng: null,
+      });
+    }
+  }
 
   rows.push(...validSpots);
 
@@ -547,7 +552,12 @@ async function importDurunubiSpotsForCourse(client, item, courseId, ownerId) {
             : Number(candidate.distance_from_start_m),
         }
         : await getRoutePositionFromCourseRoute(client, courseId, candidate);
-      if (saved.spot?.spot_id && routePosition && Number.isFinite(routePosition.routeProgress)) {
+      if (
+        saved.spot?.spot_id &&
+        routePosition &&
+        Number.isFinite(routePosition.routeProgress) &&
+        !result.waypointSpots.some((w) => w.spotId === saved.spot.spot_id)
+      ) {
         result.waypointSpots.push({
           spotId: saved.spot.spot_id,
           routeProgress: routePosition.routeProgress,
