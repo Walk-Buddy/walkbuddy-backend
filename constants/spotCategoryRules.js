@@ -633,6 +633,27 @@ const SUPPORTED_REGION_LIST = [
 /**
  * 주소(address) 또는 장소명 문자열에서 region('서울' | '춘천')과 sub_region을 자동 추출합니다.
  */
+// 주소 첫 단어(시도) → 짧은 지역 이름 (코스 지역과 같은 표기: import-durunubi-courses.js)
+const PROVINCE_ALIASES = {
+  서울: '서울', 서울특별시: '서울', 서울시: '서울',
+  부산: '부산', 부산광역시: '부산',
+  대구: '대구', 대구광역시: '대구',
+  인천: '인천', 인천광역시: '인천',
+  광주: '광주', 광주광역시: '광주',
+  대전: '대전', 대전광역시: '대전',
+  울산: '울산', 울산광역시: '울산',
+  세종: '세종', 세종특별자치시: '세종',
+  경기: '경기', 경기도: '경기',
+  강원: '강원', 강원도: '강원', 강원특별자치도: '강원',
+  충북: '충북', 충청북도: '충북',
+  충남: '충남', 충청남도: '충남',
+  전북: '전북', 전라북도: '전북', 전북특별자치도: '전북',
+  전남: '전남', 전라남도: '전남', 전남광주통합특별시: '전남',
+  경북: '경북', 경상북도: '경북',
+  경남: '경남', 경상남도: '경남',
+  제주: '제주', 제주도: '제주', 제주특별자치도: '제주',
+};
+
 function extractRegionFromAddress(addressOrText = '') {
   if (!addressOrText || typeof addressOrText !== 'string') {
     return { region: '서울', sub_region: null };
@@ -655,6 +676,14 @@ function extractRegionFromAddress(addressOrText = '') {
       matchedSub = '강촌·남산권';
     }
     return { region: '춘천', sub_region: matchedSub };
+  }
+
+  // 2. 서울이 아닌 시도 주소는 그 시도로 (예: "부산 남구 ..." → 부산)
+  // IMPORTANT: 예전엔 서울·춘천이 아니면 모두 '서울'로 저장해 두루누비 경유지(부산·경남 등)가 서울 장소로 보였고,
+  // '부산 중구'처럼 서울과 같은 구 이름은 서울 중구로 판정됐다. 그래서 시도를 자치구보다 먼저 본다.
+  const province = PROVINCE_ALIASES[text.split(/\s+/)[0]];
+  if (province && province !== '서울') {
+    return { region: province, sub_region: null };
   }
 
   // 2. 서울 확인 (1단계: '종로구', '노원구' 등 정확한 자치구 명칭 우선)

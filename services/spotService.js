@@ -13,9 +13,9 @@ const tourApiService = require('./tourApiService');
 const odiiService = require('./odiiService');
 const trafficLog = require('./tourTrafficLog');
 const { getQuotaErrorCount } = require('./dataGoKrKey');
-const { isLegacyPlaceId, legacyContentId, findKakaoPlaceNear } = require('../utils/kakaoPlaceMatch');
+const { isLegacyPlaceId, legacyContentId, findKakaoPlaceNear, isSamePlaceName } = require('../utils/kakaoPlaceMatch');
 const { findExistingSpot, linkExternalIds, toKakaoPlaceId, toTourContentId } = require('../utils/spotIdentity');
-const { findTags } = require('../constants/tagAliases');
+const { findTags, petSizeTag } = require('../constants/tagAliases');
 
 const TOUR_API_BASE_URL = 'https://apis.data.go.kr/B551011/KorService2';
 const TOUR_API_MATCH_RADIUS = Number(process.env.TOUR_API_MATCH_RADIUS || 300);
@@ -94,11 +94,18 @@ function normalizePlaceName(name = '') {
         .toLowerCase();
 }
 
+// IMPORTANT: 단순 포함 비교를 쓰면 '오목교'가 '올리브영 오목교지하철역점'과 같은 장소로 매칭돼
+// 매장의 반려동물·무장애 정보가 붙었다. 덧붙은 말이 지점·부속시설 이름이면 다른 장소로 본다. (utils/kakaoPlaceMatch.js)
 function isSameTourPlace(kakaoName, tourTitle) {
-    const kakao = normalizePlaceName(kakaoName);
-    const tour = normalizePlaceName(tourTitle);
-    if (!kakao || !tour) return false;
-    return kakao === tour || kakao.includes(tour) || tour.includes(kakao);
+    return isSamePlaceName(kakaoName, tourTitle);
+}
+
+function haversineDistanceMeters(lat1, lng1, lat2, lng2) {
+    if (![lat1, lng1, lat2, lng2].every(Number.isFinite)) return Infinity;
+    const toRad = (d) => (d * Math.PI) / 180;
+    const h = Math.sin(toRad(lat2 - lat1) / 2) ** 2
+        + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(toRad(lng2 - lng1) / 2) ** 2;
+    return 2 * 6371000 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
 function cleanTourOverview(overview = '') {
@@ -329,12 +336,8 @@ function extractTourTags({ overview, barrierFreeInfo, petTourInfo, odiiGuide }) 
     if (petTourInfo?.has_pet_info) {
         tags.add('반려동물');
         const petDetails = petTourInfo.details || {};
-        const sizeStr = String(petDetails.allowed_pet_size || '');
-        if (sizeStr.includes('대형견') || sizeStr.includes('모두') || sizeStr.includes('제한없음')) {
-            tags.add('대형견 동반');
-        } else if (sizeStr.includes('소형견') || sizeStr.includes('중형견')) {
-            tags.add('소형견동반');
-        }
+        const sizeTag = petSizeTag(petDetails.allowed_pet_size);
+        if (sizeTag) tags.add(sizeTag);
 
         const facilityStr = `${petDetails.facilities || ''} ${petDetails.etc_info || ''}`;
         if (/배변|배변봉투|배변시설|수거함/i.test(facilityStr) && !/(없음|미설치)/.test(facilityStr)) {
@@ -568,8 +571,10 @@ async function enrichKakaoSpotTourContent(spot, userId) {
         // 3차 폴백: 키워드 검색 기반 매칭 (관광지 위치가 카카오 좌표와 조금 다르거나 반경 밖인 경우)
         if (!matched) {
             const kwCandidates = await fetchTourKeywordCandidates(spot.name);
+            // 이름이 같은 다른 지역 장소와 매칭되지 않도록 2km 안만 쓴다
             matched = kwCandidates
                 .filter(candidate => isSameTourPlace(spot.name, candidate.title))
+                .filter(candidate => haversineDistanceMeters(lat, lng, Number(candidate.mapy), Number(candidate.mapx)) <= 2000)
                 .sort((a, b) => {
                     const distA = Math.hypot(Number(a.mapx || 0) - lng, Number(a.mapy || 0) - lat);
                     const distB = Math.hypot(Number(b.mapx || 0) - lng, Number(b.mapy || 0) - lat);

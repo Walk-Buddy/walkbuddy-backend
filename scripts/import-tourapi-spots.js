@@ -1,5 +1,9 @@
 require('dotenv').config();
 
+// TourAPI 관광지(12)·문화시설(14) 장소 적재. 장소마다 개요·무장애(KorWithService2)·반려동물(KorPetTourService2)·이용안내를 함께 조회한다.
+// 무장애·반려동물 API 목록에 있는 서울·춘천 관광지·문화시설은 모두 이 목록(KorService2)에 포함돼 있어
+// npm run sync:barrier-free / sync:pet 도 이 스크립트를 쓴다. (2026-10 확인: 무장애 283곳·반려동물 37곳 전부 포함)
+
 const axios = require('axios');
 const pool = require('../config/db');
 const {
@@ -7,7 +11,7 @@ const {
   inferSpotCategoriesWithFallback,
 } = require('../constants/spotCategoryRules');
 const trafficLog = require('../services/tourTrafficLog');
-const { findTags } = require('../constants/tagAliases');
+const { findTags, petSizeTag } = require('../constants/tagAliases');
 const tourApiService = require('../services/tourApiService');
 const { installDataGoKrKeyFallback } = require('../services/dataGoKrKey');
 const { findExistingSpot, linkExternalIds } = require('../utils/spotIdentity');
@@ -390,12 +394,8 @@ function deriveSpotTags({ title = '', categories = [], overview = '', barrierFre
   // (3) 반려동물 동반정보 (KorPetTourService2 - 반려동물 공식 태그)
   if (petTour) {
     tags.add('반려동물');
-    const size = String(petTour.allowed_pet_size || '');
-    if (size.includes('대형견') || size.includes('모두') || size.includes('제한없음') || size.includes('전 견종')) {
-      tags.add('대형견 동반');
-    } else if (size.includes('소형견') || size.includes('중형견')) {
-      tags.add('소형견동반');
-    }
+    const sizeTag = petSizeTag(petTour.allowed_pet_size);
+    if (sizeTag) tags.add(sizeTag);
 
     const fac = `${petTour.facilities || ''} ${petTour.need_items || ''} ${petTour.etc_info || ''}`;
     if (/배변|봉투|수거함/.test(fac)) tags.add('반려견배변시설');
