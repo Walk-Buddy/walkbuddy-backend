@@ -8,6 +8,7 @@ const courseTagService = require('../services/courseTagService');
 const { getDurunubiCourseSpotMappings } = require('../constants/durunubiSpotMappings');
 const { inferRegionFromLocation } = require('../constants/spotCategoryRules');
 const { parseDescriptionSections } = require('../utils/courseDescription');
+const { WALK_METERS_PER_MINUTE } = require('../constants/courseConstants');
 
 const BASE_URL = 'http://apis.data.go.kr/B551011/Durunubi';
 const DATA_SOURCE = '한국관광공사_두루누비';
@@ -44,12 +45,6 @@ const http = installDataGoKrKeyFallback(axios.create({
 function toInt(value, fallback) {
   const n = Number.parseInt(value, 10);
   return Number.isFinite(n) ? n : fallback;
-}
-
-function toNumber(value) {
-  if (value == null || value === '') return null;
-  const n = Number(String(value).replace(/,/g, ''));
-  return Number.isFinite(n) ? n : null;
 }
 
 function requireEnv() {
@@ -645,16 +640,16 @@ async function importCourse(client, item, ownerId, tagId) {
   }
 
   const wkt = toWkt(points);
-  const distanceFromApi = toNumber(pick(item, ['crsDstnc']));
-  const durationFromApi = toNumber(pick(item, ['crsTotlRqrmHour']));
 
   const { rows: [stats] } = await client.query(
     `SELECT GREATEST(1, ROUND(ST_Length($1::geography))::int) AS distance`,
     [wkt]
   );
 
-  const totalDistance = distanceFromApi ? Math.max(1, Math.round(distanceFromApi * 1000)) : stats.distance;
-  const estimatedDuration = durationFromApi || Math.max(1, Math.ceil(stats.distance / 1.1 / 60));
+  // 거리·소요시간: 두루누비 원본(crsDstnc, crsTotlRqrmHour) 대신 지도에 그리는 GPX 경로 기준.
+  // 소요시간은 전국길관광(T맵 도보 경로)과 같은 도보 속도로 계산해 코스 간 비교가 되게 한다.
+  const totalDistance = stats.distance;
+  const estimatedDuration = Math.max(1, Math.round(totalDistance / WALK_METERS_PER_MINUTE));
   const description = buildDescription(item);
 
   const sigun = pick(item, ['sigun']) || '';

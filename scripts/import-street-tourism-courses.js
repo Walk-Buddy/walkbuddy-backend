@@ -6,6 +6,7 @@ const axios = require('axios');
 const pool = require('../config/db');
 const spotService = require('../services/spotService');
 const courseTagService = require('../services/courseTagService');
+const { WALK_METERS_PER_MINUTE } = require('../constants/courseConstants');
 const {
   extractRegionFromAddress,
   inferSpotCategoriesWithFallback,
@@ -403,27 +404,8 @@ async function findStopPlace(stop, { region, subRegion, anchor, prev, maxDistanc
 // ──────────────────────────────────────────────────────────
 // 4. 경로(LineString) 생성 (Tmap 도보 경로 연동)
 // ──────────────────────────────────────────────────────────
-function parseDurationMinutes(reqreTime, distanceM) {
-  if (!reqreTime || typeof reqreTime !== 'string') {
-    return Math.max(1, Math.ceil(distanceM / 67));
-  }
-
-  let minutes = 0;
-  const hourMatch = reqreTime.match(/(\d+)\s*시간/);
-  const minMatch = reqreTime.match(/(\d+)\s*분/);
-
-  if (hourMatch) minutes += Number.parseInt(hourMatch[1], 10) * 60;
-  if (minMatch) minutes += Number.parseInt(minMatch[1], 10);
-
-  if (minutes > 0) return minutes;
-
-  const num = Number.parseFloat(reqreTime.replace(/[^0-9.]/g, ''));
-  if (Number.isFinite(num) && num > 0) {
-    return Math.round(num * 60);
-  }
-
-  return Math.max(1, Math.ceil(distanceM / 67));
-}
+// T맵 경로를 받지 못한 구간(직선 연결)은 T맵과 같은 도보 속도로 계산
+const FALLBACK_WALK_METERS_PER_MINUTE = WALK_METERS_PER_MINUTE;
 
 async function fetchTmapPedestrianRoute(from, to) {
   if (!tmapKey) return null;
@@ -460,7 +442,15 @@ async function fetchTmapPedestrianRoute(from, to) {
         }
       }
     }
-    return coords.length >= 2 ? coords : null;
+    if (coords.length < 2) return null;
+
+    // 출발 지점 feature 의 properties 에 구간 전체 거리(m)·시간(초)이 들어 있다.
+    const summary = features.find((f) => Number.isFinite(Number(f.properties?.totalDistance)))?.properties;
+    return {
+      coords,
+      distanceM: summary ? Number(summary.totalDistance) : null,
+      timeSec: summary ? Number(summary.totalTime) : null,
+    };
   } catch (_) {
     return null;
   }
@@ -477,20 +467,30 @@ async function buildCourseRoute(waypointsList) {
     });
   }
 
+  // 코스 거리·소요시간은 T맵 도보 경로의 구간별 거리·시간을 더해서 구한다.
+  // T맵 경로를 받지 못한 구간은 직선으로 잇고 직선거리·기본 도보 속도로 계산한다.
   const finalCoords = [];
+  let distanceM = 0;
+  let timeSec = 0;
+  let fallbackSegments = 0;
   for (let i = 0; i < points.length - 1; i += 1) {
     const p1 = points[i];
     const p2 = points[i + 1];
 
-    let tmapSegment = null;
-    if (tmapKey) {
-      tmapSegment = await fetchTmapPedestrianRoute(p1, p2);
-    }
+    const tmapSegment = tmapKey ? await fetchTmapPedestrianRoute(p1, p2) : null;
 
-    if (tmapSegment && tmapSegment.length > 0) {
-      finalCoords.push(...tmapSegment);
+    if (tmapSegment) {
+      finalCoords.push(...tmapSegment.coords);
+      const segmentDistance = tmapSegment.distanceM
+        ?? tmapSegment.coords.slice(1).reduce((sum, p, idx) => sum + distanceMeters(tmapSegment.coords[idx], p), 0);
+      distanceM += segmentDistance;
+      timeSec += tmapSegment.timeSec ?? (segmentDistance / FALLBACK_WALK_METERS_PER_MINUTE) * 60;
     } else {
       finalCoords.push(p1, p2);
+      const segmentDistance = distanceMeters(p1, p2);
+      distanceM += segmentDistance;
+      timeSec += (segmentDistance / FALLBACK_WALK_METERS_PER_MINUTE) * 60;
+      fallbackSegments += 1;
     }
   }
 
@@ -506,7 +506,13 @@ async function buildCourseRoute(waypointsList) {
   }
 
   const wkt = `SRID=4326;LINESTRING(${sampled.map((p) => `${p.lng} ${p.lat}`).join(', ')})`;
-  return { wkt, points: sampled };
+  return {
+    wkt,
+    points: sampled,
+    distanceM: Math.max(1, Math.round(distanceM)),
+    durationMin: Math.max(1, Math.round(timeSec / 60)),
+    fallbackSegments,
+  };
 }
 
 // ──────────────────────────────────────────────────────────
@@ -673,20 +679,25 @@ async function main() {
       const matchedStops = [];
       const unmatchedStops = [];
 
+      // 큐레이션된 지점은 자동 매칭보다 우선한다. (출발·중간·도착 모두)
+      const curatedStops = CURATED_COURSES[sourceId]?.stops || {};
+      const skippedStops = [];
+
       // 1. 출발지: 출발 주소 바로 옆(300m)의 같은 이름 장소, 없으면 주소 좌표 핀
       const startName = stops[0] || beginName;
-      const startPlace = startName
-        ? await findStopPlace(startName, { region, subRegion: sub_region, anchor: startAnchor, prev: startAnchor, maxDistance: startAnchor ? 300 : maxDistance })
-        : null;
-      if (startPlace) matchedStops.push({ stop: startName, place: startPlace });
+      const startCuration = startName ? curatedStops[startName] : null;
+      const startPlace = startCuration
+        ? placeFromCuration(startName, startCuration, region, sub_region)
+        : startName
+          ? await findStopPlace(startName, { region, subRegion: sub_region, anchor: startAnchor, prev: startAnchor, maxDistance: startAnchor ? 300 : maxDistance })
+          : null;
+      if (startCuration?.skip) skippedStops.push(startName);
+      else if (startPlace) matchedStops.push({ stop: startName, place: startPlace, curated: Boolean(startCuration) });
       else if (startAnchor) matchedStops.push({ stop: startName || '출발', place: { name: startName, x: startAnchor.lng, y: startAnchor.lat } });
       else if (startName) unmatchedStops.push(startName);
 
       // 2. 중간 경유지: 출발지 주변에서 이름이 맞는 곳 중 직전 지점과 가까운 곳
-      const curatedStops = CURATED_COURSES[sourceId]?.stops || {};
-      const skippedStops = [];
       for (const stop of middleStops) {
-        // 큐레이션된 지점은 자동 매칭보다 우선한다.
         if (curatedStops[stop]) {
           const curatedPlace = placeFromCuration(stop, curatedStops[stop], region, sub_region);
           if (curatedPlace) matchedStops.push({ stop, place: curatedPlace, curated: true });
@@ -705,11 +716,15 @@ async function main() {
         matchedStops.push({ ...matchedStops[0], isLoopEnd: true });
       } else if (stops.length > 1) {
         const lastName = stops[stops.length - 1];
-        const endPlace = await findStopPlace(lastName, {
-          region, subRegion: sub_region, anchor: endAnchor || anchor, prev: endAnchor,
-          maxDistance: endAnchor ? 300 : maxDistance,
-        });
-        if (endPlace) matchedStops.push({ stop: lastName, place: endPlace });
+        const endCuration = curatedStops[lastName];
+        const endPlace = endCuration
+          ? placeFromCuration(lastName, endCuration, region, sub_region)
+          : await findStopPlace(lastName, {
+            region, subRegion: sub_region, anchor: endAnchor || anchor, prev: endAnchor,
+            maxDistance: endAnchor ? 300 : maxDistance,
+          });
+        if (endCuration?.skip) skippedStops.push(lastName);
+        else if (endPlace) matchedStops.push({ stop: lastName, place: endPlace, curated: Boolean(endCuration) });
         else if (endAnchor) matchedStops.push({ stop: lastName, place: { name: lastName, x: endAnchor.lng, y: endAnchor.lat } });
         else unmatchedStops.push(lastName);
       }
@@ -786,36 +801,28 @@ async function main() {
         continue;
       }
 
-      // 생성 경로 길이가 공식 거리와 크게 다르면 경유지 매칭을 확인해야 하는 코스
-      const routeLengthM = route.points.slice(1).reduce((sum, p, idx) => sum + distanceMeters(route.points[idx], p), 0);
+      // 거리·소요시간: 공공데이터 원본(stretLt, reqreTime) 대신 T맵 도보 경로 기준
+      const totalDistance = route.distanceM;
+      const estimatedDuration = route.durationMin;
+      if (route.fallbackSegments > 0) {
+        console.log(`  - ⚠️  T맵 경로 실패 구간 ${route.fallbackSegments}개는 직선거리로 계산`);
+      }
+
+      // 원본 공식 거리와 크게 다르면 경유지 매칭이나 원본 데이터를 확인해야 하는 코스
+      const routeLabel = `T맵 ${(totalDistance / 1000).toFixed(2)}km·${estimatedDuration}분`;
       if (officialLengthM) {
-        const ratio = routeLengthM / officialLengthM;
-        const ratioLabel = `생성 경로 ${(routeLengthM / 1000).toFixed(2)}km / 공식 ${(officialLengthM / 1000).toFixed(2)}km`;
+        const ratio = totalDistance / officialLengthM;
+        const ratioLabel = `${routeLabel} / 원본 ${(officialLengthM / 1000).toFixed(2)}km·${item.reqreTime || '-'}`;
         if (ratio < 0.6 || ratio > 1.6) {
           stats.lengthWarnings += 1;
           console.log(`  - ⚠️  거리 차이 큼: ${ratioLabel} (확인 필요)`);
         } else {
-          console.log(`  - 거리 확인: ${ratioLabel}`);
+          console.log(`  - 거리·시간: ${ratioLabel}`);
         }
+      } else {
+        console.log(`  - 거리·시간: ${routeLabel}`);
       }
 
-      // 거리 및 시간 산출
-      let totalDistance = 0;
-      if (item.stretLt) {
-        const ltKm = Number.parseFloat(item.stretLt);
-        if (Number.isFinite(ltKm) && ltKm > 0) totalDistance = Math.round(ltKm * 1000);
-      }
-      if (client && totalDistance <= 0) {
-        const { rows: [calc] } = await client.query(
-          `SELECT GREATEST(1, ROUND(ST_Length($1::geography))::int) AS distance`,
-          [route.wkt]
-        );
-        totalDistance = calc?.distance || 1000;
-      } else if (totalDistance <= 0) {
-        totalDistance = 1000;
-      }
-
-      const estimatedDuration = parseDurationMinutes(item.reqreTime, totalDistance);
       const description = buildCourseDescription(item);
 
       if (isDryRun) {
