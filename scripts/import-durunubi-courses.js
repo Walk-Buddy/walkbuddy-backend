@@ -25,8 +25,8 @@ const serviceKey =
 const mobileOS = process.env.DURUNUBI_MOBILE_OS || DEFAULT_MOBILE_OS;
 const mobileApp = process.env.DURUNUBI_MOBILE_APP || DEFAULT_MOBILE_APP;
 const brdDiv = process.env.DURUNUBI_BRD_DIV || '';
-const maxImport = toInt(process.env.DURUNUBI_MAX_IMPORT, 0);
-const startIndex = Math.max(0, toInt(process.env.DURUNUBI_START_INDEX, 0));
+const maxImport = toInt(process.argv[2] || process.env.DURUNUBI_MAX_IMPORT, 0);
+const startIndex = Math.max(0, toInt(process.argv[3] || process.env.DURUNUBI_START_INDEX, 0));
 const maxWaypoints = toInt(process.env.DURUNUBI_MAX_WAYPOINTS, DEFAULT_MAX_WAYPOINTS);
 
 const http = axios.create({
