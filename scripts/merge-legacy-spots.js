@@ -23,6 +23,8 @@ const isApply = process.argv.includes('--apply');
 // --limit=N: 병합·전환을 각각 앞에서 N개만 (검토용 소량 반영)
 const limitArg = Math.max(0, Number.parseInt((process.argv.find((a) => a.startsWith('--limit=')) || '').slice(8), 10) || 0);
 const MATCH_RADIUS_M = 150;
+// 산책 장소가 아닌 레거시 스팟 (찜질방·스파·온천): 연결된 데이터가 없으면 삭제
+const EXCLUDED_LEISURE_PATTERN = /찜질|사우나|스파|목욕|온천|워터파크/;
 const KAKAO_SEARCH_RADIUS_M = 300;
 
 // 카카오 장소 ID가 아닌 스팟: tour_*, tour_with_*, tour:*, ID 없음
@@ -107,11 +109,24 @@ async function main() {
   console.log(`🧹 레거시 스팟 정리 ${isApply ? '(반영)' : '(미리보기 — 변경 없음, 반영하려면 --apply)'}`);
   console.log(`- 대상: ${legacySpots.length}개 (tour_*, tour_with_*, tour:*, ID 없음)\n`);
 
-  const plan = { merge: [], convert: [], keep: [] };
+  const plan = { merge: [], convert: [], keep: [], remove: [] };
   // 카카오 ID → 그 ID로 전환하기로 한 레거시 스팟 (같은 장소의 다른 레거시 스팟은 여기에 합친다)
   const convertedByKakaoId = new Map();
 
   for (const spot of legacySpots) {
+    if (EXCLUDED_LEISURE_PATTERN.test(spot.name)) {
+      const { rows: [refs] } = await pool.query(
+        `SELECT (SELECT COUNT(*) FROM course_waypoints WHERE spot_id = $1)
+              + (SELECT COUNT(*) FROM spot_reviews WHERE spot_id = $1)
+              + (SELECT COUNT(*) FROM bookmarks WHERE target_type = 'spot' AND target_id = $1) AS n`,
+        [spot.spot_id]
+      );
+      if (Number(refs.n) === 0) {
+        plan.remove.push(spot);
+        continue;
+      }
+    }
+
     // 1) DB 안의 카카오 스팟과 짝 찾기
     const { rows: nearby } = await pool.query(
       `SELECT spot_id, name, kakao_place_id,
@@ -160,6 +175,8 @@ async function main() {
   for (const { spot, doc } of plan.convert) {
     console.log(`  ${spot.name} [${spot.kakao_place_id || 'ID 없음'}] → 카카오 ${doc.place_name} [${doc.id}] (${doc.distance}m)`);
   }
+  console.log(`\n삭제 (찜질방·스파·온천, 연결 데이터 없음): ${plan.remove.length}개`);
+  if (plan.remove.length) console.log(`  ${plan.remove.map((s) => s.name).join(', ')}`);
   console.log(`\n유지 (카카오에서 못 찾음): ${plan.keep.length}개`);
   if (plan.keep.length) console.log(`  ${plan.keep.map((s) => s.name).join(', ')}`);
 
@@ -181,8 +198,12 @@ async function main() {
     // 전환을 먼저 해야 '전환된 레거시 스팟에 합치기'가 올바른 대상에 들어간다.
     for (const { spot, doc } of plan.convert) await convertSpot(client, spot, doc);
     for (const { spot, target } of plan.merge) await mergeSpot(client, spot, target);
+    for (const spot of plan.remove) {
+      await client.query(`DELETE FROM taggings WHERE target_type = 'spot' AND target_id = $1`, [spot.spot_id]);
+      await client.query(`DELETE FROM spots WHERE spot_id = $1`, [spot.spot_id]);
+    }
     await client.query('COMMIT');
-    console.log(`\n✅ 반영 완료: 병합 ${plan.merge.length}, 전환 ${plan.convert.length}`);
+    console.log(`\n✅ 반영 완료: 병합 ${plan.merge.length}, 전환 ${plan.convert.length}, 삭제 ${plan.remove.length}`);
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

@@ -38,6 +38,8 @@ const CONTENT_TYPE_NAMES = { 12: '관광지', 14: '문화시설', 28: '레포츠
 // 장소 자체가 아닌 부속시설·상업시설로 잘못 매칭되는 카카오 카테고리
 // 관광지·문화시설을 카페·식당으로 잘못 잇지 않도록 음식점도 제외 (예: 구봉산 → 구봉산카페쉼터)
 const EXCLUDED_KAKAO_CATEGORY_PATTERN = /편의점|주차장|화장실|충전소|숙박|매표소|퀵서비스|식품판매|입출구|^부동산 > (?!빌딩)|^음식점|^의료,건강/;
+// 찜질방·스파·온천 등은 산책 장소가 아니어서 제외 (TourAPI가 관광지로 분류해도)
+const EXCLUDED_LEISURE_PATTERN = /찜질|사우나|스파|목욕|온천|워터파크/;
 const FACILITY_SUFFIX_PATTERN = /(주차장|공중화장실|화장실|입구|출입구|매점|매표소|관리사무소|정류장|점)$/;
 
 const args = process.argv.slice(2);
@@ -194,13 +196,23 @@ async function main() {
   console.log(`- 처리 대상: ${targets.length}곳 (${startArg + 1}번째부터)\n`);
 
   const ownerId = isDryRun ? null : await ensureAdminUser();
-  const stats = { total: targets.length, created: 0, existing: 0, enriched: 0, skippedRecent: 0, partialQuota: 0, noKakao: 0, failed: 0 };
+  const stats = { total: targets.length, created: 0, existing: 0, enriched: 0, skippedRecent: 0, partialQuota: 0, noKakao: 0, excludedLeisure: 0, failed: 0 };
   const noKakao = [];
 
   for (const [index, { item, target, contentTypeId }] of targets.entries()) {
     const label = `[${startArg + index + 1}] ${target.name} ${item.title}`;
     try {
+      if (EXCLUDED_LEISURE_PATTERN.test(item.title)) {
+        stats.excludedLeisure += 1;
+        console.log(`${label} → 제외 (찜질방·스파·온천)`);
+        continue;
+      }
       const doc = await findKakaoPlace(item, target.name);
+      if (doc && EXCLUDED_LEISURE_PATTERN.test(`${doc.category_name || ''} ${doc.place_name}`)) {
+        stats.excludedLeisure += 1;
+        console.log(`${label} → 제외 (찜질방·스파·온천: ${doc.place_name})`);
+        continue;
+      }
       if (!doc) {
         stats.noKakao += 1;
         noKakao.push(`${target.name} ${item.title}`);
@@ -241,7 +253,7 @@ async function main() {
 
   console.log('\n=============================================');
   console.log(`처리 ${stats.total}곳 | 신규 ${stats.created} | 기존 ${stats.existing} | 보강 ${stats.enriched}`);
-  console.log(`최근 보강되어 건너뜀 ${stats.skippedRecent} | 한도 초과로 보강 미완료 ${stats.partialQuota} | 카카오 장소 없음 ${stats.noKakao} | 실패 ${stats.failed}`);
+  console.log(`최근 보강되어 건너뜀 ${stats.skippedRecent} | 한도 초과로 보강 미완료 ${stats.partialQuota} | 카카오 장소 없음 ${stats.noKakao} | 찜질방·스파 제외 ${stats.excludedLeisure} | 실패 ${stats.failed}`);
   if (noKakao.length) console.log(`카카오 장소 없음: ${noKakao.join(', ')}`);
   if (stats.partialQuota) console.log('※ 보강 미완료 장소는 다음 실행 때 자동으로 다시 보강됩니다.');
   console.log('=============================================');

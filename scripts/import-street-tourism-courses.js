@@ -407,6 +407,24 @@ async function findStopPlace(stop, { region, subRegion, anchor, prev, maxDistanc
 // ──────────────────────────────────────────────────────────
 // 4. 경로(LineString) 생성 (Tmap 도보 경로 연동)
 // ──────────────────────────────────────────────────────────
+// 원본 소요시간 문구("2시간", "1시간30분", "45분", "1.5") → 분. 없거나 못 읽으면 null
+function parseOfficialMinutes(reqreTime) {
+  const text = String(reqreTime || '').trim();
+  if (!text) return null;
+  const hours = Number(text.match(/(\d+(?:\.\d+)?)\s*시간/)?.[1] || 0);
+  const minutes = Number(text.match(/(\d+)\s*분/)?.[1] || 0);
+  if (hours || minutes) return Math.round(hours * 60 + minutes);
+  const num = Number.parseFloat(text.replace(/[^0-9.]/g, ''));
+  return Number.isFinite(num) && num > 0 ? Math.round(num * 60) : null;
+}
+
+// T맵 보행자 경로는 보도·골목 중심이라 등산로·임도 같은 산길을 모른다.
+// 경유 지점을 이 비율 미만으로 찾았거나 원본 거리와 이 범위를 벗어나면 산길 코스로 보고 원본 거리·시간을 쓴다.
+const MIN_MATCHED_STOP_RATIO = 0.6;
+// 코스명·경유 경로에 이런 말이 있으면 산길 코스 (T맵 보행자 경로가 모르는 길)
+const TRAIL_COURSE_PATTERN = /둘레길|자락길|숲길|산길|등산|임도|봄내길|트레킹|산책로\s*\(?산|오름|능선/;
+const OFFICIAL_LENGTH_RATIO_RANGE = [0.6, 1.6];
+
 // T맵 경로를 받지 못한 구간(직선 연결)은 T맵과 같은 도보 속도로 계산
 const FALLBACK_WALK_METERS_PER_MINUTE = WALK_METERS_PER_MINUTE;
 
@@ -632,7 +650,7 @@ async function main() {
     skipped: 0,
     failed: 0,
     unmatchedStops: 0,
-    lengthWarnings: 0,
+    officialUsed: 0,
   };
 
   try {
@@ -805,26 +823,39 @@ async function main() {
         continue;
       }
 
-      // 거리·소요시간: 공공데이터 원본(stretLt, reqreTime) 대신 T맵 도보 경로 기준
-      const totalDistance = route.distanceM;
-      const estimatedDuration = route.durationMin;
+      // 거리·소요시간: 기본은 T맵 도보 경로 기준.
+      // 산길 코스(경유 지점 매칭 부족 또는 원본 거리와 차이 큼)는 원본 거리·시간을 쓴다.
       if (route.fallbackSegments > 0) {
         console.log(`  - ⚠️  T맵 경로 실패 구간 ${route.fallbackSegments}개는 직선거리로 계산`);
       }
+      const consideredStops = stops.length - skippedStops.length;
+      const matchedRatio = consideredStops > 0 ? (consideredStops - unmatchedStops.length) / consideredStops : 1;
+      const lengthRatio = officialLengthM ? route.distanceM / officialLengthM : null;
+      const lengthOutOfRange = lengthRatio != null
+        && (lengthRatio < OFFICIAL_LENGTH_RATIO_RANGE[0] || lengthRatio > OFFICIAL_LENGTH_RATIO_RANGE[1]);
+      // 큐레이션으로 지점을 확인한 코스는 원본이 틀린 경우(예: 3.1운동길B 원본 1.0km)라 T맵 값을 유지한다.
+      const isCurated = Boolean(CURATED_COURSES[sourceId]);
+      const isTrailCourse = TRAIL_COURSE_PATTERN.test(`${courseName} ${item.coursInfo || ''}`);
+      const useOfficial = !isCurated && Boolean(officialLengthM)
+        && (isTrailCourse || matchedRatio < MIN_MATCHED_STOP_RATIO || lengthOutOfRange);
 
-      // 원본 공식 거리와 크게 다르면 경유지 매칭이나 원본 데이터를 확인해야 하는 코스
-      const routeLabel = `T맵 ${(totalDistance / 1000).toFixed(2)}km·${estimatedDuration}분`;
-      if (officialLengthM) {
-        const ratio = totalDistance / officialLengthM;
-        const ratioLabel = `${routeLabel} / 원본 ${(officialLengthM / 1000).toFixed(2)}km·${item.reqreTime || '-'}`;
-        if (ratio < 0.6 || ratio > 1.6) {
-          stats.lengthWarnings += 1;
-          console.log(`  - ⚠️  거리 차이 큼: ${ratioLabel} (확인 필요)`);
-        } else {
-          console.log(`  - 거리·시간: ${ratioLabel}`);
-        }
+      const totalDistance = useOfficial ? Math.round(officialLengthM) : route.distanceM;
+      const estimatedDuration = useOfficial
+        ? parseOfficialMinutes(item.reqreTime) || Math.max(1, Math.round(totalDistance / WALK_METERS_PER_MINUTE))
+        : route.durationMin;
+
+      const tmapLabel = `T맵 ${(route.distanceM / 1000).toFixed(2)}km·${route.durationMin}분`;
+      const officialLabel = officialLengthM ? ` / 원본 ${(officialLengthM / 1000).toFixed(2)}km·${item.reqreTime || '-'}` : '';
+      if (useOfficial) {
+        stats.officialUsed += 1;
+        const reason = isTrailCourse
+          ? '코스명·경로에 산길 표현'
+          : matchedRatio < MIN_MATCHED_STOP_RATIO
+            ? `경유 지점 매칭 ${Math.round(matchedRatio * 100)}%`
+            : `거리 비율 ${lengthRatio.toFixed(2)}`;
+        console.log(`  - 🏔️  산길 코스로 판단(${reason}) → 원본 거리·시간 사용: ${tmapLabel}${officialLabel}`);
       } else {
-        console.log(`  - 거리·시간: ${routeLabel}`);
+        console.log(`  - 거리·시간(T맵): ${tmapLabel}${officialLabel}`);
       }
 
       const description = buildCourseDescription(item);
@@ -923,7 +954,7 @@ async function main() {
   console.log(`- 신규 등록 스팟: ${stats.spotsSaved}개`);
   console.log(`- TourAPI 관광정보 매칭: ${stats.tourEnriched}개`);
   console.log(`- 찾지 못한 경유 지점: ${stats.unmatchedStops}개`);
-  console.log(`- 거리 차이 큰 코스(확인 필요): ${stats.lengthWarnings}개`);
+  console.log(`- 산길 코스로 원본 거리·시간 사용: ${stats.officialUsed}개`);
   console.log(`- 스킵 코스 수: ${stats.skipped}`);
   console.log(`- 실패 코스 수: ${stats.failed}`);
   console.log('=============================================\n');
