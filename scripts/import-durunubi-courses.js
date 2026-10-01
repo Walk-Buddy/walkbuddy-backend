@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const axios = require('axios');
 const pool = require('../config/db');
-const { requireCanonicalTagId } = require('../constants/tagMaster');
+const { requireTagId } = require('../constants/tagAliases');
 const spotService = require('../services/spotService');
 const { installDataGoKrKeyFallback } = require('../services/dataGoKrKey');
 const courseTagService = require('../services/courseTagService');
@@ -327,15 +327,15 @@ async function findAvailableNickname(client, baseName) {
   throw new Error('두루누비 관리자 계정에 사용할 수 있는 닉네임을 만들지 못했습니다.');
 }
 
-// 정본 태그만 쓴다 (태그를 새로 만들지 않는다 — constants/tagMaster.js, npm run sync:tags)
+// 정본 태그만 쓴다 (태그를 새로 만들지 않는다 — DB 정본 태그 — constants/tagAliases.js)
 async function ensureCourseTag(client) {
-  return requireCanonicalTagId(client, COURSE_TAG_NAME, 'course');
+  return requireTagId(client, COURSE_TAG_NAME, 'course');
 }
 
 // 서버에서 넣는 공공데이터 코스는 항상 '공식코스' 태그를 붙인다.
 // (자동 태그 단계가 실패해도 빠지지 않도록 코스 저장과 같은 트랜잭션에서 직접 연결)
 async function ensureOfficialCourseTag(client) {
-  return requireCanonicalTagId(client, '공식코스', 'course');
+  return requireTagId(client, '공식코스', 'course');
 }
 
 const PROV_MAP = {

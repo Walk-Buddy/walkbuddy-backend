@@ -7,7 +7,7 @@ const {
   inferSpotCategoriesWithFallback,
 } = require('../constants/spotCategoryRules');
 const trafficLog = require('../services/tourTrafficLog');
-const { findCanonicalTags } = require('../constants/tagMaster');
+const { findTags } = require('../constants/tagAliases');
 
 // ──────────────────────────────────────────────────────────
 // 1. CLI 옵션 파싱
@@ -413,8 +413,8 @@ async function attachTags(client, spotId, tagNames, ownerId) {
     [spotId, ownerId]
   ).catch(() => {});
 
-  // 정본 태그만 붙인다 (정본에 없는 이름으로 태그를 새로 만들지 않는다 — constants/tagMaster.js)
-  const tags = await findCanonicalTags(client, tagNames, 'spot');
+  // 정본 태그만 붙인다 (정본에 없는 이름으로 태그를 새로 만들지 않는다 — constants/tagAliases.js)
+  const tags = await findTags(client, tagNames, 'spot');
   for (const tag of tags) {
     try {
       await client.query(

@@ -14,7 +14,7 @@ const odiiService = require('./odiiService');
 const trafficLog = require('./tourTrafficLog');
 const { getQuotaErrorCount } = require('./dataGoKrKey');
 const { isLegacyPlaceId, legacyContentId, findKakaoPlaceNear } = require('../utils/kakaoPlaceMatch');
-const { findCanonicalTags } = require('../constants/tagMaster');
+const { findTags } = require('../constants/tagAliases');
 
 const TOUR_API_BASE_URL = 'https://apis.data.go.kr/B551011/KorService2';
 const TOUR_API_MATCH_RADIUS = Number(process.env.TOUR_API_MATCH_RADIUS || 300);
@@ -427,8 +427,8 @@ async function attachTagsToSpot(spotId, tagNames, userId) {
             return;
         }
 
-        // 1. 정본 태그만 붙인다 (정본에 없는 이름으로 태그를 새로 만들지 않는다 — constants/tagMaster.js)
-        const tagsToAttach = await findCanonicalTags(pool, cleanNames, 'spot');
+        // 1. 정본 태그만 붙인다 (정본에 없는 이름으로 태그를 새로 만들지 않는다 — constants/tagAliases.js)
+        const tagsToAttach = await findTags(pool, cleanNames, 'spot');
 
         // 2. taggings 테이블에 일괄 등록
         for (const tag of tagsToAttach) {

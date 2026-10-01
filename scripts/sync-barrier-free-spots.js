@@ -16,7 +16,7 @@
 require('dotenv').config();
 const pool = require('../config/db');
 const tourApiService = require('../services/tourApiService');
-const { findCanonicalTags } = require('../constants/tagMaster');
+const { findTags } = require('../constants/tagAliases');
 const {
   resolveRegion,
   inferRegionFromLocation,
@@ -61,8 +61,8 @@ async function ensureSystemTaggerId() {
 // ── 태그 생성 및 스팟 부착 ────────────────────────────────────
 async function attachTagsToSpot(spotId, tagNames, userId) {
   if (!tagNames || tagNames.length === 0) return;
-  // 정본 태그만 붙인다 (정본에 없는 이름으로 태그를 새로 만들지 않는다 — constants/tagMaster.js)
-  const tags = await findCanonicalTags(pool, tagNames, 'spot');
+  // 정본 태그만 붙인다 (정본에 없는 이름으로 태그를 새로 만들지 않는다 — constants/tagAliases.js)
+  const tags = await findTags(pool, tagNames, 'spot');
   if (!tags.length) return;
 
   // taggings 등록

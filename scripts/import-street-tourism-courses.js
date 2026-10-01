@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const pool = require('../config/db');
-const { requireCanonicalTagId } = require('../constants/tagMaster');
+const { requireTagId } = require('../constants/tagAliases');
 const spotService = require('../services/spotService');
 const courseTagService = require('../services/courseTagService');
 const { WALK_METERS_PER_MINUTE } = require('../constants/courseConstants');
@@ -15,7 +15,7 @@ const {
 
 const API_BASE_URL = 'https://api.data.go.kr/openapi/tn_pubr_public_stret_tursm_info_api';
 const DATA_SOURCE = '행정안전부_전국길관광정보표준데이터';
-const COURSE_TAG_NAME = '추천코스'; // 정본 태그 (constants/tagMaster.js). 코스 분류(category)는 '관광코스' 그대로
+const COURSE_TAG_NAME = '추천코스'; // 정본 태그 (DB tags). 코스 분류(category)는 '관광코스' 그대로
 const DEFAULT_PAGE_SIZE = 100;
 
 // CLI 옵션 파싱
@@ -559,15 +559,15 @@ async function ensureAdminUser(client) {
   return created[0].user_id;
 }
 
-// 정본 태그만 쓴다 (태그를 새로 만들지 않는다 — constants/tagMaster.js, npm run sync:tags)
+// 정본 태그만 쓴다 (태그를 새로 만들지 않는다 — DB 정본 태그 — constants/tagAliases.js)
 async function ensureCourseTag(client) {
-  return requireCanonicalTagId(client, COURSE_TAG_NAME, 'course');
+  return requireTagId(client, COURSE_TAG_NAME, 'course');
 }
 
 // 서버에서 넣는 공공데이터 코스는 항상 '공식코스' 태그를 붙인다.
 // (자동 태그 단계가 실패해도 빠지지 않도록 코스 저장과 같은 트랜잭션에서 직접 연결)
 async function ensureOfficialCourseTag(client) {
-  return requireCanonicalTagId(client, '공식코스', 'course');
+  return requireTagId(client, '공식코스', 'course');
 }
 
 function buildCourseDescription(item) {
