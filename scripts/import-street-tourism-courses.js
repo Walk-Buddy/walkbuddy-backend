@@ -930,6 +930,17 @@ async function main() {
         [tagIds, course.course_id, ownerId]
       );
 
+      // 산길 코스(봄내길·둘레길·자락길·숲길 등)는 '둘레길' 태그도 붙인다. (필터 #둘레길로 검색되도록)
+      if (isTrailCourse) {
+        await client.query(
+          `INSERT INTO taggings (tag_id, target_id, target_type, user_id)
+           SELECT tag_id, $1, 'course', $2 FROM tags
+           WHERE name = '둘레길' AND type = 'course' AND is_active = TRUE
+           ON CONFLICT DO NOTHING`,
+          [course.course_id, ownerId]
+        );
+      }
+
       // 코스 태그 최대 연결: 카테고리·설명·경유지 스팟 태그를 코스 태그로 승격
       try {
         const derivedTags = await courseTagService.autoTagCourse({

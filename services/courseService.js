@@ -1006,6 +1006,20 @@ exports.getMyCourses = async (userId, query) => {
 exports.getCourseById = async (courseId, userId) => {
   const client = await pool.connect();
   try {
+    // 예전 앱은 두루누비 코스를 원본 ID(예: T_CRS_MNG0000005118)로 열었다.
+    // UUID가 아니면 import된 코스의 원본 ID(source_id)로 찾는다. (북마크·공유 링크 호환)
+    if (!UUID_PATTERN.test(String(courseId))) {
+      const { rows: [bySource] } = await client.query(
+        `SELECT course_id FROM courses WHERE source_id = $1 AND status != 'deleted' LIMIT 1`,
+        [String(courseId)]
+      );
+      if (!bySource) {
+        const err = new Error('코스를 찾을 수 없습니다.');
+        err.status = 404; throw err;
+      }
+      courseId = bySource.course_id;
+    }
+
     // 코스 기본 정보
     const { rows: [course] } = await client.query(
       `SELECT
