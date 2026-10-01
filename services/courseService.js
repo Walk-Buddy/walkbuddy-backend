@@ -312,7 +312,25 @@ function normalizeDifficulty(value) {
 // 두루누비 description 섹션 파싱은 utils/courseDescription.js 로 이전됨
 // (courseService · backfill 스크립트가 공용으로 사용)
 
+// 전국길관광정보 코스 설명에 import가 붙였던 항목 중 상세 화면에 이미 보이는 정보
+// (경유지 타임라인, 출발→도착, 소요시간 박스)는 산책로 소개에서 뺀다.
+const STREET_TOURISM_DUPLICATE_PARAGRAPH = /^(📌\s*경유 경로|🚩\s*출발|⏱️?\s*소요 시간)\s*:/;
+
+function stripStreetTourismDuplicates(description) {
+  if (!description) return description;
+  return String(description)
+    .split(/\n{2,}/)
+    .filter((paragraph) => !STREET_TOURISM_DUPLICATE_PARAGRAPH.test(paragraph.trim()))
+    .join('\n\n');
+}
+
 function buildCourseDetailDescription(course) {
+  if (course.data_source === '행정안전부_전국길관광정보표준데이터') {
+    return {
+      description: cleanText(stripStreetTourismDuplicates(course.description)),
+    };
+  }
+
   if (course.data_source !== '한국관광공사_두루누비') {
     return {
       description: cleanText(course.description),
@@ -1036,6 +1054,7 @@ exports.getCourseById = async (courseId, userId) => {
       `SELECT
          cw.seq, cw.type, cw.spot_id,
          cw.lat, cw.lng,
+         cw.name,
          s.name AS spot_name,
          ST_Y(s.location::geometry) AS spot_lat,
          ST_X(s.location::geometry) AS spot_lng,

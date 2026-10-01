@@ -638,6 +638,11 @@ CREATE TABLE course_waypoints (
     -- type = 'pin' 일 때만 사용: 경도
     -- type = 'spot' 일 때 NULL (좌표는 spots.location 에서 조회)
 
+    name        VARCHAR(100)    NULL,
+    -- 경유지 표시 이름 (주로 type = 'pin' 에서 사용)
+    -- 카카오에 없는 옛터·표지석 등을 이름 있는 핀으로 저장 (예: '손병희 집 터')
+    -- type = 'spot' 은 spots.name 을 우선 사용
+
     CONSTRAINT pk_course_waypoints
         PRIMARY KEY (course_id, seq),
     -- 복합 PK: 동일 코스 내 seq 유일 보장

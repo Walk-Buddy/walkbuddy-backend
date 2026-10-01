@@ -1,5 +1,7 @@
 require('dotenv').config();
 
+const fs = require('fs');
+const path = require('path');
 const axios = require('axios');
 const pool = require('../config/db');
 const spotService = require('../services/spotService');
@@ -195,80 +197,207 @@ function isWithinRegion(lat, lng, region) {
   );
 }
 
-async function searchKakaoPlace(spotName, region, subRegion, addr) {
-  if (!kakaoKey) return null;
-  const cacheKey = `${region}:${subRegion || ''}:${spotName || ''}:${addr || ''}`;
-  if (placeCache.has(cacheKey)) return placeCache.get(cacheKey);
+// ── 경유지 이름 정리 ───────────────────────────────────────
+// 장소명이 아닌 괄호 안 메모 (예: "(월 휴관)", "(공사중, `24.6.30.)", "(평일 비개방)")
+const NOTE_PATTERN = /휴관|공사|비개방|개방|촬영지|방향|예정|운영|`|\d{2}\.\d/;
+// 장소 자체가 아닌 부속시설·상업시설로 잘못 매칭되는 카카오 카테고리
+const EXCLUDED_KAKAO_CATEGORY_PATTERN = /편의점|주차장|화장실|충전소|숙박|매표소|퀵서비스|노인|식품판매|입출구|^부동산 > (?!빌딩)|^음식점/;
+const FACILITY_SUFFIX_PATTERN = /(주차장|공중화장실|화장실|입구|출입구|매점|매표소|관리사무소|정류장|점)$/;
+const PREFERRED_CATEGORY_PATTERN = /^(여행|문화,예술|종교|교육,학문|사회,공공기관)/;
+const MAX_INTERMEDIATE_STOPS = 12;
 
-  // 후보 쿼리 목록 (지역+권역 우선 → 지역 → 원본명)
+// 사람이 확인한 경유 지점 (카카오에 없는 옛터·표지석, 다른 이름으로 등록된 장소)
+const CURATED_PATH = path.join(__dirname, '../constants/streetTourismCourses.curated.json');
+const CURATED_COURSES = fs.existsSync(CURATED_PATH)
+  ? JSON.parse(fs.readFileSync(CURATED_PATH, 'utf8')).courses || {}
+  : {};
+
+// 큐레이션 항목 → 경유 지점 (skip 이면 null)
+//  - kakao: 카카오 장소로 저장, label 은 타임라인 표시 이름
+//  - pin:   이름 있는 좌표 핀
+function placeFromCuration(stop, curated, region, subRegion) {
+  if (curated.skip) return null;
+  const label = curated.label || stop.replace(/\([^)]*\)/g, '').trim();
+  if (curated.kakao) {
+    const k = curated.kakao;
+    const place = toPlace(
+      { id: k.id, place_name: k.name, category_name: k.categoryName, road_address_name: k.address, x: k.x, y: k.y },
+      region,
+      subRegion
+    );
+    if (curated.categories?.length) place.categories = curated.categories;
+    return { ...place, label };
+  }
+  return { name: label, label, x: Number(curated.pin.lng), y: Number(curated.pin.lat) };
+}
+
+function normalizeName(name = '') {
+  return String(name)
+    .replace(/\([^)]*\)/g, '')
+    .replace(/[\s·ㆍ.,'"`]/g, '')
+    .toLowerCase();
+}
+
+// coursInfo 를 경유 지점 목록으로 자른다. 화살표가 있으면 화살표만 구분자로 쓴다.
+// (화살표가 없는 코스는 "-", "~", ">" 를 구분자로 사용. 쉼표는 한 지점 안의 나열로 본다)
+function splitCourseStops(coursInfo) {
+  const text = String(coursInfo || '').trim();
+  if (!text) return [];
+  const parts = /→/.test(text) ? text.split(/→+/) : text.split(/\s*(?:-|~|>)+\s*/);
+  return parts
+    .map((part) => part.replace(/\s+/g, ' ').trim())
+    .filter((part) => part.length >= 2 && !/^(출발|도착|종착지?)$/.test(part));
+}
+
+// 묘역 이름에서 인물 이름만 남길 때 빼는 단어 (호·존칭·일반 명사)
+const GRAVE_GENERIC_TOKENS = new Set(['선생', '열사', '의사', '지사', '여사', '묘역', '묘소', '묘', '합동']);
+
+// 한 경유 지점의 검색어 후보. { query, graveName } 목록을 돌려준다.
+//  1) 괄호 제거한 이름, 괄호 안 별칭, 쉼표/및 으로 나뉜 각 장소
+//  2) "OO 터" → "OO터"
+//  3) 마지막 설명어를 뺀 이름 ("한글가온길 새김돌" → "한글가온길")
+//  4) 묘역: 카카오는 "OO 묘소"/"OO묘"로 등록 → 인물 이름 + 묘소 로 검색하고 카테고리로 검증
+function buildStopQueries(stop) {
   const queries = [];
-  if (spotName) {
-    if (subRegion) queries.push(`${region} ${subRegion} ${spotName}`);
-    queries.push(`${region} ${spotName}`);
-    queries.push(`${subRegion ? region + ' ' + subRegion + ' ' : ''}${spotName}`);
-    queries.push(spotName);
-  }
+  const aliases = [...String(stop).matchAll(/\(([^)]*)\)/g)]
+    .map((m) => m[1].trim())
+    .filter((alias) => alias.length >= 2 && !NOTE_PATTERN.test(alias));
+  const base = String(stop).replace(/\([^)]*\)?/g, ' ').replace(/\s+/g, ' ').trim();
 
-  // 1. 키워드 검색 — bbox 안에 들어오는 첫 결과만 채택
-  for (const q of queries) {
-    try {
-      const res = await axios.get('https://dapi.kakao.com/v2/local/search/keyword.json', {
-        headers: { Authorization: `KakaoAK ${kakaoKey}` },
-        params: { query: q.trim(), size: 5 },
-        timeout: 5000,
-      });
-      const docs = res.data?.documents || [];
-      // bbox 안에 있는 결과 중 가장 신뢰도 높은(첫) 항목 선택
-      const doc = docs.find((d) => isWithinRegion(Number(d.y), Number(d.x), region));
-      if (!doc) continue; // 이 쿼리는 지역 밖 결과뿐 → 다음 쿼리로
+  const pieces = [base, ...aliases, ...base.split(/\s*,\s*|\s+및\s+/)];
+  for (const piece of pieces) {
+    const name = piece.trim();
+    // "최린" 처럼 사람 이름만 남은 짧은 조각은 검색하지 않는다.
+    if (normalizeName(name).length < 3) continue;
+    queries.push({ query: name });
+    if (/\s터$/.test(name)) queries.push({ query: name.replace(/\s터$/, '터') });
 
-      const categories = inferSpotCategoriesWithFallback(doc.category_name, doc.place_name);
-      const result = {
-        kakao_place_id: String(doc.id),
-        name: doc.place_name,
-        kakao_category_name: doc.category_name || null,
-        categories: categories.length > 0 ? categories : ['자연·힐링'],
-        address: doc.road_address_name || doc.address_name || null,
-        x: Number(doc.x),
-        y: Number(doc.y),
-        region,
-        sub_region: subRegion,
-      };
-      placeCache.set(cacheKey, result);
-      return result;
-    } catch (_) {}
-  }
-
-  // 2. 주소 검색 (폴백) — 주소 결과도 bbox 검증
-  if (addr) {
-    try {
-      const res = await axios.get('https://dapi.kakao.com/v2/local/search/address.json', {
-        headers: { Authorization: `KakaoAK ${kakaoKey}` },
-        params: { query: addr.trim() },
-        timeout: 5000,
-      });
-      const doc = res.data?.documents?.[0];
-      if (doc?.x && doc?.y && isWithinRegion(Number(doc.y), Number(doc.x), region)) {
-        const result = {
-          kakao_place_id: null,
-          name: spotName || addr,
-          kakao_category_name: null,
-          categories: ['자연·힐링'],
-          address: doc.road_address_name || doc.address_name || addr,
-          x: Number(doc.x),
-          y: Number(doc.y),
-          region,
-          sub_region: subRegion,
-        };
-        placeCache.set(cacheKey, result);
-        return result;
+    const tokens = name.split(' ');
+    if (/묘역|묘소/.test(name)) {
+      // "성재 이시영 선생 묘역" → 이시영, "일성 이준열사 묘역" → 이준
+      const people = tokens
+        .map((token) => token.replace(/(선생|열사|의사|지사|여사)$/, ''))
+        .filter((token) => token.length >= 2 && !GRAVE_GENERIC_TOKENS.has(token));
+      // 호(號)는 보통 이름 앞에 오므로 마지막 인물 토큰부터 시도
+      for (const person of people.reverse()) {
+        queries.push({ query: `${person} 묘소`, graveName: person });
       }
-    } catch (_) {}
+    } else if (tokens.length >= 2) {
+      const withoutLast = tokens.slice(0, -1).join(' ');
+      if (normalizeName(withoutLast).length >= 3) queries.push({ query: withoutLast });
+    }
   }
 
-  // 지역 안에서 끝내 찾지 못하면 null → 엉뚱한 스팟 저장 방지
-  placeCache.set(cacheKey, null);
-  return null;
+  const seen = new Set();
+  return queries.filter(({ query }) => (seen.has(query) ? false : seen.add(query)));
+}
+
+// 묘역 검색 결과 검증: 무덤 카테고리이고 이름에 인물 이름이 있어야 같은 곳으로 본다.
+function getGraveScore(graveName, doc) {
+  const isGrave = /릉,묘,총/.test(String(doc.category_name || ''));
+  return isGrave && normalizeName(doc.place_name).includes(normalizeName(graveName)) ? 75 : 0;
+}
+
+function getNameScore(query, placeName) {
+  const expected = normalizeName(query);
+  const actual = normalizeName(placeName);
+  if (!expected || !actual) return 0;
+  if (expected === actual) return 100;
+  if (actual.includes(expected)) {
+    if (FACILITY_SUFFIX_PATTERN.test(actual) && !actual.endsWith(expected)) return 0;
+    return Math.max(55, 85 - (actual.length - expected.length) * 3);
+  }
+  if (expected.includes(actual)) return actual.length >= 3 ? 65 : 0;
+  return 0;
+}
+
+function distanceMeters(a, b) {
+  const R = 6371000;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function toPlace(doc, region, subRegion) {
+  const categories = inferSpotCategoriesWithFallback(doc);
+  return {
+    kakao_place_id: String(doc.id),
+    name: doc.place_name,
+    kakao_category_name: doc.category_name || null,
+    categories: categories.length > 0 ? categories : ['공원·광장'],
+    address: doc.road_address_name || doc.address_name || null,
+    x: Number(doc.x),
+    y: Number(doc.y),
+    region,
+    sub_region: subRegion,
+  };
+}
+
+async function kakaoGet(path, params) {
+  const cacheKey = `${path}:${JSON.stringify(params)}`;
+  if (!placeCache.has(cacheKey)) {
+    placeCache.set(cacheKey, axios.get(`https://dapi.kakao.com/v2/local/search/${path}.json`, {
+      headers: { Authorization: `KakaoAK ${kakaoKey}` },
+      params,
+      timeout: 5000,
+    }).then((res) => res.data?.documents || []).catch(() => []));
+  }
+  return placeCache.get(cacheKey);
+}
+
+// 주소 → 좌표 (출발/도착 기준점)
+async function geocodeAddress(addr, region) {
+  if (!kakaoKey || !addr) return null;
+  const doc = (await kakaoGet('address', { query: addr.trim() }))[0];
+  if (!doc?.x || !doc?.y) return null;
+  const point = { lat: Number(doc.y), lng: Number(doc.x) };
+  return isWithinRegion(point.lat, point.lng, region) ? point : null;
+}
+
+/**
+ * 기준점(출발지) 주변에서만 장소를 찾고, 이름이 맞는 후보 중 직전 지점에서 가장 가까운 곳을 고른다.
+ *  - anchor: 검색 중심 (출발지 좌표). 없으면 지역 bbox 안 전체 검색
+ *  - prev:   직전 경유 지점 좌표 (동점 후보 중 가까운 곳 선택)
+ *  - maxDistance: 기준점에서 이보다 멀면 다른 곳의 동명 장소로 보고 버림
+ */
+async function findStopPlace(stop, { region, subRegion, anchor, prev, maxDistance }) {
+  if (!kakaoKey) return null;
+
+  const candidates = [];
+  for (const { query, graveName } of buildStopQueries(stop)) {
+    const searches = anchor
+      ? [{ query, x: anchor.lng, y: anchor.lat, radius: Math.min(20000, Math.round(maxDistance)), size: 15 }]
+      : [{ query: `${region} ${subRegion || ''} ${query}`.replace(/\s+/g, ' '), size: 15 }];
+
+    for (const params of searches) {
+      for (const doc of await kakaoGet('keyword', params)) {
+        const point = { lat: Number(doc.y), lng: Number(doc.x) };
+        if (!isWithinRegion(point.lat, point.lng, region)) continue;
+        if (EXCLUDED_KAKAO_CATEGORY_PATTERN.test(String(doc.category_name || ''))) continue;
+        if (anchor && distanceMeters(anchor, point) > maxDistance) continue;
+
+        const nameScore = graveName ? getGraveScore(graveName, doc) : getNameScore(query, doc.place_name);
+        if (nameScore < 55) continue;
+        // 길 관광 경유지는 대부분 관광지·문화시설·종교시설·공공기관이므로 이름이 비슷하면 우선한다.
+        // (예: "YMCA" → 옷가게 "YMCA유니폼" 대신 "서울YMCA 별관")
+        const score = nameScore + (PREFERRED_CATEGORY_PATTERN.test(String(doc.category_name || '')) ? 10 : 0);
+        candidates.push({ doc, point, score, nameScore, prevDistance: prev ? distanceMeters(prev, point) : 0 });
+      }
+    }
+    // 정확히 일치하는 후보가 있으면 다음 검색어는 보지 않는다.
+    if (candidates.some((c) => c.nameScore === 100)) break;
+  }
+
+  if (!candidates.length) return null;
+  const bestScore = Math.max(...candidates.map((c) => c.score));
+  // 이름 점수가 거의 같은 후보끼리만 직전 지점과의 거리로 고른다.
+  const best = candidates
+    .filter((c) => c.score >= bestScore - 5)
+    .sort((a, b) => a.prevDistance - b.prevDistance || b.score - a.score)[0];
+  return toPlace(best.doc, region, subRegion);
 }
 
 // ──────────────────────────────────────────────────────────
@@ -422,12 +551,9 @@ async function ensureCourseTag(client) {
 
 function buildCourseDescription(item) {
   const parts = [];
+  // 경유 경로·출발/도착·소요 시간은 코스 상세 화면(타임라인, 출발→도착, 소요시간 박스)에
+  // 이미 나오므로 설명에는 넣지 않는다.
   if (item.stretIntrcn) parts.push(item.stretIntrcn.trim());
-  if (item.coursInfo) parts.push(`📌 경유 경로: ${item.coursInfo.trim()}`);
-  if (item.beginSpotNm || item.endSpotNm) {
-    parts.push(`🚩 출발: ${item.beginSpotNm || '미지정'} / 도착: ${item.endSpotNm || '미지정'}`);
-  }
-  if (item.reqreTime) parts.push(`⏱️ 소요 시간: ${item.reqreTime.trim()}`);
   if (item.institutionNm) parts.push(`🏛️ 관리 기관: ${item.institutionNm.trim()}`);
   if (item.phoneNumber) parts.push(`📞 문의 전화: ${item.phoneNumber.trim()}`);
 
@@ -443,15 +569,15 @@ async function insertCourseWaypoints(client, courseId, waypointsList) {
 
     if (w.spotId) {
       await client.query(
-        `INSERT INTO course_waypoints (course_id, seq, type, spot_id, lat, lng)
-         VALUES ($1, $2, 'spot', $3, NULL, NULL)`,
-        [courseId, seq, w.spotId]
+        `INSERT INTO course_waypoints (course_id, seq, type, spot_id, lat, lng, name)
+         VALUES ($1, $2, 'spot', $3, NULL, NULL, $4)`,
+        [courseId, seq, w.spotId, w.name || null]
       );
     } else {
       await client.query(
-        `INSERT INTO course_waypoints (course_id, seq, type, spot_id, lat, lng)
-         VALUES ($1, $2, 'pin', NULL, $3, $4)`,
-        [courseId, seq, w.lat, w.lng]
+        `INSERT INTO course_waypoints (course_id, seq, type, spot_id, lat, lng, name)
+         VALUES ($1, $2, 'pin', NULL, $3, $4, $5)`,
+        [courseId, seq, w.lat, w.lng, w.name || null]
       );
     }
   }
@@ -495,6 +621,8 @@ async function main() {
     tourEnriched: 0,
     skipped: 0,
     failed: 0,
+    unmatchedStops: 0,
+    lengthWarnings: 0,
   };
 
   try {
@@ -515,68 +643,90 @@ async function main() {
       const { region, sub_region } = resolveCourseRegion(item);
       console.log(`📍 권역: ${region} (${sub_region || '기본권역'})`);
 
-      // 경유 지점 후보군 추출
-      const spotCandidates = [];
+      // 경유 지점 정리: coursInfo 순서를 그대로 쓰고, 출발/도착 이름이 빠져 있으면 앞뒤에 붙인다.
+      const officialLengthM = Number.parseFloat(item.stretLt) > 0 ? Number.parseFloat(item.stretLt) * 1000 : null;
+      // 출발지 기준 검색 반경: 공식 거리(왕복 고려) + 여유
+      const maxDistance = Math.max(1500, (officialLengthM || 3000) * 1.2 + 500);
+      const startAnchor = await geocodeAddress(item.beginRdnmadr, region) || await geocodeAddress(item.beginLnmadr, region);
+      const endAnchor = await geocodeAddress(item.endRdnmadr, region) || await geocodeAddress(item.endLnmadr, region);
+      const anchor = startAnchor || endAnchor;
 
-      // 1. 출발지
-      if (item.beginSpotNm || item.beginRdnmadr || item.beginLnmadr) {
-        spotCandidates.push({
-          name: item.beginSpotNm,
-          addr: item.beginRdnmadr || item.beginLnmadr,
-          role: 'start',
-        });
+      const stops = splitCourseStops(item.coursInfo);
+      const beginName = (item.beginSpotNm || '').trim();
+      const endName = (item.endSpotNm || '').trim();
+      if (beginName && normalizeName(stops[0]) !== normalizeName(beginName)) stops.unshift(beginName);
+      if (endName && normalizeName(stops[stops.length - 1]) !== normalizeName(endName)) stops.push(endName);
+
+      const isCycle = Boolean(
+        (beginName && endName && normalizeName(beginName) === normalizeName(endName))
+        || (startAnchor && endAnchor && distanceMeters(startAnchor, endAnchor) < 50)
+      );
+
+      // 중간 경유지가 너무 많으면 순서를 유지한 채 고르게 줄인다.
+      let middleStops = stops.slice(1, -1);
+      if (middleStops.length > MAX_INTERMEDIATE_STOPS) {
+        const lastIdx = middleStops.length - 1;
+        middleStops = [...new Set(Array.from({ length: MAX_INTERMEDIATE_STOPS }, (_, k) =>
+          middleStops[Math.round((k * lastIdx) / (MAX_INTERMEDIATE_STOPS - 1))]))];
       }
 
-      // 2. 중간 경유지들 (coursInfo 파싱)
-      if (item.coursInfo) {
-        const intermediateNames = item.coursInfo
-          .split(/[→\->,>~]+/g)
-          .map((s) => s.trim())
-          .filter((s) => s && s.length >= 2 && !s.includes('종착지') && !s.includes('출발'));
+      const matchedStops = [];
+      const unmatchedStops = [];
 
-        // 중간 경유지는 주요 명소 최대 5개 선택
-        const selectedNames = intermediateNames.length <= 5
-          ? intermediateNames
-          : [
-              intermediateNames[0],
-              intermediateNames[Math.floor(intermediateNames.length * 0.25)],
-              intermediateNames[Math.floor(intermediateNames.length * 0.5)],
-              intermediateNames[Math.floor(intermediateNames.length * 0.75)],
-              intermediateNames[intermediateNames.length - 1],
-            ];
+      // 1. 출발지: 출발 주소 바로 옆(300m)의 같은 이름 장소, 없으면 주소 좌표 핀
+      const startName = stops[0] || beginName;
+      const startPlace = startName
+        ? await findStopPlace(startName, { region, subRegion: sub_region, anchor: startAnchor, prev: startAnchor, maxDistance: startAnchor ? 300 : maxDistance })
+        : null;
+      if (startPlace) matchedStops.push({ stop: startName, place: startPlace });
+      else if (startAnchor) matchedStops.push({ stop: startName || '출발', place: { name: startName, x: startAnchor.lng, y: startAnchor.lat } });
+      else if (startName) unmatchedStops.push(startName);
 
-        for (const name of selectedNames) {
-          // 출발지/도착지와 중복되지 않도록 방어
-          if (name !== item.beginSpotNm && name !== item.endSpotNm) {
-            spotCandidates.push({ name, addr: null, role: 'waypoint' });
-          }
+      // 2. 중간 경유지: 출발지 주변에서 이름이 맞는 곳 중 직전 지점과 가까운 곳
+      const curatedStops = CURATED_COURSES[sourceId]?.stops || {};
+      const skippedStops = [];
+      for (const stop of middleStops) {
+        // 큐레이션된 지점은 자동 매칭보다 우선한다.
+        if (curatedStops[stop]) {
+          const curatedPlace = placeFromCuration(stop, curatedStops[stop], region, sub_region);
+          if (curatedPlace) matchedStops.push({ stop, place: curatedPlace, curated: true });
+          else skippedStops.push(stop);
+          continue;
         }
+        const prevPlace = matchedStops[matchedStops.length - 1]?.place;
+        const prev = prevPlace ? { lat: prevPlace.y, lng: prevPlace.x } : anchor;
+        const place = await findStopPlace(stop, { region, subRegion: sub_region, anchor, prev, maxDistance });
+        if (place) matchedStops.push({ stop, place });
+        else unmatchedStops.push(stop);
       }
 
-      // 3. 도착지
-      if (item.endSpotNm || item.endRdnmadr || item.endLnmadr) {
-        spotCandidates.push({
-          name: item.endSpotNm,
-          addr: item.endRdnmadr || item.endLnmadr,
-          role: 'end',
+      // 3. 도착지: 순환 코스는 출발 지점으로 되돌아온다.
+      if (isCycle && matchedStops.length > 0) {
+        matchedStops.push({ ...matchedStops[0], isLoopEnd: true });
+      } else if (stops.length > 1) {
+        const lastName = stops[stops.length - 1];
+        const endPlace = await findStopPlace(lastName, {
+          region, subRegion: sub_region, anchor: endAnchor || anchor, prev: endAnchor,
+          maxDistance: endAnchor ? 300 : maxDistance,
         });
+        if (endPlace) matchedStops.push({ stop: lastName, place: endPlace });
+        else if (endAnchor) matchedStops.push({ stop: lastName, place: { name: lastName, x: endAnchor.lng, y: endAnchor.lat } });
+        else unmatchedStops.push(lastName);
       }
 
-      // 각 후보 장소를 지오코딩 및 스팟 DB 저장 (with TourAPI 연동)
+      // 각 지점을 스팟으로 저장 (카카오 장소인 경우만, TourAPI 보강 포함)
       const courseWaypointsList = [];
+      const savedSpotIds = new Map();
 
-      for (const cand of spotCandidates) {
-        const place = await searchKakaoPlace(cand.name, region, sub_region, cand.addr);
-        if (!place) continue;
+      for (const { place, isLoopEnd } of matchedStops) {
+        let spotId = place.kakao_place_id ? savedSpotIds.get(place.kakao_place_id) || null : null;
 
-        let spotId = null;
-
-        // 스팟 등록 모드이고 카카오 장소 ID가 있는 정식 장소인 경우
-        if (withSpots && place.kakao_place_id && !isDryRun && client) {
+        if (!spotId && withSpots && place.kakao_place_id && !isDryRun && client) {
           try {
             const saved = await spotService.saveKakaoSpot(place, ownerId);
             if (saved.spot?.spot_id) {
               spotId = saved.spot.spot_id;
+              savedSpotIds.set(place.kakao_place_id, spotId);
               stats.spotsSaved += saved.is_created ? 1 : 0;
               if (saved.tour_content_enriched) {
                 stats.tourEnriched += 1;
@@ -592,18 +742,34 @@ async function main() {
           console.log(`  🔎 [스팟 후보] ${place.name} (좌표: ${place.x}, ${place.y})`);
         }
 
-        // 연속 동일 좌표 방지
+        // 연속 동일 좌표 방지 (순환 코스의 도착 지점은 유지)
         const last = courseWaypointsList[courseWaypointsList.length - 1];
-        if (last && Math.abs(last.lat - place.y) < 1e-6 && Math.abs(last.lng - place.x) < 1e-6) {
+        if (!isLoopEnd && last && Math.abs(last.lat - place.y) < 1e-6 && Math.abs(last.lng - place.x) < 1e-6) {
           continue;
         }
 
         courseWaypointsList.push({
-          name: place.name,
+          // 핀은 장소명, 큐레이션 스팟은 코스가 쓰는 이름(label)을 경유지 이름으로 저장
+          name: place.label || (spotId ? null : place.name || null),
           lat: place.y,
           lng: place.x,
           spotId,
         });
+      }
+
+      const matchedLabels = matchedStops
+        .filter(({ isLoopEnd }) => !isLoopEnd)
+        .map(({ stop, place, curated }) => {
+          const target = place.kakao_place_id ? place.name : '핀';
+          return `${stop}→${target}${curated ? '(큐레이션)' : ''}`;
+        });
+      console.log(`  - 경유 지점 ${stops.length}개 중 연결 ${matchedLabels.length}개: ${matchedLabels.join(', ')}`);
+      if (skippedStops.length > 0) {
+        console.log(`  - 생략(큐레이션): ${skippedStops.join(', ')}`);
+      }
+      if (unmatchedStops.length > 0) {
+        stats.unmatchedStops += unmatchedStops.length;
+        console.log(`  - ⚠️  찾지 못한 지점: ${unmatchedStops.join(', ')}`);
       }
 
       if (courseWaypointsList.length === 0) {
@@ -618,6 +784,19 @@ async function main() {
         console.log('❌ [스킵] 경로 geometry 생성 불가');
         stats.skipped += 1;
         continue;
+      }
+
+      // 생성 경로 길이가 공식 거리와 크게 다르면 경유지 매칭을 확인해야 하는 코스
+      const routeLengthM = route.points.slice(1).reduce((sum, p, idx) => sum + distanceMeters(route.points[idx], p), 0);
+      if (officialLengthM) {
+        const ratio = routeLengthM / officialLengthM;
+        const ratioLabel = `생성 경로 ${(routeLengthM / 1000).toFixed(2)}km / 공식 ${(officialLengthM / 1000).toFixed(2)}km`;
+        if (ratio < 0.6 || ratio > 1.6) {
+          stats.lengthWarnings += 1;
+          console.log(`  - ⚠️  거리 차이 큼: ${ratioLabel} (확인 필요)`);
+        } else {
+          console.log(`  - 거리 확인: ${ratioLabel}`);
+        }
       }
 
       // 거리 및 시간 산출
@@ -638,8 +817,6 @@ async function main() {
 
       const estimatedDuration = parseDurationMinutes(item.reqreTime, totalDistance);
       const description = buildCourseDescription(item);
-      const isCycle =
-        item.beginSpotNm && item.endSpotNm && item.beginSpotNm.trim() === item.endSpotNm.trim();
 
       if (isDryRun) {
         const spotCount = courseWaypointsList.filter((w) => w.spotId || w.name).length;
@@ -705,7 +882,8 @@ async function main() {
           courseId: course.course_id,
           courseName,           // ← 코스명 전달: '봄내길' 등 명칭 기반 태그 도출에 필요
           category: '관광코스',
-          description,
+          // 설명에서는 뺐지만 경유 경로의 장소명도 태그 도출에 쓴다.
+          description: [description, item.coursInfo].filter(Boolean).join('\n\n'),
           userId: ownerId,
         }, client);
         if (derivedTags.length > 0) {
@@ -733,6 +911,8 @@ async function main() {
   console.log(`- 성공 코스 수: ${stats.success}`);
   console.log(`- 신규 등록 스팟: ${stats.spotsSaved}개`);
   console.log(`- TourAPI 관광정보 매칭: ${stats.tourEnriched}개`);
+  console.log(`- 찾지 못한 경유 지점: ${stats.unmatchedStops}개`);
+  console.log(`- 거리 차이 큰 코스(확인 필요): ${stats.lengthWarnings}개`);
   console.log(`- 스킵 코스 수: ${stats.skipped}`);
   console.log(`- 실패 코스 수: ${stats.failed}`);
   console.log('=============================================\n');
