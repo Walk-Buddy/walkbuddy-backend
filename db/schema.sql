@@ -538,6 +538,12 @@ CREATE TABLE courses (
     -- 'hidden': 신고 누적으로 자동 숨김
     -- 'deleted': 삭제 (소프트 딜리트)
 
+    photo_cache         JSONB           NULL,
+    -- 관광사진(TourAPI) 검색 결과 캐시 { source, photos } (GET /api/courses/:id/photos)
+
+    photo_cached_at     TIMESTAMPTZ     NULL,
+    -- 사진 캐시 저장 시각: 사진이 있으면 7일, 없으면 1일 동안 재사용
+
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
 

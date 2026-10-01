@@ -1078,16 +1078,15 @@ exports.getCoursePhotos = async (courseName, spotNames = []) => {
   }
 
   // 3. 코스 자체 사진이 부족하고 경유지 스팟 목록이 있는 경우 각 스팟별 대표 사진 검색 연동
+  //    경유지 검색은 서로 독립이라 병렬로 조회하고, 결과는 경유지 순서대로 합친다.
   if (photos.length < 5 && Array.isArray(spotNames) && spotNames.length > 0) {
-    for (const spotName of spotNames.slice(0, 5)) {
-      if (!spotName || spotName.length < 2) continue;
-      try {
-        const spotPhotos = await exports.getPhotosByKeyword(spotName, 3);
-        addPhotos(spotPhotos);
-        if (photos.length >= 8) break;
-      } catch (err) {
-        // 개별 스팟 사진 조회 실패 무시
-      }
+    const targets = spotNames.slice(0, 5).filter((spotName) => spotName && spotName.length >= 2);
+    const results = await Promise.all(
+      targets.map((spotName) => exports.getPhotosByKeyword(spotName, 3).catch(() => []))
+    );
+    for (const spotPhotos of results) {
+      addPhotos(spotPhotos);
+      if (photos.length >= 8) break;
     }
   }
 
