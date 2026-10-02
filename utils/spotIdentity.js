@@ -8,11 +8,12 @@
  *
  * IMPORTANT: 예전엔 TourAPI 번호를 kakao_place_id 에 'tour_123'·'tour:123'·'tour_with_123' 형식으로 넣어서
  * 같은 장소가 들어올 때 알아보지 못하고 중복 행이 생겼다. (예: 육림랜드 3개)
- * 확인 순서: TourAPI 번호 → 카카오 번호 → (둘 다 못 찾으면) 같은 이름 + 300m 안.
+ * 확인 순서: TourAPI 번호 → 카카오 번호 → (둘 다 못 찾으면) 같은 이름 + 1km 안.
  */
 const { legacyContentId, normalizePlaceName } = require('./kakaoPlaceMatch');
 
-const SAME_NAME_RADIUS_M = 300;
+// 이름이 완전히 같으면 공원·하천처럼 넓은 장소일 수 있어 1km 안을 같은 장소로 본다 (계남근린공원 TourAPI 두 건이 750m 차이)
+const SAME_NAME_RADIUS_M = 1000;
 
 /** 'tour_123', 'tour:123', 'tour_with_123', 123 → '123' */
 function toTourContentId(value) {

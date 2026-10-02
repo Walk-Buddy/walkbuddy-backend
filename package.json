@@ -18,8 +18,8 @@
     "import:street-tourism": "node scripts/import-street-tourism-courses.js",
     "merge:legacy-spots": "node scripts/merge-legacy-spots.js",
     "normalize:spot-categories": "node scripts/normalize-spot-categories.js",
-    "sync:pet": "node scripts/sync-pet-spots.js",
-    "sync:barrier-free": "node scripts/sync-barrier-free-spots.js",
+    "sync:pet": "node scripts/import-tourapi-spots.js --region=all --all --types=12,14 --skip-existing",
+    "sync:barrier-free": "node scripts/import-tourapi-spots.js --region=all --all --types=12,14 --skip-existing",
     "seed:prewalk-course": "node scripts/create-prewalk-course-via-api.js",
     "seed:prewalk-reviews": "node scripts/create-prewalk-course-via-api.js --reviews-only"
   },

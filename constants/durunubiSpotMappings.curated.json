@@ -14,7 +14,7 @@
             "canonicalName": "통영타워",
             "kakaoCategoryName": "여행 > 관광,명소 > 전망대",
             "categories": [
-              "전망대"
+              "공원·광장"
             ],
             "address": "경남 통영시 용남면 남해안대로 21",
             "x": "128.47376697906435",
@@ -34,7 +34,7 @@
             "canonicalName": "신거제대교",
             "kakaoCategoryName": "교통,수송 > 도로시설 > 교량,다리 > 대교",
             "categories": [
-              "교량,다리"
+              "강·하천"
             ],
             "address": "경남 거제시 사등면 덕호리 44-11",
             "x": "128.4796748684115",
@@ -54,7 +54,7 @@
             "canonicalName": "청곡리 지석묘",
             "kakaoCategoryName": "여행 > 관광,명소 > 문화유적 > 릉,묘,총",
             "categories": [
-              "문화유적"
+              "역사·유적"
             ],
             "address": "경남 거제시 사등면 청곡리 20-3",
             "x": "128.510586376957",
@@ -80,7 +80,7 @@
             "canonicalName": "성포항",
             "kakaoCategoryName": "교통,수송 > 교통시설 > 항구,포구",
             "categories": [
-              "항구,포구"
+              "공원·광장"
             ],
             "address": "경남 거제시 사등면 성포로3길 33",
             "x": "128.525930867339",
@@ -100,7 +100,7 @@
             "canonicalName": "사등성지",
             "kakaoCategoryName": "여행 > 관광,명소 > 문화유적 > 산성,성곽",
             "categories": [
-              "문화유적"
+              "역사·유적"
             ],
             "address": "경남 거제시 사등면 사등리 2300",
             "x": "128.551170945763",
@@ -120,7 +120,7 @@
             "canonicalName": "사곡해수욕장",
             "kakaoCategoryName": "여행 > 관광,명소 > 해수욕장,해변",
             "categories": [
-              "해수욕장,해변"
+              "공원·광장"
             ],
             "address": "경남 거제시 사등면 사곡리 757-1",
             "x": "128.57215177848857",
@@ -146,7 +146,7 @@
             "canonicalName": "영도대교",
             "kakaoCategoryName": "교통,수송 > 도로시설 > 교량,다리 > 대교",
             "categories": [
-              "교량,다리"
+              "강·하천"
             ],
             "address": "부산 영도구 대교동1가 190-1",
             "x": "129.0364786611536",
@@ -226,7 +226,7 @@
             "canonicalName": "송도해상케이블카",
             "kakaoCategoryName": "여행 > 관광,명소 > 케이블카",
             "categories": [
-              "케이블카"
+              "공원·광장"
             ],
             "address": "부산 서구 송도해변로 171",
             "x": "129.02339870312",
@@ -246,7 +246,7 @@
             "canonicalName": "송도해수욕장",
             "kakaoCategoryName": "여행 > 관광,명소 > 해수욕장,해변",
             "categories": [
-              "해수욕장,해변"
+              "공원·광장"
             ],
             "address": "부산 서구 암남동 135-5",
             "x": "129.016954361828",
@@ -418,7 +418,7 @@
             "canonicalName": "봉암교",
             "kakaoCategoryName": "교통,수송 > 도로시설 > 교량,다리 > 대교",
             "categories": [
-              "교량,다리"
+              "강·하천"
             ],
             "address": "경남 창원시 성산구 양곡동 847-11",
             "x": "128.619529743695",
@@ -518,7 +518,7 @@
             "canonicalName": "3.15의거탑",
             "kakaoCategoryName": "여행 > 관광,명소 > 문화유적 > 탑,비석",
             "categories": [
-              "문화유적"
+              "역사·유적"
             ],
             "address": "경남 창원시 마산합포구 서성동 84-325",
             "x": "128.56924908185306",
@@ -526,6 +526,1346 @@
             "routeDistance": 48,
             "routeProgress": 0.925883,
             "distanceFromStartM": 13865
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000004239": {
+      "courseName": "해파랑길 1코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "오륙도해맞이공원",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "19157377",
+            "canonicalName": "오륙도해맞이공원",
+            "kakaoCategoryName": "여행 > 공원 > 도시근린공원",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "부산 남구 용호동 산 196-8",
+            "x": "129.1233738816463",
+            "y": "35.1022136829983",
+            "routeDistance": 42,
+            "routeProgress": 0.024894,
+            "distanceFromStartM": 408
+          }
+        },
+        {
+          "sourceName": "이기대공원",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "공룡발자국 해안 산책로",
+          "mapping": {
+            "kakaoPlaceId": "1739127325",
+            "canonicalName": "이기대 자연마당",
+            "kakaoCategoryName": "여행 > 공원",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "부산 남구 용호동 산 197",
+            "x": "129.122843568065",
+            "y": "35.1033710477846",
+            "routeDistance": 48,
+            "routeProgress": 0.03068,
+            "distanceFromStartM": 503
+          }
+        },
+        {
+          "sourceName": "누리마루 APEC하우스",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "8192337",
+            "canonicalName": "누리마루 APEC하우스",
+            "kakaoCategoryName": "문화,예술 > 문화시설 > 전시관",
+            "categories": [
+              "전시·문화공간"
+            ],
+            "address": "부산 해운대구 동백로 116",
+            "x": "129.151325936955",
+            "y": "35.1523345777828",
+            "routeDistance": 43,
+            "routeProgress": 0.921121,
+            "distanceFromStartM": 15107
+          }
+        },
+        {
+          "sourceName": "해운대 최치원 유적",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "관광정보: 해운 최치원 석각",
+          "mapping": {
+            "kakaoPlaceId": "17556443",
+            "canonicalName": "동백공원 최치원유적",
+            "kakaoCategoryName": "여행 > 관광,명소 > 문화유적 > 유적지",
+            "categories": [
+              "역사·유적",
+              "공원·광장"
+            ],
+            "address": "부산 해운대구 동백로 99",
+            "x": "129.152330346543",
+            "y": "35.153643216565",
+            "routeDistance": 70,
+            "routeProgress": 0.93603,
+            "distanceFromStartM": 15351
+          }
+        },
+        {
+          "sourceName": "동백섬",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "8257954",
+            "canonicalName": "동백섬",
+            "kakaoCategoryName": "여행 > 관광,명소 > 섬 > 섬(내륙)",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "부산 해운대구 우동 708-3",
+            "x": "129.152289970167",
+            "y": "35.1539431141198",
+            "routeDistance": 86,
+            "routeProgress": 0.938078,
+            "distanceFromStartM": 15385
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000004237": {
+      "courseName": "해파랑길 12코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "송대말등대",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "9865973",
+            "canonicalName": "송대말등대",
+            "kakaoCategoryName": "교통,수송 > 교통시설 > 등대",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경북 경주시 감포읍 감포로 226-19",
+            "x": "129.5113556677616",
+            "y": "35.80722828526161",
+            "routeDistance": 12,
+            "routeProgress": 0.042893,
+            "distanceFromStartM": 1521
+          }
+        },
+        {
+          "sourceName": "오류고아라해변",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "11256465",
+            "canonicalName": "오류고아라해변",
+            "kakaoCategoryName": "여행 > 관광,명소 > 해수욕장,해변",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경북 경주시 감포읍 오류리",
+            "x": "129.509520717781",
+            "y": "35.8213166189963",
+            "routeDistance": 22,
+            "routeProgress": 0.095167,
+            "distanceFromStartM": 3374
+          }
+        },
+        {
+          "sourceName": "연동마을",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "25417435",
+            "canonicalName": "연동어촌체험휴양마을",
+            "kakaoCategoryName": "여행 > 체험여행 > 정보화,체험마을",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경북 경주시 감포읍 연동길 38-1",
+            "x": "129.519483118221",
+            "y": "35.8378771792859",
+            "routeDistance": 32,
+            "routeProgress": 0.165205,
+            "distanceFromStartM": 5857
+          }
+        },
+        {
+          "sourceName": "소봉대",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "25288336",
+            "canonicalName": "소봉대",
+            "kakaoCategoryName": "부동산 > 지명",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경북 포항시 남구 장기면 계원리",
+            "x": "129.525913006486",
+            "y": "35.8603026426914",
+            "routeDistance": 65,
+            "routeProgress": 0.259109,
+            "distanceFromStartM": 9185
+          }
+        },
+        {
+          "sourceName": "양포항",
+          "status": "mapped",
+          "endpoint": "end",
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "8495016",
+            "canonicalName": "양포항",
+            "kakaoCategoryName": "교통,수송 > 교통시설 > 항구,포구",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경북 포항시 남구 장기면 양포리 9-32",
+            "x": "129.520018851223",
+            "y": "35.8810769062536",
+            "routeDistance": 22,
+            "routeProgress": 0.376206,
+            "distanceFromStartM": 13337
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000004378": {
+      "courseName": "해파랑길 2코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "미포",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "해운대 블루라인파크 미포정거장",
+          "mapping": {
+            "kakaoPlaceId": "188403018",
+            "canonicalName": "해운대블루라인파크 미포정거장",
+            "kakaoCategoryName": "여행 > 관광,명소 > 테마파크",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "부산 해운대구 달맞이길62번길 13",
+            "x": "129.17281473802996",
+            "y": "35.15815259880406",
+            "routeDistance": 3,
+            "routeProgress": 0.094937,
+            "distanceFromStartM": 1337
+          }
+        },
+        {
+          "sourceName": "청사포 다릿돌전망대",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "484076440",
+            "canonicalName": "청사포다릿돌전망대",
+            "kakaoCategoryName": "여행 > 관광,명소 > 전망대",
+            "categories": [
+              "산·등산로"
+            ],
+            "address": "부산 해운대구 중동 산 3-9",
+            "x": "129.19631396716275",
+            "y": "35.16418891718333",
+            "routeDistance": 18,
+            "routeProgress": 0.281008,
+            "distanceFromStartM": 3956
+          }
+        },
+        {
+          "sourceName": "죽도공원",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "8576816",
+            "canonicalName": "죽도공원",
+            "kakaoCategoryName": "여행 > 공원 > 도시근린공원",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "부산 해운대구 송정해변로 1-23",
+            "x": "129.205382289118",
+            "y": "35.1801047856529",
+            "routeDistance": 10,
+            "routeProgress": 0.467147,
+            "distanceFromStartM": 6576
+          }
+        },
+        {
+          "sourceName": "해동용궁사",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "1581343513",
+            "canonicalName": "해동용궁사 일주문",
+            "kakaoCategoryName": "여행 > 관광,명소 > 문화유적 > 문",
+            "categories": [
+              "역사·유적"
+            ],
+            "address": "부산 기장군 기장읍 시랑리 416-39",
+            "x": "129.2226152669",
+            "y": "35.1890135602935",
+            "routeDistance": 2,
+            "routeProgress": 0.640556,
+            "distanceFromStartM": 9018
+          }
+        },
+        {
+          "sourceName": "시랑대",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "8202898",
+            "canonicalName": "시랑대",
+            "kakaoCategoryName": "여행 > 관광,명소 > 바위",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "부산 기장군 기장읍 시랑리 413",
+            "x": "129.222879995387",
+            "y": "35.1859989389198",
+            "routeDistance": 327,
+            "routeProgress": 0.6435,
+            "distanceFromStartM": 9059
+          }
+        },
+        {
+          "sourceName": "대변항",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "27079885",
+            "canonicalName": "대변항등대",
+            "kakaoCategoryName": "교통,수송 > 교통시설 > 등대",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "부산 기장군 기장읍 기장해안로 634-1",
+            "x": "129.2294379431952",
+            "y": "35.221355531667825",
+            "routeDistance": 159,
+            "routeProgress": 0.978228,
+            "distanceFromStartM": 13771
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000004220": {
+      "courseName": "해파랑길 7코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "태화강전망대",
+          "status": "mapped",
+          "endpoint": "start",
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "19237158",
+            "canonicalName": "태화강국가정원 태화강전망대",
+            "kakaoCategoryName": "여행 > 관광,명소 > 전망대",
+            "categories": [
+              "산·등산로",
+              "수목원·정원"
+            ],
+            "address": "울산 남구 남산로 223",
+            "x": "129.293851162386",
+            "y": "35.5450563357159",
+            "routeDistance": 6,
+            "routeProgress": 0,
+            "distanceFromStartM": 0
+          }
+        },
+        {
+          "sourceName": "십리대숲",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "11581806",
+            "canonicalName": "태화강국가정원 십리대숲",
+            "kakaoCategoryName": "여행 > 관광,명소 > 숲",
+            "categories": [
+              "숲·휴양림",
+              "수목원·정원"
+            ],
+            "address": "울산 중구 태화동 636",
+            "x": "129.296551316054",
+            "y": "35.54564016727036",
+            "routeDistance": 22,
+            "routeProgress": 0.305523,
+            "distanceFromStartM": 5510
+          }
+        },
+        {
+          "sourceName": "십리대밭교",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "11581814",
+            "canonicalName": "태화강국가정원 십리대밭교",
+            "kakaoCategoryName": "여행 > 공원시설물",
+            "categories": [
+              "수목원·정원"
+            ],
+            "address": "울산 남구 신정동 1733",
+            "x": "129.30324517574303",
+            "y": "35.5491644445582",
+            "routeDistance": 81,
+            "routeProgress": 0.349708,
+            "distanceFromStartM": 6307
+          }
+        },
+        {
+          "sourceName": "태화루",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "15112331",
+            "canonicalName": "태화강국가정원 태화루",
+            "kakaoCategoryName": "여행 > 관광,명소 > 문화유적",
+            "categories": [
+              "수목원·정원",
+              "역사·유적"
+            ],
+            "address": "울산 중구 태화로 300",
+            "x": "129.30764158701567",
+            "y": "35.5533739073646",
+            "routeDistance": 13,
+            "routeProgress": 0.402236,
+            "distanceFromStartM": 7254
+          }
+        },
+        {
+          "sourceName": "내황교",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "8231799",
+            "canonicalName": "내황교",
+            "kakaoCategoryName": "교통,수송 > 도로시설 > 교량,다리 > 대교",
+            "categories": [
+              "강·하천"
+            ],
+            "address": "울산 북구 명촌동 794-7",
+            "x": "129.35274870944326",
+            "y": "35.55029505052276",
+            "routeDistance": 8,
+            "routeProgress": 0.636976,
+            "distanceFromStartM": 11488
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000004194": {
+      "courseName": "해파랑길 17코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "송도해수욕장",
+          "status": "mapped",
+          "endpoint": "start",
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "8125413",
+            "canonicalName": "포항송도해수욕장",
+            "kakaoCategoryName": "여행 > 관광,명소 > 해수욕장,해변",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경북 포항시 남구 송도동 378-438",
+            "x": "129.380984143786",
+            "y": "36.0341868354409",
+            "routeDistance": 27,
+            "routeProgress": 0,
+            "distanceFromStartM": 0
+          }
+        },
+        {
+          "sourceName": "평화의 여상",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "17코스 시작을 알리는 포토존",
+          "mapping": {
+            "kakaoPlaceId": "26873928",
+            "canonicalName": "송도해수욕장 여신상",
+            "kakaoCategoryName": "문화,예술 > 미술,공예 > 조각",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경북 포항시 남구 송도동 378-438",
+            "x": "129.38083601301435",
+            "y": "36.03471955868087",
+            "routeDistance": 19,
+            "routeProgress": 0.00181,
+            "distanceFromStartM": 33
+          }
+        },
+        {
+          "sourceName": "환호공원",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "17939192",
+            "canonicalName": "환호공원 해변공원",
+            "kakaoCategoryName": "여행 > 공원",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경북 포항시 북구 환호공원길 30",
+            "x": "129.391313515454",
+            "y": "36.0642433938162",
+            "routeDistance": 128,
+            "routeProgress": 0.297279,
+            "distanceFromStartM": 5375
+          }
+        },
+        {
+          "sourceName": "칠포해수욕장",
+          "status": "mapped",
+          "endpoint": "end",
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "8589137",
+            "canonicalName": "칠포해수욕장",
+            "kakaoCategoryName": "여행 > 관광,명소 > 해수욕장,해변",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경북 포항시 북구 흥해읍 칠포리 112",
+            "x": "129.399614982897",
+            "y": "36.1320037397917",
+            "routeDistance": 39,
+            "routeProgress": 0.993299,
+            "distanceFromStartM": 17961
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000005344": {
+      "courseName": "서해랑길 70코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "소근진성",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "25655274",
+            "canonicalName": "소근진성",
+            "kakaoCategoryName": "여행 > 관광,명소 > 문화유적 > 산성,성곽",
+            "categories": [
+              "역사·유적"
+            ],
+            "address": "충남 태안군 소원면 소근리",
+            "x": "126.185738887531",
+            "y": "36.8182313895012",
+            "routeDistance": 158,
+            "routeProgress": 0.275447,
+            "distanceFromStartM": 5232
+          }
+        },
+        {
+          "sourceName": "신두리해수욕장",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "25023109",
+            "canonicalName": "신두리해수욕장",
+            "kakaoCategoryName": "여행 > 관광,명소 > 해수욕장,해변",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "충남 태안군 원북면 신두리 1414-18",
+            "x": "126.189295962458",
+            "y": "36.8401339835847",
+            "routeDistance": 70,
+            "routeProgress": 0.50248,
+            "distanceFromStartM": 9545
+          }
+        },
+        {
+          "sourceName": "먼동해변",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "17781594",
+            "canonicalName": "먼동해변",
+            "kakaoCategoryName": "여행 > 관광,명소 > 해수욕장,해변",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "충남 태안군 원북면 황촌리 906-1",
+            "x": "126.18700128793824",
+            "y": "36.88383499948428",
+            "routeDistance": 8,
+            "routeProgress": 0.829143,
+            "distanceFromStartM": 15751
+          }
+        },
+        {
+          "sourceName": "구례포해수욕장",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "25789753",
+            "canonicalName": "구례포해수욕장",
+            "kakaoCategoryName": "여행 > 관광,명소 > 해수욕장,해변",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "충남 태안군 원북면 구례포길 47-20",
+            "x": "126.200101136181",
+            "y": "36.8872290465847",
+            "routeDistance": 74,
+            "routeProgress": 0.901218,
+            "distanceFromStartM": 17120
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000005329": {
+      "courseName": "서해랑길 55코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "진포해양테마공원",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "1278084476",
+            "canonicalName": "진포해양테마공원",
+            "kakaoCategoryName": "여행 > 공원",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "전북특별자치도 군산시 내항2길 32",
+            "x": "126.71663032964102",
+            "y": "35.989727873433786",
+            "routeDistance": 19,
+            "routeProgress": 0.014032,
+            "distanceFromStartM": 212
+          }
+        },
+        {
+          "sourceName": "뜬다리부두",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "1330701045",
+            "canonicalName": "뜬다리부두",
+            "kakaoCategoryName": "교통,수송 > 교통시설 > 항구,포구 > 부두",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "전북특별자치도 군산시 장미동",
+            "x": "126.717889057379",
+            "y": "35.9893955816083",
+            "routeDistance": 44,
+            "routeProgress": 0.031132,
+            "distanceFromStartM": 470
+          }
+        },
+        {
+          "sourceName": "경암동철길마을",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "25046668",
+            "canonicalName": "경암동철길마을",
+            "kakaoCategoryName": "여행 > 관광,명소",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "전북특별자치도 군산시 경촌4길 14",
+            "x": "126.73620910230106",
+            "y": "35.981300930084565",
+            "routeDistance": 2,
+            "routeProgress": 0.185774,
+            "distanceFromStartM": 2804
+          }
+        },
+        {
+          "sourceName": "채만식문학관",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "8082929",
+            "canonicalName": "채만식문학관",
+            "kakaoCategoryName": "문화,예술 > 문화시설 > 전시관",
+            "categories": [
+              "전시·문화공간"
+            ],
+            "address": "전북특별자치도 군산시 강변로 449",
+            "x": "126.75788079835357",
+            "y": "36.008635924999375",
+            "routeDistance": 135,
+            "routeProgress": 0.443923,
+            "distanceFromStartM": 6699
+          }
+        },
+        {
+          "sourceName": "조류생태전시관",
+          "status": "nearby",
+          "endpoint": null,
+          "note": "경로에서 약 430m",
+          "mapping": {
+            "kakaoPlaceId": "10845881",
+            "canonicalName": "조류생태전시관",
+            "kakaoCategoryName": "문화,예술 > 문화시설 > 전시관",
+            "categories": [
+              "전시·문화공간"
+            ],
+            "address": "충남 서천군 마서면 장산로 916",
+            "x": "126.742678469171",
+            "y": "36.0228076375275",
+            "routeDistance": 435,
+            "routeProgress": 0.600855,
+            "distanceFromStartM": 9068
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000005332": {
+      "courseName": "서해랑길 58코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "선도리어촌체험마을",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "545022133",
+            "canonicalName": "선도리어촌체험휴양마을 안내소",
+            "kakaoCategoryName": "여행 > 체험여행 > 정보화,체험마을",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "충남 서천군 비인면 갯벌체험로 428-13",
+            "x": "126.582809159434",
+            "y": "36.1328001189681",
+            "routeDistance": 55,
+            "routeProgress": 0,
+            "distanceFromStartM": 0
+          }
+        },
+        {
+          "sourceName": "홍원항",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "8176331",
+            "canonicalName": "홍원항",
+            "kakaoCategoryName": "교통,수송 > 교통시설 > 항구,포구",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "충남 서천군 서면 도둔리",
+            "x": "126.501739043113",
+            "y": "36.1563036681086",
+            "routeDistance": 86,
+            "routeProgress": 0.908518,
+            "distanceFromStartM": 27917
+          }
+        },
+        {
+          "sourceName": "춘장대해수욕장",
+          "status": "mapped",
+          "endpoint": "end",
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "8095254",
+            "canonicalName": "춘장대해수욕장",
+            "kakaoCategoryName": "여행 > 관광,명소 > 해수욕장,해변",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "충남 서천군 서면 도둔리 산 46-1",
+            "x": "126.52271060325947",
+            "y": "36.16335176445686",
+            "routeDistance": 40,
+            "routeProgress": 0.986381,
+            "distanceFromStartM": 30310
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000005291": {
+      "courseName": "서해랑길 18코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "목포 갓바위",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "8667941",
+            "canonicalName": "목포 갓바위",
+            "kakaoCategoryName": "여행 > 관광,명소 > 바위",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "전남광주통합특별시 목포시 용해동 산 86-24",
+            "x": "126.425759127126",
+            "y": "34.7920224100901",
+            "routeDistance": 30,
+            "routeProgress": 0.118121,
+            "distanceFromStartM": 2140
+          }
+        },
+        {
+          "sourceName": "목포해양유물전시관",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "27581934",
+            "canonicalName": "국립해양유산연구소 목포해양유물전시관",
+            "kakaoCategoryName": "문화,예술 > 문화시설 > 전시관",
+            "categories": [
+              "전시·문화공간"
+            ],
+            "address": "전남광주통합특별시 목포시 남농로 136",
+            "x": "126.421778076018",
+            "y": "34.7919386620138",
+            "routeDistance": 98,
+            "routeProgress": 0.146754,
+            "distanceFromStartM": 2659
+          }
+        },
+        {
+          "sourceName": "목포요트마리나",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "17797898",
+            "canonicalName": "목포마리나",
+            "kakaoCategoryName": "교통,수송 > 교통시설 > 선착장,항만시설",
+            "categories": [
+              "강·하천"
+            ],
+            "address": "전남광주통합특별시 목포시 삼학로 88-56",
+            "x": "126.3898647195005",
+            "y": "34.783515256003724",
+            "routeDistance": 84,
+            "routeProgress": 0.388816,
+            "distanceFromStartM": 7044
+          }
+        },
+        {
+          "sourceName": "목포진 역사공원",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "26830749",
+            "canonicalName": "목포진역사공원",
+            "kakaoCategoryName": "여행 > 공원 > 도시근린공원",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "전남광주통합특별시 목포시 만호동 1-52",
+            "x": "126.38457965218657",
+            "y": "34.78548794985718",
+            "routeDistance": 53,
+            "routeProgress": 0.493259,
+            "distanceFromStartM": 8937
+          }
+        },
+        {
+          "sourceName": "목포근대역사관",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "11739604",
+            "canonicalName": "목포근대역사관 1관",
+            "kakaoCategoryName": "문화,예술 > 문화시설 > 박물관",
+            "categories": [
+              "전시·문화공간"
+            ],
+            "address": "전남광주통합특별시 목포시 영산로29번길 6",
+            "x": "126.38208646508214",
+            "y": "34.787532306488664",
+            "routeDistance": 27,
+            "routeProgress": 0.524883,
+            "distanceFromStartM": 9509
+          }
+        },
+        {
+          "sourceName": "유달산 낙조대",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "8206926",
+            "canonicalName": "유달산낙조대",
+            "kakaoCategoryName": "여행 > 관광,명소 > 문화유적",
+            "categories": [
+              "역사·유적"
+            ],
+            "address": "전남광주통합특별시 목포시 죽교동 산 37-18",
+            "x": "126.369104857596",
+            "y": "34.7877433433938",
+            "routeDistance": 7,
+            "routeProgress": 0.61118,
+            "distanceFromStartM": 11073
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000005366": {
+      "courseName": "서해랑길 92코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "방아머리해변",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "19400370",
+            "canonicalName": "방아머리해변",
+            "kakaoCategoryName": "여행 > 관광,명소 > 해수욕장,해변",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경기 안산시 단원구 대부북동",
+            "x": "126.576767387831",
+            "y": "37.2891526817361",
+            "routeDistance": 130,
+            "routeProgress": 0,
+            "distanceFromStartM": 0
+          }
+        },
+        {
+          "sourceName": "시화방조제",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "26957378",
+            "canonicalName": "시화방조제",
+            "kakaoCategoryName": "여행 > 관광,명소 > 방조제",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경기 안산시 단원구 대부동동 2098-1",
+            "x": "126.606330737015",
+            "y": "37.3092720051821",
+            "routeDistance": 60,
+            "routeProgress": 0.226359,
+            "distanceFromStartM": 3612
+          }
+        },
+        {
+          "sourceName": "시화나래조력공원",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "1829029160",
+            "canonicalName": "시화나래조력공원",
+            "kakaoCategoryName": "여행 > 공원",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경기 안산시 단원구 대부동동",
+            "x": "126.6071697279",
+            "y": "37.3119238195412",
+            "routeDistance": 89,
+            "routeProgress": 0.242951,
+            "distanceFromStartM": 3877
+          }
+        },
+        {
+          "sourceName": "달전망대",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "25701961",
+            "canonicalName": "시화달전망대 시화이루나타워",
+            "kakaoCategoryName": "여행 > 관광,명소 > 전망대",
+            "categories": [
+              "산·등산로"
+            ],
+            "address": "경기 안산시 단원구 대부동동 2109",
+            "x": "126.60916183648231",
+            "y": "37.31280621599576",
+            "routeDistance": 26,
+            "routeProgress": 0.264311,
+            "distanceFromStartM": 4218
+          }
+        },
+        {
+          "sourceName": "오이도 빨강등대",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "13498966",
+            "canonicalName": "오이도 빨강등대",
+            "kakaoCategoryName": "여행 > 관광,명소",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경기 시흥시 오이도로 170",
+            "x": "126.68751058508818",
+            "y": "37.345455350524844",
+            "routeDistance": 3,
+            "routeProgress": 0.855575,
+            "distanceFromStartM": 13653
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000005642": {
+      "courseName": "DMZ 평화의 길 18코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "백골공원",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "15277223",
+            "canonicalName": "백골공원",
+            "kakaoCategoryName": "여행 > 공원",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "강원특별자치도 철원군 서면 자등리 187",
+            "x": "127.424743714188",
+            "y": "38.2079012284059",
+            "routeDistance": 78,
+            "routeProgress": 0.277423,
+            "distanceFromStartM": 4152
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000005624": {
+      "courseName": "DMZ 평화의 길 1코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "강화평화전망대",
+          "status": "mapped",
+          "endpoint": "start",
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "15539898",
+            "canonicalName": "강화제적봉 평화전망대",
+            "kakaoCategoryName": "여행 > 관광,명소 > 전망대",
+            "categories": [
+              "산·등산로"
+            ],
+            "address": "인천 강화군 양사면 전망대로 797",
+            "x": "126.432998866596",
+            "y": "37.8265155381068",
+            "routeDistance": 206,
+            "routeProgress": 0,
+            "distanceFromStartM": 0
+          }
+        },
+        {
+          "sourceName": "연미정",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "7999804",
+            "canonicalName": "연미정",
+            "kakaoCategoryName": "여행 > 관광,명소 > 문화유적",
+            "categories": [
+              "역사·유적"
+            ],
+            "address": "인천 강화군 강화읍 월곳리 242",
+            "x": "126.511915371644",
+            "y": "37.7709487071361",
+            "routeDistance": 79,
+            "routeProgress": 0.604251,
+            "distanceFromStartM": 9430
+          }
+        },
+        {
+          "sourceName": "6.25참전용사기념공원",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "1831478014",
+            "canonicalName": "6.25참전용사기념공원",
+            "kakaoCategoryName": "여행 > 공원",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "인천 강화군 강화읍 용정리 산 81-1",
+            "x": "126.524504384373",
+            "y": "37.7410486934142",
+            "routeDistance": 11,
+            "routeProgress": 0.84406,
+            "distanceFromStartM": 13172
+          }
+        },
+        {
+          "sourceName": "문수산성 남문",
+          "status": "mapped",
+          "endpoint": "end",
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "1937740237",
+            "canonicalName": "문수산성 남문",
+            "kakaoCategoryName": "여행 > 관광,명소 > 문화유적 > 문",
+            "categories": [
+              "역사·유적"
+            ],
+            "address": "경기 김포시 월곶면 포내리 5-1",
+            "x": "126.529493153458",
+            "y": "37.7306229553993",
+            "routeDistance": 15,
+            "routeProgress": 0.999934,
+            "distanceFromStartM": 15604
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000005635": {
+      "courseName": "DMZ 평화의 길 11코스 ",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "사미천",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "21573142",
+            "canonicalName": "사미천",
+            "kakaoCategoryName": "여행 > 관광,명소 > 하천",
+            "categories": [
+              "강·하천"
+            ],
+            "address": "경기 연천군 장남면 원당리",
+            "x": "126.894162530661",
+            "y": "37.9997361542776",
+            "routeDistance": 74,
+            "routeProgress": 0.321014,
+            "distanceFromStartM": 6792
+          }
+        },
+        {
+          "sourceName": "학곡리 고인돌",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "12720004",
+            "canonicalName": "연천학곡리고인돌",
+            "kakaoCategoryName": "여행 > 관광,명소 > 문화유적 > 릉,묘,총",
+            "categories": [
+              "역사·유적"
+            ],
+            "address": "경기 연천군 백학면 학곡리 273-3",
+            "x": "126.944185287367",
+            "y": "37.9871358846133",
+            "routeDistance": 86,
+            "routeProgress": 0.691807,
+            "distanceFromStartM": 14637
+          }
+        },
+        {
+          "sourceName": "숭의전지",
+          "status": "mapped",
+          "endpoint": "end",
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "12776849",
+            "canonicalName": "숭의전지",
+            "kakaoCategoryName": "여행 > 관광,명소 > 문화유적 > 유적지",
+            "categories": [
+              "역사·유적"
+            ],
+            "address": "경기 연천군 미산면 숭의전로 382-27",
+            "x": "126.973030672353",
+            "y": "38.0243183494053",
+            "routeDistance": 39,
+            "routeProgress": 1,
+            "distanceFromStartM": 21157
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000005644": {
+      "courseName": "DMZ 평화의 길 20코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "산천어밸리",
+          "status": "mapped",
+          "endpoint": "end",
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "12664549",
+            "canonicalName": "화천산천어밸리",
+            "kakaoCategoryName": "여행 > 관광,명소",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "강원특별자치도 화천군 상서면 구운리",
+            "x": "127.624435855058",
+            "y": "38.1356728038927",
+            "routeDistance": 311,
+            "routeProgress": 1,
+            "distanceFromStartM": 10338
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000005655": {
+      "courseName": "DMZ 평화의 길 31코스 ",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "진부령미술관",
+          "status": "mapped",
+          "endpoint": "start",
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "8593106",
+            "canonicalName": "진부령미술관",
+            "kakaoCategoryName": "문화,예술 > 문화시설 > 미술관",
+            "categories": [
+              "전시·문화공간"
+            ],
+            "address": "강원특별자치도 인제군 북면 진부령로 663",
+            "x": "128.3586181136051",
+            "y": "38.265433572363676",
+            "routeDistance": 46,
+            "routeProgress": 0,
+            "distanceFromStartM": 0
+          }
+        },
+        {
+          "sourceName": "칡소폭포",
+          "status": "mapped",
+          "endpoint": null,
+          "note": "경로에서 약 330m",
+          "mapping": {
+            "kakaoPlaceId": "1978316496",
+            "canonicalName": "칡소폭포",
+            "kakaoCategoryName": "여행 > 관광,명소 > 폭포",
+            "categories": [
+              "강·하천"
+            ],
+            "address": "강원특별자치도 고성군 간성읍 장신리 산 180-1",
+            "x": "128.372119420958",
+            "y": "38.3234786658409",
+            "routeDistance": 334,
+            "routeProgress": 0.911144,
+            "distanceFromStartM": 13190
+          }
+        },
+        {
+          "sourceName": "소똥령마을",
+          "status": "mapped",
+          "endpoint": "end",
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "24662303",
+            "canonicalName": "소똥령마을 농촌체험휴양마을",
+            "kakaoCategoryName": "교육,학문 > 교육단체 > 체험학습장",
+            "categories": [
+              "숲·휴양림"
+            ],
+            "address": "강원특별자치도 고성군 간성읍 소똥령마을길 82",
+            "x": "128.38030320298492",
+            "y": "38.33178635526338",
+            "routeDistance": 22,
+            "routeProgress": 0.999696,
+            "distanceFromStartM": 14472
+          }
+        }
+      ]
+    },
+    "T_CRS_MNG0000005158": {
+      "courseName": "남파랑길 42코스",
+      "curatedAt": "2026-10-01",
+      "spots": [
+        {
+          "sourceName": "남해 미국마을",
+          "status": "mapped",
+          "endpoint": null,
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "26137441",
+            "canonicalName": "미국마을",
+            "kakaoCategoryName": "여행 > 관광,명소 > 테마거리",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경남 남해군 이동면 미국마을길 8",
+            "x": "127.92881682316",
+            "y": "34.779232892904",
+            "routeDistance": 199,
+            "routeProgress": 0.272982,
+            "distanceFromStartM": 4451
+          }
+        },
+        {
+          "sourceName": "가천다랭이마을",
+          "status": "mapped",
+          "endpoint": "end",
+          "note": null,
+          "mapping": {
+            "kakaoPlaceId": "9700708",
+            "canonicalName": "다랭이마을",
+            "kakaoCategoryName": "여행 > 체험여행 > 정보화,체험마을",
+            "categories": [
+              "공원·광장"
+            ],
+            "address": "경남 남해군 남면 남면로679번길 21",
+            "x": "127.89404799878",
+            "y": "34.7275303909963",
+            "routeDistance": 120,
+            "routeProgress": 0.993351,
+            "distanceFromStartM": 16198
           }
         }
       ]

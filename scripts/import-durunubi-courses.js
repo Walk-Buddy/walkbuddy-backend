@@ -35,6 +35,12 @@ const brdDiv = process.env.DURUNUBI_BRD_DIV || '';
 // 위치 인자: [최대 개수] [시작 위치]. --curated-only 는 큐레이션 파일에 있는 코스만 import (대표 코스 선별용)
 const positionalArgs = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
 const curatedOnly = process.argv.includes('--curated-only');
+// --only=T_CRS_MNG...,T_CRS_MNG... : 지정한 crsIdx 코스만 import
+const onlyArg = (process.argv.find((arg) => arg.startsWith('--only=')) || '').slice('--only='.length);
+const onlyIds = new Set(onlyArg.split(',').map((id) => id.trim()).filter(Boolean));
+// --max-minutes=300 : 예상 소요시간이 이보다 긴 코스는 넣지 않는다 (기본 5시간)
+const maxMinutesArg = (process.argv.find((arg) => arg.startsWith('--max-minutes=')) || '').slice('--max-minutes='.length);
+const maxMinutes = toInt(maxMinutesArg || process.env.COURSE_MAX_MINUTES, 300);
 const maxImport = toInt(positionalArgs[0] || process.env.DURUNUBI_MAX_IMPORT, 0);
 const startIndex = Math.max(0, toInt(positionalArgs[1] || process.env.DURUNUBI_START_INDEX, 0));
 const maxWaypoints = toInt(process.env.DURUNUBI_MAX_WAYPOINTS, DEFAULT_MAX_WAYPOINTS);
@@ -140,9 +146,10 @@ async function fetchAllCourses() {
     courses.push(...page.items);
   }
 
-  const candidates = curatedOnly
+  let candidates = curatedOnly
     ? courses.filter((course) => CURATED_DURUNUBI_SPOT_MAPPINGS.courses[String(pick(course, ['crsIdx']))])
     : courses;
+  if (onlyIds.size) candidates = candidates.filter((course) => onlyIds.has(String(pick(course, ['crsIdx']))));
   const selectedCourses = startIndex > 0 ? candidates.slice(startIndex) : candidates;
   return maxImport > 0 ? selectedCourses.slice(0, maxImport) : selectedCourses;
 }
@@ -211,28 +218,64 @@ function decodeHtmlEntities(value) {
     .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(Number.parseInt(code, 16)));
 }
 
-function parseGpxPoints(gpx) {
+function parsePointsFrom(xml, tagPattern) {
   const points = [];
-  const pointRegex = /<(?:trkpt|rtept|wpt)\b[^>]*\blat=["']([-0-9.]+)["'][^>]*\blon=["']([-0-9.]+)["'][^>]*>/gi;
+  const pointRegex = new RegExp(`<(?:${tagPattern})\\b[^>]*>`, 'gi');
   let match;
-
-  while ((match = pointRegex.exec(gpx)) !== null) {
-    const lat = Number(match[1]);
-    const lng = Number(match[2]);
-
-    if (
-      Number.isFinite(lat) &&
-      Number.isFinite(lng) &&
-      lat >= -90 &&
-      lat <= 90 &&
-      lng >= -180 &&
-      lng <= 180
-    ) {
+  while ((match = pointRegex.exec(xml)) !== null) {
+    const lat = Number((match[0].match(/\blat=["']([-0-9.]+)["']/) || [])[1]);
+    const lng = Number((match[0].match(/\blon=["']([-0-9.]+)["']/) || [])[1]);
+    if (Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && (lat !== 0 || lng !== 0)) {
       points.push({ lat, lng });
     }
   }
-
   return points;
+}
+
+/**
+ * GPX → 경로 구간 목록.
+ * IMPORTANT: 두루누비 GPX 중에는 같은 경로를 트랙(trkpt)과 웨이포인트(wpt)로 두 번 담은 파일이 있다.
+ * 예전엔 셋을 모두 이어 붙여 경로가 앞뒤로 오가며 거리가 수천 km로 계산됐다(서해랑길 20코스 2,632km).
+ * 트랙이 있으면 트랙만, 없으면 루트(rtept), 그것도 없으면 웨이포인트를 쓴다. 트랙 구간(trkseg)은 따로 돌려준다.
+ */
+function parseGpxSegments(gpx) {
+  const trksegs = gpx.match(/<trkseg\b[\s\S]*?<\/trkseg>/gi) || [];
+  const fromTracks = trksegs.map((seg) => parsePointsFrom(seg, 'trkpt')).filter((seg) => seg.length >= 2);
+  if (fromTracks.length) return fromTracks;
+  const trkpts = parsePointsFrom(gpx, 'trkpt');
+  if (trkpts.length >= 2) return [trkpts];
+  const rtepts = parsePointsFrom(gpx, 'rtept');
+  if (rtepts.length >= 2) return [rtepts];
+  const wpts = parsePointsFrom(gpx, 'wpt');
+  return wpts.length >= 2 ? [wpts] : [];
+}
+
+function segmentLength(points) {
+  let sum = 0;
+  for (let i = 1; i < points.length; i += 1) sum += haversineMeters(points[i - 1], points[i]);
+  return sum;
+}
+
+/** 여러 트랙 구간을 끝점이 가까운 순서로 이어 붙인다 (필요하면 구간 방향을 뒤집는다) */
+function stitchSegments(segments) {
+  if (segments.length <= 1) return segments[0] || [];
+  const remaining = segments.slice(1);
+  const result = [...segments[0]];
+  while (remaining.length) {
+    const tail = result[result.length - 1];
+    let best = 0;
+    let reverse = false;
+    let bestDistance = Infinity;
+    remaining.forEach((seg, index) => {
+      const toStart = haversineMeters(tail, seg[0]);
+      const toEnd = haversineMeters(tail, seg[seg.length - 1]);
+      if (toStart < bestDistance) { bestDistance = toStart; best = index; reverse = false; }
+      if (toEnd < bestDistance) { bestDistance = toEnd; best = index; reverse = true; }
+    });
+    const [seg] = remaining.splice(best, 1);
+    result.push(...(reverse ? [...seg].reverse() : seg));
+  }
+  return result;
 }
 
 function samplePoints(points) {
@@ -253,10 +296,17 @@ function toWkt(points) {
   return `SRID=4326;LINESTRING(${points.map((p) => `${p.lng} ${p.lat}`).join(', ')})`;
 }
 
-async function fetchGpxPoints(gpxPath) {
-  if (!gpxPath) return [];
+/**
+ * GPX 경로 좌표와 실제 걷는 거리(m).
+ * 거리는 트랙 구간 안의 길이만 더한다 (구간 사이 빈틈은 걷는 길이 아니라 제외).
+ */
+async function fetchGpxRoute(gpxPath) {
+  if (!gpxPath) return { points: [], distance: 0, longest: [] };
   const { data } = await http.get(gpxPath, { responseType: 'text' });
-  return samplePoints(parseGpxPoints(String(data)));
+  const segments = parseGpxSegments(String(data));
+  const distance = Math.round(segments.reduce((sum, seg) => sum + segmentLength(seg), 0));
+  const longest = segments.reduce((best, seg) => (segmentLength(seg) > segmentLength(best) ? seg : best), segments[0] || []);
+  return { points: samplePoints(stitchSegments(segments)), distance, longest: samplePoints(longest) };
 }
 
 async function ensureAdminUser(client) {
@@ -673,22 +723,28 @@ async function importCourse(client, item, ownerId, tagIds) {
     return { status: 'skipped', reason: '필수값 없음', name: name || sourceId || 'unknown' };
   }
 
-  const points = await fetchGpxPoints(gpxPath);
+  const route = await fetchGpxRoute(gpxPath);
+  let { points } = route;
+  const gpxDistance = route.distance;
   if (points.length < 2) {
     return { status: 'skipped', reason: 'GPX 좌표 부족', name };
   }
 
+  // 거리·소요시간: 지도에 그리는 GPX 경로 기준. 소요시간은 전국길관광(T맵 도보 경로)과 같은 도보 속도로 계산한다.
+  // GPX 거리가 두루누비 공식 거리(crsDstnc, km)와 크게 다르면 GPX 파일 문제로 보고 공식 거리를 쓴다.
+  const officialDistance = Math.round(Number(pick(item, ['crsDstnc'])) * 1000) || 0;
+  const gpxLooksWrong = officialDistance > 0 && (gpxDistance > officialDistance * 1.5 || gpxDistance < officialDistance * 0.5);
+  if (gpxLooksWrong) {
+    console.log(`  - 거리 보정: GPX ${(gpxDistance / 1000).toFixed(1)}km → 공식 ${(officialDistance / 1000).toFixed(1)}km`);
+  }
+  // 같은 경로가 트랙 두 개로 들어 있는 파일(서해랑길 62코스)은 가장 긴 트랙 하나만 그린다
+  if (gpxLooksWrong && route.longest.length >= 2) points = route.longest;
   const wkt = toWkt(points);
-
-  const { rows: [stats] } = await client.query(
-    `SELECT GREATEST(1, ROUND(ST_Length($1::geography))::int) AS distance`,
-    [wkt]
-  );
-
-  // 거리·소요시간: 두루누비 원본(crsDstnc, crsTotlRqrmHour) 대신 지도에 그리는 GPX 경로 기준.
-  // 소요시간은 전국길관광(T맵 도보 경로)과 같은 도보 속도로 계산해 코스 간 비교가 되게 한다.
-  const totalDistance = stats.distance;
+  const totalDistance = Math.max(1, gpxLooksWrong ? officialDistance : gpxDistance);
   const estimatedDuration = Math.max(1, Math.round(totalDistance / WALK_METERS_PER_MINUTE));
+  if (maxMinutes > 0 && estimatedDuration > maxMinutes) {
+    return { status: 'skipped', reason: `예상 ${estimatedDuration}분 > ${maxMinutes}분`, name };
+  }
   const description = buildDescription(item);
 
   const sigun = pick(item, ['sigun']) || '';

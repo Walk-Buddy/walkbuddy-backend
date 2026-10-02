@@ -55,4 +55,21 @@ async function requireTagId(db, name, type) {
   return tag.tag_id;
 }
 
-module.exports = { TAG_ALIASES, canonicalTagName, findTags, requireTagId };
+/**
+ * 반려동물 동반 가능 크기(TourAPI acmpyPsblCpam 등) → 크기 태그.
+ * IMPORTANT: '맹견 및 대형견 제외'에 '대형견'이 들어 있다고 #대형견 동반을 붙이면 안 되고,
+ * 가장 흔한 표현인 '전 견종 동반 가능'은 #대형견 동반이다.
+ * @returns {'대형견 동반'|'소형견동반'|null}
+ */
+function petSizeTag(allowedSize = '') {
+  const text = String(allowedSize || '').replace(/\s+/g, ' ');
+  if (!text) return null;
+  if (/(대형견|중\s?대형견)[^,.]{0,6}(제외|불가|금지)/.test(text)) return '소형견동반';
+  // '이동장(켄넬)에 들어가는 전 견종', '안고 탑승'은 실제로 작은 개만 가능하다
+  if (/이동장|켄넬|안고/.test(text)) return '소형견동반';
+  if (/전\s?견종|모든\s?견종|견종\s?(제한\s?없|무관)|제한\s?없|대형견|모두/.test(text)) return '대형견 동반';
+  if (/소형견|중형견/.test(text)) return '소형견동반';
+  return null;
+}
+
+module.exports = { TAG_ALIASES, canonicalTagName, findTags, requireTagId, petSizeTag };

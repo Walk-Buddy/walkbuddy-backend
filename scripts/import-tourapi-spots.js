@@ -1,5 +1,9 @@
 require('dotenv').config();
 
+// TourAPI 관광지(12)·문화시설(14) 장소 적재. 장소마다 개요·무장애(KorWithService2)·반려동물(KorPetTourService2)·이용안내를 함께 조회한다.
+// 무장애·반려동물 API 목록에 있는 서울·춘천 관광지·문화시설은 모두 이 목록(KorService2)에 포함돼 있어
+// npm run sync:barrier-free / sync:pet 도 이 스크립트를 쓴다. (2026-10 확인: 무장애 283곳·반려동물 37곳 전부 포함)
+
 const axios = require('axios');
 const pool = require('../config/db');
 const {
@@ -7,8 +11,9 @@ const {
   inferSpotCategoriesWithFallback,
 } = require('../constants/spotCategoryRules');
 const trafficLog = require('../services/tourTrafficLog');
-const { findTags } = require('../constants/tagAliases');
+const { findTags, petSizeTag } = require('../constants/tagAliases');
 const tourApiService = require('../services/tourApiService');
+const { installDataGoKrKeyFallback } = require('../services/dataGoKrKey');
 const { findExistingSpot, linkExternalIds } = require('../utils/spotIdentity');
 
 // ──────────────────────────────────────────────────────────
@@ -28,8 +33,55 @@ const isAll = args.includes('--all');
 const limitPerRegion = isAll ? 500 : Number.parseInt(getArg('limit', process.env.TOUARPI_IMPORT_LIMIT || '15'), 10);
 const targetRegion = (getArg('region', 'all') || 'all').trim();
 const sleepMs = Number.parseInt(getArg('sleep', isAll ? '150' : '200'), 10);
+// 콘텐츠 유형: 12 관광지, 14 문화시설 (기본 둘 다)
+const contentTypeIds = String(getArg('types', '12,14')).split(',').map((t) => t.trim()).filter(Boolean);
+// 이미 TourAPI 정보로 저장된 장소는 상세 호출 없이 건너뛴다 (중간에 멈췄다 다시 돌릴 때 호출 절약)
+const skipExisting = args.includes('--skip-existing');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function isKoreaCoordinate(lat, lng) {
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= 33 && lat <= 39 && lng >= 124 && lng <= 132;
+}
+
+// 카카오 장소 검색으로 좌표 찾기: 이름이 같은 장소만 (주소가 비어 있는 장소용)
+async function findPlaceByName(title, regionName) {
+  if (!title || !process.env.KAKAO_REST_API_KEY) return null;
+  const norm = (v) => String(v || '').replace(/\([^)]*\)/g, '').replace(/\s+/g, '');
+  try {
+    const { data } = await axios.get('https://dapi.kakao.com/v2/local/search/keyword.json', {
+      headers: { Authorization: `KakaoAK ${process.env.KAKAO_REST_API_KEY}` },
+      params: { query: `${regionName} ${norm(title)}`, size: 5 },
+      timeout: 5000,
+    });
+    const doc = (data.documents || []).find((d) => norm(d.place_name) === norm(title)
+      && String(d.address_name || '').startsWith(regionName === '춘천' ? '강원' : regionName));
+    const point = doc ? { lat: Number(doc.y), lng: Number(doc.x) } : null;
+    return point && isKoreaCoordinate(point.lat, point.lng) ? point : null;
+  } catch {
+    return null;
+  }
+}
+
+// 카카오 주소 검색으로 좌표 찾기 (TourAPI 좌표가 잘못된 장소용)
+async function geocodeAddress(address) {
+  if (!address || !process.env.KAKAO_REST_API_KEY) return null;
+  try {
+    const { data } = await axios.get('https://dapi.kakao.com/v2/local/search/address.json', {
+      headers: { Authorization: `KakaoAK ${process.env.KAKAO_REST_API_KEY}` },
+      params: { query: address },
+      timeout: 5000,
+    });
+    const doc = data.documents?.[0];
+    const point = doc ? { lat: Number(doc.y), lng: Number(doc.x) } : null;
+    return point && isKoreaCoordinate(point.lat, point.lng) ? point : null;
+  } catch {
+    return null;
+  }
+}
+
+// 목욕·찜질 시설 이름 ('스파이더', '에스파스 루이비통' 같은 이름은 제외하지 않는다)
+const BATH_FACILITY_PATTERN = /찜질|사우나|온천|불가마|목욕탕|(?<!에)스파(?![이스])/;
 
 // ──────────────────────────────────────────────────────────
 // 2. 서비스 키 및 API 설정
@@ -54,10 +106,11 @@ function requireEnv() {
   }
 }
 
-const http = axios.create({
+// 공공데이터 인증키 일일 한도 초과 시 보조 키(TOURAPI_SERVICE_KEY_FALLBACK)로 자동 전환
+const http = installDataGoKrKeyFallback(axios.create({
   timeout: 15000,
   headers: { 'User-Agent': 'WalkBuddy-TourAPI-Importer/1.0' },
-});
+}));
 
 async function callOpenApi(baseUrl, pathname, params, apiName) {
   const serviceKey = getServiceKey();
@@ -341,12 +394,8 @@ function deriveSpotTags({ title = '', categories = [], overview = '', barrierFre
   // (3) 반려동물 동반정보 (KorPetTourService2 - 반려동물 공식 태그)
   if (petTour) {
     tags.add('반려동물');
-    const size = String(petTour.allowed_pet_size || '');
-    if (size.includes('대형견') || size.includes('모두') || size.includes('제한없음') || size.includes('전 견종')) {
-      tags.add('대형견 동반');
-    } else if (size.includes('소형견') || size.includes('중형견')) {
-      tags.add('소형견동반');
-    }
+    const sizeTag = petSizeTag(petTour.allowed_pet_size);
+    if (sizeTag) tags.add(sizeTag);
 
     const fac = `${petTour.facilities || ''} ${petTour.need_items || ''} ${petTour.etc_info || ''}`;
     if (/배변|봉투|수거함/.test(fac)) tags.add('반려견배변시설');
@@ -457,14 +506,6 @@ async function main() {
       });
     }
     if (isSeoul) {
-      // 서울 노원구(서울여대 인근) 및 서울 주요 명소
-      targets.push({
-        name: '서울',
-        areaCode: '1',
-        sigunguCode: '9', // 노원구 우선
-        description: '서울 노원구 및 주요 명소',
-      });
-      // 서울 전역 추가 (다양한 스팟 확보용)
       targets.push({
         name: '서울',
         areaCode: '1',
@@ -479,16 +520,26 @@ async function main() {
     for (const target of targets) {
       console.log(`📍 [${target.name}] 목록 조회 중... (${target.description})`);
 
-      const params = {
-        areaCode: target.areaCode,
-        numOfRows: limitPerRegion,
-        pageNo: 1,
-        arrange: 'O', // 인기/제목순
-        contentTypeId: 12, // 관광지
-      };
-      if (target.sigunguCode) params.sigunguCode = target.sigunguCode;
-
-      const items = await callOpenApi(BASE_URL, 'areaBasedList2', params, 'KorService2');
+      // 콘텐츠 유형별로 페이지를 넘기며 지역 전체(최대 limitPerRegion)를 받는다
+      const items = [];
+      for (const contentTypeId of contentTypeIds) {
+        const typeItems = [];
+        for (let pageNo = 1; typeItems.length < limitPerRegion; pageNo += 1) {
+          const params = {
+            areaCode: target.areaCode,
+            numOfRows: Math.min(100, limitPerRegion),
+            pageNo,
+            arrange: 'O', // 인기/제목순
+            contentTypeId,
+          };
+          if (target.sigunguCode) params.sigunguCode = target.sigunguCode;
+          const pageItems = await callOpenApi(BASE_URL, 'areaBasedList2', params, 'KorService2');
+          typeItems.push(...pageItems);
+          if (pageItems.length < params.numOfRows) break;
+        }
+        console.log(`   - 유형 ${contentTypeId}: ${Math.min(typeItems.length, limitPerRegion)}개`);
+        items.push(...typeItems.slice(0, limitPerRegion));
+      }
       console.log(`   총 ${items.length}개 후보 확인. 세부 정보 및 태그 분석 중...`);
 
       for (let i = 0; i < items.length; i += 1) {
@@ -498,13 +549,32 @@ async function main() {
         if (seenPlaceIds.has(contentId)) continue;
         seenPlaceIds.add(contentId);
 
-        const lng = Number(item.mapx);
-        const lat = Number(item.mapy);
+        if (skipExisting && !isDryRun) {
+          const { rows: done } = await client.query(
+            'SELECT 1 FROM spots WHERE tour_content_id = $1 AND content_tour IS NOT NULL', [contentId]);
+          if (done.length) continue;
+        }
+
+        let lng = Number(item.mapx);
+        let lat = Number(item.mapy);
         const title = (item.title || '').trim();
         const address = (item.addr1 || '') + (item.addr2 ? ` ${item.addr2}` : '');
 
-        // 유효하지 않은 좌표 건너뜀
-        if (!Number.isFinite(lng) || !Number.isFinite(lat) || lng === 0 || lat === 0) {
+        // IMPORTANT: TourAPI 좌표가 한국 밖으로 잘못 들어온 장소가 있다 (서울책보고 등이 19.69,117.99).
+        // 그대로 저장하면 지도·반경 검색에서 사라지므로 주소로 좌표를 다시 찾고, 못 찾으면 건너뛴다.
+        if (!isKoreaCoordinate(lat, lng)) {
+          const geocoded = await geocodeAddress(item.addr1 || address) || await findPlaceByName(title, target.name);
+          if (!geocoded) {
+            console.log(`   [제외] 좌표 오류·주소와 이름으로도 못 찾음: ${title} (${item.mapy}, ${item.mapx})`);
+            continue;
+          }
+          console.log(`   [좌표 보정] ${title}: (${item.mapy}, ${item.mapx}) → (${geocoded.lat}, ${geocoded.lng})`);
+          ({ lat, lng } = geocoded);
+        }
+
+        // 산책 장소가 아닌 목욕·찜질 시설은 제외 (예: 월드온천24)
+        if (BATH_FACILITY_PATTERN.test(title)) {
+          console.log(`   [제외] 목욕·찜질 시설: ${title}`);
           continue;
         }
 
