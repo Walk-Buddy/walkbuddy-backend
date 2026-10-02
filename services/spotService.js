@@ -12,10 +12,17 @@ const {
 const tourApiService = require('./tourApiService');
 const odiiService = require('./odiiService');
 const trafficLog = require('./tourTrafficLog');
+const { getQuotaErrorCount } = require('./dataGoKrKey');
+const { isLegacyPlaceId, legacyContentId, findKakaoPlaceNear, isSamePlaceName } = require('../utils/kakaoPlaceMatch');
+const { findExistingSpot, linkExternalIds, toKakaoPlaceId, toTourContentId } = require('../utils/spotIdentity');
+const { findTags, petSizeTag } = require('../constants/tagAliases');
 
 const TOUR_API_BASE_URL = 'https://apis.data.go.kr/B551011/KorService2';
 const TOUR_API_MATCH_RADIUS = Number(process.env.TOUR_API_MATCH_RADIUS || 300);
 const TOUR_API_FALLBACK_MATCH_RADIUS = 500;
+// 이 기간 안에 TourAPI 보강을 마친 기존 스팟은 다시 저장돼도 보강 호출을 생략한다.
+// (두루누비 import 재실행, 같은 스팟을 공유하는 인접 코스에서 반복 호출 방지)
+const TOUR_ENRICH_REFRESH_DAYS = Number(process.env.TOUR_ENRICH_REFRESH_DAYS || 30);
 
 function sanitizeText(text) {
     if (!text) return '';
@@ -25,6 +32,35 @@ function sanitizeText(text) {
         .replace(/[\r\t]+/g, ' ')         // 탭/개행 정규화
         .replace(/\s{2,}/g, ' ')          // 다중 공백 단일화
         .trim();
+}
+
+/**
+ * 앱은 카카오 ID가 없는 TourAPI 장소를 kakao_place_id = "tour:<contentId>" 로 저장 요청한다.
+ * 이대로 저장하면 같은 장소가 카카오 스팟과 따로 생기므로, 같은 위치의 카카오 장소를 찾아 카카오 ID로 바꾼다.
+ * 찾지 못하면 요청 그대로 저장한다. (contentId 는 tour_api_content_id 로 넘겨 TourAPI 보강에 쓴다)
+ */
+async function normalizeLegacyPlaceId(body) {
+    if (!isLegacyPlaceId(body.kakao_place_id) || body.kakao_place_id == null) return body;
+
+    const contentId = legacyContentId(body.kakao_place_id);
+    const doc = await findKakaoPlaceNear({ name: body.name, x: body.x, y: body.y, kakaoKey: getKakaoRestApiKey() })
+        .catch(() => null);
+    if (!doc) {
+        return { ...body, tour_api_content_id: body.tour_api_content_id || contentId };
+    }
+
+    const categories = inferSpotCategoriesWithFallback(doc);
+    return {
+        ...body,
+        kakao_place_id: String(doc.id),
+        name: doc.place_name,
+        kakao_category_name: doc.category_name || body.kakao_category_name || null,
+        categories: categories.length ? categories : body.categories,
+        address: doc.road_address_name || doc.address_name || body.address,
+        x: doc.x,
+        y: doc.y,
+        tour_api_content_id: body.tour_api_content_id || contentId,
+    };
 }
 
 function getTourApiServiceKey() {
@@ -58,11 +94,18 @@ function normalizePlaceName(name = '') {
         .toLowerCase();
 }
 
+// IMPORTANT: 단순 포함 비교를 쓰면 '오목교'가 '올리브영 오목교지하철역점'과 같은 장소로 매칭돼
+// 매장의 반려동물·무장애 정보가 붙었다. 덧붙은 말이 지점·부속시설 이름이면 다른 장소로 본다. (utils/kakaoPlaceMatch.js)
 function isSameTourPlace(kakaoName, tourTitle) {
-    const kakao = normalizePlaceName(kakaoName);
-    const tour = normalizePlaceName(tourTitle);
-    if (!kakao || !tour) return false;
-    return kakao === tour || kakao.includes(tour) || tour.includes(kakao);
+    return isSamePlaceName(kakaoName, tourTitle);
+}
+
+function haversineDistanceMeters(lat1, lng1, lat2, lng2) {
+    if (![lat1, lng1, lat2, lng2].every(Number.isFinite)) return Infinity;
+    const toRad = (d) => (d * Math.PI) / 180;
+    const h = Math.sin(toRad(lat2 - lat1) / 2) ** 2
+        + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(toRad(lng2 - lng1) / 2) ** 2;
+    return 2 * 6371000 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
 function cleanTourOverview(overview = '') {
@@ -200,8 +243,9 @@ async function fetchTourOverview(contentId) {
 
         const api = 'KorService2';
     const pathname = 'detailCommon2';
-    // firstImageYN/overviewYN 을 명시해야 대표 이미지(firstimage)까지 함께 내려온다.
-    const params = { _type: 'json', contentId, firstImageYN: 'Y', overviewYN: 'Y' };
+    // KorService2(v4.x)는 overview·firstimage를 기본으로 내려준다.
+    // 예전 firstImageYN/overviewYN 파라미터를 붙이면 INVALID_REQUEST_PARAMETER_ERROR(resultCode 10)로 실패한다.
+    const params = { _type: 'json', contentId };
     const startedAt = Date.now();
 
     try {
@@ -210,12 +254,15 @@ async function fetchTourOverview(contentId) {
                 serviceKey,
                 MobileOS: process.env.TOUR_API_MOBILE_OS || 'ETC',
                 MobileApp: process.env.TOUR_API_MOBILE_APP || 'WalkBuddy',
-                                _type: 'json',
+                _type: 'json',
                 contentId,
-                firstImageYN: 'Y',
-                overviewYN: 'Y',
             },
         });
+
+        // 오류 응답은 { resultCode, resultMsg } 형태로 header 없이 온다.
+        if (response.data?.resultCode && response.data.resultCode !== '0000') {
+            throw new Error(`${response.data.resultMsg || 'TourAPI 오류'} (${response.data.resultCode})`);
+        }
 
         const header = response.data?.response?.header;
         const item = response.data?.response?.body?.items?.item;
@@ -264,7 +311,6 @@ function extractTourTags({ overview, barrierFreeInfo, petTourInfo, odiiGuide }) 
 
     // 2. 무장애 편의시설 (KorWithService2) 세부 태그
     if (barrierFreeInfo?.has_barrier_free_info && barrierFreeInfo.details) {
-        tags.add('열린관광');
         const d = barrierFreeInfo.details;
         if (d.physical?.wheelchair) {
             const wcStr = String(d.physical.wheelchair);
@@ -281,24 +327,17 @@ function extractTourTags({ overview, barrierFreeInfo, petTourInfo, odiiGuide }) 
         if (d.infant?.stroller && !/(불가|없음)/.test(d.infant.stroller)) tags.add('유모차대여');
         if (d.infant?.lactation_room && !/(없음|미설치)/.test(d.infant.lactation_room)) tags.add('수유실');
         if (d.visual?.braile_block || d.visual?.braile_promotion) tags.add('점자안내');
-        if (d.visual?.help_dog && !/(불가|금지)/.test(d.visual.help_dog)) tags.add('안내견동반');
-        if (d.visual?.audio_guide && !/(없음|미설치)/.test(d.visual.audio_guide)) tags.add('시각장애인음성안내');
+        if (d.visual?.help_dog) tags.add('안내견동반');
+        if (d.visual?.audio_guide) tags.add('시각장애인음성안내');
         if (d.hearing?.sign_language || d.hearing?.video_guide) tags.add('수어안내');
     }
 
     // 3. 반려동물 동반 (KorPetTourService2) 세부 태그
     if (petTourInfo?.has_pet_info) {
-        tags.add('반려견동반');
+        tags.add('반려동물');
         const petDetails = petTourInfo.details || {};
-        const sizeStr = `${petDetails.allowed_pet_size || ''} ${petDetails.etc_info || ''} ${petDetails.pet_tour_info || ''}`;
-        if (!/(출입\s*불가|입장\s*금지)/.test(sizeStr)) {
-            if (/대형견|전\s*견종|전견종|모든\s*견종|제한\s*없음|제한없음/i.test(sizeStr)) {
-                tags.add('대형견가능');
-            }
-            if (/소형견|중[,\s·]*소형견|중형견|10kg|15kg|전\s*견종|전견종|모든\s*견종/i.test(sizeStr)) {
-                tags.add('소형견동반');
-            }
-        }
+        const sizeTag = petSizeTag(petDetails.allowed_pet_size);
+        if (sizeTag) tags.add(sizeTag);
 
         const facilityStr = `${petDetails.facilities || ''} ${petDetails.etc_info || ''}`;
         if (/배변|배변봉투|배변시설|수거함/i.test(facilityStr) && !/(없음|미설치)/.test(facilityStr)) {
@@ -392,29 +431,10 @@ async function attachTagsToSpot(spotId, tagNames, userId) {
             return;
         }
 
-        // 1. 기존 태그 확인
-        const { rows: existingTags } = await pool.query(
-            `SELECT tag_id, name FROM tags WHERE name = ANY($1::TEXT[]) AND type = 'spot'`,
-            [cleanNames]
-        );
+        // 1. 정본 태그만 붙인다 (정본에 없는 이름으로 태그를 새로 만들지 않는다 — constants/tagAliases.js)
+        const tagsToAttach = await findTags(pool, cleanNames, 'spot');
 
-        const existingNames = new Set(existingTags.map(r => r.name));
-        const tagsToAttach = [...existingTags];
-
-        // 2. 누락된 태그는 tags 테이블에 안전하게 자동 등록
-        const missingNames = cleanNames.filter(n => !existingNames.has(n));
-        for (const name of missingNames) {
-            const { rows } = await pool.query(
-                `INSERT INTO tags (name, type, group_name, is_active)
-                 VALUES ($1, 'spot', '기타', TRUE)
-                 ON CONFLICT (name, type) DO UPDATE SET is_active = TRUE
-                 RETURNING tag_id, name`,
-                [name]
-            );
-            if (rows[0]) tagsToAttach.push(rows[0]);
-        }
-
-        // 3. taggings 테이블에 일괄 등록
+        // 2. taggings 테이블에 일괄 등록
         for (const tag of tagsToAttach) {
             await pool.query(
                 `INSERT INTO taggings (tag_id, target_id, target_type, user_id)
@@ -509,6 +529,9 @@ async function enrichKakaoSpotTourContent(spot, userId) {
         return { spot, ...result };
     }
 
+    // 보강 도중 일일 한도 초과가 있었는지 확인하기 위한 기준값
+    const quotaErrorsBefore = getQuotaErrorCount();
+
     try {
         // Odii 오디오 가이드 검색을 병렬로 함께 시작
         const odiiPromise = odiiService.findBestOdiiGuide({
@@ -517,7 +540,9 @@ async function enrichKakaoSpotTourContent(spot, userId) {
             y: lat,
         }).catch(() => null);
 
-        let matched = await findTourApiMatchByContentId(spot.tour_api_content_id);
+        // 요청으로 받은 contentId → 이전 보강에서 저장해 둔 contentId 순으로 쓰고,
+        // 둘 다 없을 때만 위치·키워드 검색으로 매칭한다.
+        let matched = await findTourApiMatchByContentId(spot.tour_api_content_id || spot.tour_content_id);
         let candidates = [];
 
         if (!matched) {
@@ -546,8 +571,10 @@ async function enrichKakaoSpotTourContent(spot, userId) {
         // 3차 폴백: 키워드 검색 기반 매칭 (관광지 위치가 카카오 좌표와 조금 다르거나 반경 밖인 경우)
         if (!matched) {
             const kwCandidates = await fetchTourKeywordCandidates(spot.name);
+            // 이름이 같은 다른 지역 장소와 매칭되지 않도록 2km 안만 쓴다
             matched = kwCandidates
                 .filter(candidate => isSameTourPlace(spot.name, candidate.title))
+                .filter(candidate => haversineDistanceMeters(lat, lng, Number(candidate.mapy), Number(candidate.mapx)) <= 2000)
                 .sort((a, b) => {
                     const distA = Math.hypot(Number(a.mapx || 0) - lng, Number(a.mapy || 0) - lat);
                     const distB = Math.hypot(Number(b.mapx || 0) - lng, Number(b.mapy || 0) - lat);
@@ -658,6 +685,23 @@ async function enrichKakaoSpotTourContent(spot, userId) {
             ? 'enriched'
             : 'matched_without_new_content';
 
+        // 보강 완료 기록. TourAPI에 없는 장소도 기록해서 매칭 검색을 반복하지 않는다.
+        // 일일 한도 초과로 일부 호출이 실패했다면 기록하지 않아 다음 저장 때 다시 시도한다.
+        if (getQuotaErrorCount() === quotaErrorsBefore) {
+            await pool.query(
+                // 다른 장소가 이미 가진 TourAPI 번호는 넣지 않는다 (uix_spots_tour_content_id)
+                `UPDATE spots SET tour_enriched_at = NOW(),
+                        tour_content_id = CASE
+                            WHEN $2::text IS NULL THEN tour_content_id
+                            WHEN EXISTS (SELECT 1 FROM spots o WHERE o.tour_content_id = $2 AND o.spot_id <> $1) THEN tour_content_id
+                            ELSE $2 END
+                  WHERE spot_id = $1`,
+                [updatedSpot.spot_id, matched?.contentid ? String(matched.contentid) : null]
+            );
+        } else {
+            result.tour_content_status = 'partial_quota_exceeded';
+        }
+
         return {
             spot: {
                 ...updatedSpot,
@@ -767,7 +811,7 @@ exports.getSpots = async (query) => {
         whereConditions.push(`(s.name ILIKE $${queryValues.length} OR s.address ILIKE $${queryValues.length} OR s.sub_region ILIKE $${queryValues.length})`);
     }
 
-    // 태그 ID 목록 검색 (UUID) — 열린관광 및 반려견동반 선택 시 하위 태그 자동 포함(Group Expansion)
+    // 태그 ID 목록 검색 (UUID) — 그룹 확장 없이 AND(교집합) 매칭
     if (tag_ids) {
         const tagIdList = (Array.isArray(tag_ids) ? tag_ids.join(',') : tag_ids)
             .split(',').map(t => t.trim()).filter(Boolean);
@@ -778,30 +822,20 @@ exports.getSpots = async (query) => {
         }
         if (tagIdList.length > 0) {
             queryValues.push(tagIdList); const tagIdx = queryValues.length;
+            queryValues.push(tagIdList.length); const countIdx = queryValues.length;
             whereConditions.push(`
                 s.spot_id IN (
                     SELECT tg.target_id FROM taggings tg
                     JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
-                    WHERE tg.target_type = 'spot' AND (
-                        tg.tag_id = ANY($${tagIdx}::UUID[])
-                        OR (
-                            t.group_name = '열린관광' AND EXISTS (
-                                SELECT 1 FROM tags t_p WHERE t_p.name = '열린관광' AND t_p.type = 'spot' AND t_p.tag_id = ANY($${tagIdx}::UUID[])
-                            )
-                        )
-                        OR (
-                            t.group_name = '반려동물' AND EXISTS (
-                                SELECT 1 FROM tags t_p WHERE t_p.name = '반려견동반' AND t_p.type = 'spot' AND t_p.tag_id = ANY($${tagIdx}::UUID[])
-                            )
-                        )
-                    )
+                    WHERE tg.target_type = 'spot' AND tg.tag_id = ANY($${tagIdx}::UUID[])
                     GROUP BY tg.target_id
+                    HAVING COUNT(DISTINCT tg.tag_id) = $${countIdx}
                 )
             `);
         }
     }
 
-    // 태그 이름(tag_name / tag_names) 검색 지원 — 열린관광 및 반려견동반 선택 시 하위 태그 자동 포함
+    // 태그 이름(tag_name / tag_names) 검색 지원 — 그룹 확장 없이 AND(교집합) 매칭
     const targetTagNames = tag_name || tag_names;
     if (targetTagNames) {
         const tagNameList = (Array.isArray(targetTagNames) ? targetTagNames.join(',') : targetTagNames)
@@ -812,17 +846,16 @@ exports.getSpots = async (query) => {
         if (tagNameList.length > 0) {
             queryValues.push(tagNameList);
             const tagIdx = queryValues.length;
+            queryValues.push(tagNameList.length);
+            const countIdx = queryValues.length;
             whereConditions.push(`
                 s.spot_id IN (
                     SELECT tg.target_id
                     FROM taggings tg
                     JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'spot' AND t.is_active = TRUE
-                    WHERE tg.target_type = 'spot' AND (
-                        t.name = ANY($${tagIdx}::TEXT[])
-                        OR ('열린관광' = ANY($${tagIdx}::TEXT[]) AND t.group_name = '열린관광')
-                        OR ('반려견동반' = ANY($${tagIdx}::TEXT[]) AND t.group_name = '반려동물')
-                    )
+                    WHERE tg.target_type = 'spot' AND t.name = ANY($${tagIdx}::TEXT[])
                     GROUP BY tg.target_id
+                    HAVING COUNT(DISTINCT t.name) >= $${countIdx}
                 )
             `);
         }
@@ -849,7 +882,7 @@ exports.getSpots = async (query) => {
         const spotsResult = await pool.query(
         `SELECT
             s.spot_id, s.name, s.address, s.categories, s.region, s.sub_region, s.recommend_pct,
-            s.barrier_free_info, s.is_night_tour,
+            s.barrier_free_info, s.pet_tour_info, s.is_night_tour,
             s.first_image,
             -- 후기 사진 폴백: 이 장소의 후기 중 사진이 있는 가장 최근 후기의 첫 사진 key
             (
@@ -939,7 +972,7 @@ exports.getSpotById = async (spotId) => {
             s.spot_id, s.name, s.address, s.categories, s.kakao_category_name,
             s.region, s.sub_region,
                         s.recommend_pct, s.source, s.content_place, s.content_history, s.content_tour,
-            s.barrier_free_info, s.is_night_tour,
+            s.barrier_free_info, s.pet_tour_info, s.is_night_tour,
             s.first_image,
             ST_X(s.location::GEOMETRY) AS x,
             ST_Y(s.location::GEOMETRY) AS y,
@@ -1008,6 +1041,15 @@ exports.createSpot = async (body) => {
     const determinedRegion = region || regionInfo.region || '서울';
     const determinedSubRegion = sub_region || regionInfo.sub_region || null;
 
+    // 같은 이름의 장소가 300m 안에 이미 있으면 새로 만들지 않는다 (utils/spotIdentity.js)
+    const duplicate = await findExistingSpot(pool, { name, lat, lng });
+    if (duplicate) {
+        const err = new Error(`이미 등록된 장소입니다: ${duplicate.name}`);
+        err.status = 409;
+        err.spot_id = duplicate.spot_id;
+        throw err;
+    }
+
     const result = await pool.query(
         `INSERT INTO spots (
             name, location, address, categories,
@@ -1036,7 +1078,8 @@ exports.createSpot = async (body) => {
 // ──────────────────────────────────────────────────────────────────────
 // 카카오 스팟 저장
 // ──────────────────────────────────────────────────────────────────────
-exports.saveKakaoSpot = async (body, userId) => {
+exports.saveKakaoSpot = async (rawBody, userId) => {
+    const body = await normalizeLegacyPlaceId(rawBody);
     const {
         kakao_place_id,
         name,
@@ -1077,16 +1120,26 @@ exports.saveKakaoSpot = async (body, userId) => {
     const determinedRegion = region || regionInfo.region || '서울';
     const determinedSubRegion = sub_region || regionInfo.sub_region || null;
 
-    const createdResult = await pool.query(
-        `INSERT INTO spots (kakao_place_id, name, location, address, categories, kakao_category_name, source, region, sub_region, last_synced_at)
-         VALUES ($1, $2, ST_Point($3, $4)::GEOGRAPHY, $5, $6::TEXT[], $7, 'kakao', $8, $9, NOW())
-         ON CONFLICT (kakao_place_id) DO NOTHING
+    // 이미 있는 장소인지 TourAPI 번호 → 카카오 번호 → 같은 이름 + 300m 순서로 확인 (utils/spotIdentity.js)
+    const kakaoPlaceId = toKakaoPlaceId(kakao_place_id);
+    const matchedSpot = await findExistingSpot(pool, {
+        tourContentId: tour_api_content_id, kakaoPlaceId, name, lat, lng,
+    });
+    if (matchedSpot) {
+        await linkExternalIds(pool, matchedSpot.spot_id, { tourContentId: tour_api_content_id, kakaoPlaceId });
+    }
+
+    const createdResult = matchedSpot ? { rows: [] } : await pool.query(
+        `INSERT INTO spots (kakao_place_id, tour_content_id, name, location, address, categories, kakao_category_name, source, region, sub_region, last_synced_at)
+         VALUES ($1, $10, $2, ST_Point($3, $4)::GEOGRAPHY, $5, $6::TEXT[], $7, 'kakao', $8, $9, NOW())
+         ON CONFLICT DO NOTHING
          RETURNING spot_id, kakao_place_id, name, address, categories, kakao_category_name,
                    region, sub_region,
                    recommend_pct, content_tour,
                    ST_X(location::GEOMETRY) AS x,
                    ST_Y(location::GEOMETRY) AS y`,
-        [kakao_place_id, name, lng, lat, selectedAddress, normalizedCategories, kakao_category_name || null, determinedRegion, determinedSubRegion]
+        [kakaoPlaceId, name, lng, lat, selectedAddress, normalizedCategories, kakao_category_name || null, determinedRegion, determinedSubRegion,
+         toTourContentId(tour_api_content_id)]
     );
 
     if (createdResult.rows.length > 0) {
@@ -1105,11 +1158,13 @@ exports.saveKakaoSpot = async (body, userId) => {
     const existingResult = await pool.query(
         `SELECT spot_id, kakao_place_id, name, address, categories, kakao_category_name,
                 region, sub_region,
-                recommend_pct, content_tour, status,
+                recommend_pct, content_tour, status, first_image,
+                tour_content_id,
+                tour_enriched_at > NOW() - ($2::int * INTERVAL '1 day') AS is_recently_enriched,
                 ST_X(location::GEOMETRY) AS x,
                 ST_Y(location::GEOMETRY) AS y
-         FROM spots WHERE kakao_place_id = $1`,
-        [kakao_place_id]
+         FROM spots WHERE ${matchedSpot ? 'spot_id = $1' : 'kakao_place_id = $1'}`,
+        [matchedSpot ? matchedSpot.spot_id : kakaoPlaceId, TOUR_ENRICH_REFRESH_DAYS]
     );
 
     const existingSpot = existingResult.rows[0];
@@ -1132,7 +1187,7 @@ exports.saveKakaoSpot = async (body, userId) => {
         currentSpot = updatedResult.rows[0];
     }
 
-    const { status, ...spot } = currentSpot;
+    const { status, is_recently_enriched: isRecentlyEnriched, ...spot } = { ...existingSpot, ...currentSpot };
     const normalizedSpot = {
         ...spot,
         x: Number(spot.x),
@@ -1140,6 +1195,21 @@ exports.saveKakaoSpot = async (body, userId) => {
         recommend_pct: spot.recommend_pct == null ? null : Number(spot.recommend_pct),
         tour_api_content_id,
     };
+
+    // 최근에 보강을 마친 스팟은 TourAPI·Odii 호출 없이 그대로 돌려준다.
+    if (isRecentlyEnriched) {
+        return {
+            is_created: false,
+            spot: normalizedSpot,
+            tour_content_enriched: false,
+            tour_content_status: 'skipped_recently_enriched',
+            tour_content_match: null,
+            barrier_free_enriched: false,
+            pet_tour_enriched: false,
+            attached_tags: [],
+        };
+    }
+
     const enriched = await enrichKakaoSpotTourContent(normalizedSpot, userId);
     return { is_created: false, ...enriched };
 };
@@ -1259,32 +1329,22 @@ exports.searchSpots = async (query) => {
         )`);
     }
 
-    // 태그 ID 검색 — 열린관광 및 반려견동반 선택 시 하위 태그 자동 포함 & 다중 태그 OR 매칭 지원
+    // 태그 ID 검색 — 그룹 확장 없이 AND(교집합) 매칭
     if (tagIdList.length > 0) {
         queryValues.push(tagIdList); const tagIdx = queryValues.length;
+        queryValues.push(tagIdList.length); const countIdx = queryValues.length;
         whereConditions.push(`
             s.spot_id IN (
                 SELECT tg.target_id FROM taggings tg
                 JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
-                WHERE tg.target_type = 'spot' AND (
-                    tg.tag_id = ANY($${tagIdx}::UUID[])
-                    OR (
-                        t.group_name = '열린관광' AND EXISTS (
-                            SELECT 1 FROM tags t_p WHERE t_p.name = '열린관광' AND t_p.type = 'spot' AND t_p.tag_id = ANY($${tagIdx}::UUID[])
-                        )
-                    )
-                    OR (
-                        t.group_name = '반려동물' AND EXISTS (
-                            SELECT 1 FROM tags t_p WHERE t_p.name = '반려견동반' AND t_p.type = 'spot' AND t_p.tag_id = ANY($${tagIdx}::UUID[])
-                        )
-                    )
-                )
+                WHERE tg.target_type = 'spot' AND tg.tag_id = ANY($${tagIdx}::UUID[])
                 GROUP BY tg.target_id
+                HAVING COUNT(DISTINCT tg.tag_id) = $${countIdx}
             )
         `);
     }
 
-    // 태그 이름(tag_name / tag_names) 검색 지원
+    // 태그 이름(tag_name / tag_names) 검색 지원 — 그룹 확장 없이 AND(교집합) 매칭
     const searchTargetTagNames = query.tag_name || query.tag_names;
     if (searchTargetTagNames) {
         const tagNameList = (Array.isArray(searchTargetTagNames) ? searchTargetTagNames.join(',') : searchTargetTagNames)
@@ -1295,17 +1355,16 @@ exports.searchSpots = async (query) => {
         if (tagNameList.length > 0) {
             queryValues.push(tagNameList);
             const tagIdx = queryValues.length;
+            queryValues.push(tagNameList.length);
+            const countIdx = queryValues.length;
             whereConditions.push(`
                 s.spot_id IN (
                     SELECT tg.target_id
                     FROM taggings tg
                     JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'spot' AND t.is_active = TRUE
-                    WHERE tg.target_type = 'spot' AND (
-                        t.name = ANY($${tagIdx}::TEXT[])
-                        OR ('열린관광' = ANY($${tagIdx}::TEXT[]) AND t.group_name = '열린관광')
-                        OR ('반려견동반' = ANY($${tagIdx}::TEXT[]) AND t.group_name = '반려동물')
-                    )
+                    WHERE tg.target_type = 'spot' AND t.name = ANY($${tagIdx}::TEXT[])
                     GROUP BY tg.target_id
+                    HAVING COUNT(DISTINCT t.name) >= $${countIdx}
                 )
             `);
         }

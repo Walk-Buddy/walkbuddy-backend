@@ -88,14 +88,20 @@ exports.deleteCourse = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// 코스 사진 조회 (관광사진 API - galleryList1 키워드 검색)
+// 코스 사진 조회 (관광사진 API - gallerySearchList1 키워드 검색 + 경유지 스팟 연동)
 exports.getCoursePhotos = async (req, res, next) => {
   try {
     const { course_id } = req.params;
 
-    // DB에서 코스 이름 조회
+    // DB에서 코스 이름과 사진 캐시 조회
+    // 관광사진 검색은 코스명·경유지마다 TourAPI를 불러 수 초가 걸리므로 결과를 코스에 저장해 둔다.
+    // 사진이 있으면 7일, 없으면 1일 동안 재사용 (일시적 API 실패로 빈 결과가 오래 남지 않게)
     const { rows } = await pool.query(
-      `SELECT name FROM courses WHERE course_id = $1 AND status != 'deleted'`,
+      `SELECT name, photo_cache,
+              photo_cached_at > NOW() - (CASE
+                WHEN jsonb_array_length(COALESCE(photo_cache->'photos', '[]'::jsonb)) > 0 THEN INTERVAL '7 days'
+                ELSE INTERVAL '1 day' END) AS cache_fresh
+       FROM courses WHERE course_id = $1 AND status != 'deleted'`,
       [course_id]
     );
 
@@ -103,8 +109,26 @@ exports.getCoursePhotos = async (req, res, next) => {
       return res.status(404).json({ success: false, message: '코스를 찾을 수 없습니다.' });
     }
 
-    const { name } = rows[0];
-    const result = await tourApiService.getCoursePhotos(name);
+    const { name, photo_cache: photoCache, cache_fresh: cacheFresh } = rows[0];
+    if (cacheFresh && photoCache) {
+      return res.json({ success: true, course_id, course_name: name, ...photoCache, cached: true });
+    }
+
+    // 코스 경유지 스팟 이름들 조회
+    const { rows: waypointSpots } = await pool.query(
+      `SELECT DISTINCT s.name
+       FROM course_waypoints cw
+       JOIN spots s ON s.spot_id = cw.spot_id
+       WHERE cw.course_id = $1 AND cw.type = 'spot' AND s.name IS NOT NULL`,
+      [course_id]
+    );
+    const spotNames = waypointSpots.map((r) => r.name);
+
+    const result = await tourApiService.getCoursePhotos(name, spotNames);
+    await pool.query(
+      `UPDATE courses SET photo_cache = $2::jsonb, photo_cached_at = NOW() WHERE course_id = $1`,
+      [course_id, JSON.stringify(result)]
+    ).catch((err) => console.warn('[course photos] 캐시 저장 실패:', err.message));
 
     return res.json({ success: true, course_id, course_name: name, ...result });
   } catch (err) { next(err); }
@@ -124,4 +148,4 @@ exports.prewarmCourseAudio = async (req, res, next) => {
       course_id,
     });
   } catch (err) { next(err); }
-};
+};

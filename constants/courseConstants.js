@@ -21,7 +21,12 @@ const COURSE_TAGS = [
   "#아이와함께",
 ];
 
+// 공식 코스(두루누비·전국길관광) 소요시간 계산용 도보 속도 (m/분)
+// T맵 도보 길찾기 결과(길관광 6개 코스 합계 16,793m / 224분)와 맞춘 값 ≈ 4.5km/h
+const WALK_METERS_PER_MINUTE = 75;
+
 module.exports = {
+  WALK_METERS_PER_MINUTE,
   COURSE_CATEGORIES,
   COURSE_DIFFICULTIES,
   COURSE_TAGS,

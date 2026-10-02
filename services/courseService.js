@@ -1,6 +1,6 @@
 const pool = require('../config/db');
 const { extractRegionFromAddress, inferRegionFromLocation } = require('../constants/spotCategoryRules');
-const { parseDescriptionSections } = require('../utils/courseDescription');
+const { parseDescriptionSections, cleanText } = require('../utils/courseDescription');
 const courseTagService = require('./courseTagService');
 
 const WALK_SPEED_MPS = 1.1; // 도보 평균 4km/h
@@ -312,18 +312,41 @@ function normalizeDifficulty(value) {
 // 두루누비 description 섹션 파싱은 utils/courseDescription.js 로 이전됨
 // (courseService · backfill 스크립트가 공용으로 사용)
 
+// 전국길관광정보 코스 설명에 import가 붙였던 항목 중 상세 화면에 이미 보이는 정보
+// (경유지 타임라인, 출발→도착, 소요시간 박스)는 산책로 소개에서 뺀다.
+const STREET_TOURISM_DUPLICATE_PARAGRAPH = /^(📌\s*경유 경로|🚩\s*출발|⏱️?\s*소요 시간)\s*:/;
+
+function stripStreetTourismDuplicates(description) {
+  if (!description) return description;
+  return String(description)
+    .split(/\n{2,}/)
+    .filter((paragraph) => !STREET_TOURISM_DUPLICATE_PARAGRAPH.test(paragraph.trim()))
+    .join('\n\n');
+}
+
 function buildCourseDetailDescription(course) {
+  if (course.data_source === '행정안전부_전국길관광정보표준데이터') {
+    return {
+      description: cleanText(stripStreetTourismDuplicates(course.description)),
+    };
+  }
+
   if (course.data_source !== '한국관광공사_두루누비') {
     return {
-      description: course.description,
+      description: cleanText(course.description),
     };
   }
 
   const sections = parseDescriptionSections(course.description);
 
   return {
-    description: sections.summary.join('\n') || sections.content || course.description,
+    description: sections.summary.join('\n') || sections.content || cleanText(course.description),
     description_sections: sections,
+    summary: sections.summary.length ? sections.summary.join('\n') : null,
+    contents: sections.content || null,
+    tour_info: sections.tour_info.length ? sections.tour_info.join('\n') : null,
+    traveler_info: sections.traveler_info.length ? sections.traveler_info.join('\n') : null,
+    stamp_location: sections.stamp_location || null,
   };
 }
 
@@ -603,20 +626,14 @@ exports.getCourses = async (query, currentUserId) => {
       conditions.push(`(
         c.sub_region ILIKE $${params.length}
         OR c.region ILIKE $${params.length}
-        OR c.name ILIKE $${params.length}
-        OR c.description ILIKE $${params.length}
       )`);
     }
   }
 
-  // 세부 권역 필터
+  // 세부 권역 필터 — sub_region 컬럼만 매칭 (name/description 매칭 시 다른 구 코스가 혼입됨)
   if (normalizedSubRegion && !['전체', 'all'].includes(normalizedSubRegion.toLowerCase()) && normalizedSubRegion !== '전체') {
     params.push(`%${normalizedSubRegion}%`);
-    conditions.push(`(
-      c.sub_region ILIKE $${params.length}
-      OR c.name ILIKE $${params.length}
-      OR c.description ILIKE $${params.length}
-    )`);
+    conditions.push(`c.sub_region ILIKE $${params.length}`);
   }
 
   // 카테고리 필터
@@ -683,7 +700,7 @@ exports.getCourses = async (query, currentUserId) => {
     conditions.push(`(c.data_source IS NOT NULL OR u.role = 'admin')`);
   }
 
-  // 코스 태그 ID 필터
+  // 코스 태그 ID 필터 (코스 자체 및 경유지 스팟 태그 통합 AND 교집합 매칭)
   if (courseTagIds.length > 0) {
     params.push(courseTagIds);
     const tagIdsParamIndex = params.length;
@@ -692,21 +709,25 @@ exports.getCourses = async (query, currentUserId) => {
 
     conditions.push(`
       c.course_id IN (
-        SELECT tg.target_id
-        FROM taggings tg
-        JOIN tags t
-          ON t.tag_id = tg.tag_id
-         AND t.type = 'course'
-         AND t.is_active = TRUE
-        WHERE tg.target_type = 'course'
-          AND tg.tag_id = ANY($${tagIdsParamIndex}::uuid[])
-        GROUP BY tg.target_id
-        HAVING COUNT(DISTINCT tg.tag_id) = $${tagCountParamIndex}
+        SELECT course_id FROM (
+          SELECT tg.target_id AS course_id, tg.tag_id
+          FROM taggings tg
+          JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+          WHERE tg.target_type = 'course' AND tg.tag_id = ANY($${tagIdsParamIndex}::uuid[])
+          UNION
+          SELECT cw.course_id, tg.tag_id
+          FROM course_waypoints cw
+          JOIN taggings tg ON tg.target_type = 'spot' AND tg.target_id = cw.spot_id
+          JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+          WHERE cw.type = 'spot' AND tg.tag_id = ANY($${tagIdsParamIndex}::uuid[])
+        ) combined_course_tag_ids
+        GROUP BY course_id
+        HAVING COUNT(DISTINCT tag_id) >= $${tagCountParamIndex}
       )
     `);
   }
 
-  // 코스 태그명 필터
+  // 코스 태그명 필터 (코스 자체 및 경유지 스팟 태그명 통합 AND 교집합 매칭)
   if (tagNameList.length > 0) {
     params.push(tagNameList);
     const tagNamesParamIndex = params.length;
@@ -715,11 +736,20 @@ exports.getCourses = async (query, currentUserId) => {
 
     conditions.push(`
       c.course_id IN (
-        SELECT tg.target_id
-        FROM taggings tg
-        JOIN tags t ON t.tag_id = tg.tag_id AND t.type = 'course' AND t.is_active = TRUE
-        WHERE tg.target_type = 'course' AND t.name = ANY($${tagNamesParamIndex}::TEXT[])
-        GROUP BY tg.target_id HAVING COUNT(DISTINCT t.name) >= $${tagCountParamIndex}
+        SELECT course_id FROM (
+          SELECT tg.target_id AS course_id, t.name
+          FROM taggings tg
+          JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+          WHERE tg.target_type = 'course' AND t.name = ANY($${tagNamesParamIndex}::TEXT[])
+          UNION
+          SELECT cw.course_id, t.name
+          FROM course_waypoints cw
+          JOIN taggings tg ON tg.target_type = 'spot' AND tg.target_id = cw.spot_id
+          JOIN tags t ON t.tag_id = tg.tag_id AND t.is_active = TRUE
+          WHERE cw.type = 'spot' AND t.name = ANY($${tagNamesParamIndex}::TEXT[])
+        ) combined_course_tag_names
+        GROUP BY course_id
+        HAVING COUNT(DISTINCT name) >= $${tagCountParamIndex}
       )
     `);
   }
@@ -976,6 +1006,20 @@ exports.getMyCourses = async (userId, query) => {
 exports.getCourseById = async (courseId, userId) => {
   const client = await pool.connect();
   try {
+    // 예전 앱은 두루누비 코스를 원본 ID(예: T_CRS_MNG0000005118)로 열었다.
+    // UUID가 아니면 import된 코스의 원본 ID(source_id)로 찾는다. (북마크·공유 링크 호환)
+    if (!UUID_PATTERN.test(String(courseId))) {
+      const { rows: [bySource] } = await client.query(
+        `SELECT course_id FROM courses WHERE source_id = $1 AND status != 'deleted' LIMIT 1`,
+        [String(courseId)]
+      );
+      if (!bySource) {
+        const err = new Error('코스를 찾을 수 없습니다.');
+        err.status = 404; throw err;
+      }
+      courseId = bySource.course_id;
+    }
+
     // 코스 기본 정보
     const { rows: [course] } = await client.query(
       `SELECT
@@ -1018,6 +1062,7 @@ exports.getCourseById = async (courseId, userId) => {
       `SELECT
          cw.seq, cw.type, cw.spot_id,
          cw.lat, cw.lng,
+         cw.name,
          s.name AS spot_name,
          ST_Y(s.location::geometry) AS spot_lat,
          ST_X(s.location::geometry) AS spot_lng,

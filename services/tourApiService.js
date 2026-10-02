@@ -3,6 +3,7 @@ const { resolveRegion, TARGET_REGIONS, inferSpotCategories, inferSpotCategoriesW
 const pool = require("../config/db");
 const trafficLog = require("./tourTrafficLog");
 const tourCache = require("./tourCache");
+const { installDataGoKrKeyFallback } = require("./dataGoKrKey");
 
 const BASE_URL = "https://apis.data.go.kr/B551011/KorService2";
 const WITH_TOUR_BASE_URL = "https://apis.data.go.kr/B551011/KorWithService2"; // 무장애 여행정보 API
@@ -40,12 +41,13 @@ function getPetTourServiceKey() {
   return getServiceKey();
 }
 
-const http = axios.create({
+// 일일 한도 초과 시 보조 인증키(TOURAPI_SERVICE_KEY_FALLBACK)로 전환
+const http = installDataGoKrKeyFallback(axios.create({
   timeout: 15000,
   headers: {
     "User-Agent": "WalkBuddy-TourAPI-Client/1.0",
   },
-});
+}));
 
 /**
  * OpenAPI를 실제로 호출하고 응답 상태·소요시간을 함께 돌려준다.
@@ -524,9 +526,9 @@ exports.getBarrierFreeInfo = async (contentId) => {
   const summaryTags = [];
   if (item.parking) summaryTags.push("#주차가능");
   if (item.restroom) summaryTags.push("#화장실");
-  if (item.audioguide) summaryTags.push("#음성해설");
-  if (item.helpdog) summaryTags.push("#반려견동반");
-  if (item.wheelchair || item.route) summaryTags.push("#열린관광");
+  if (item.audioguide) summaryTags.push("#시각장애인음성안내");
+  if (item.helpdog) summaryTags.push("#안내견동반");
+  if (item.wheelchair || item.route) summaryTags.push("#휠체어접근");
 
   return {
     content_id: contentId,
@@ -568,8 +570,9 @@ exports.getBarrierFreeInfo = async (contentId) => {
 /**
  * 3-1. 실시간 지역별 열린관광(무장애 인증) 스팟 목록 조회 (areaBasedList2)
  */
-exports.getBarrierFreeSpots = async ({ region, contentTypeId, page = 1, limit = 10 } = {}) => {
-  const target = resolveRegion(region) || TARGET_REGIONS.CHUNCHEON;
+exports.getBarrierFreeSpots = async ({ region, sub_region, contentTypeId, page = 1, limit = 10 } = {}) => {
+  const targetRegionInput = sub_region || region;
+  const target = resolveRegion(targetRegionInput) || resolveRegion(region) || TARGET_REGIONS.CHUNCHEON;
 
   const params = {
     areaCode: target.tourApi.areaCode,
@@ -616,14 +619,14 @@ exports.getBarrierFreeSpots = async ({ region, contentTypeId, page = 1, limit = 
 /**
  * 3-2. 실시간 열린관광(무장애) 키워드 검색 (searchKeyword2)
  */
-exports.searchBarrierFreePlaces = async ({ region, keyword, page = 1, limit = 10 } = {}) => {
+exports.searchBarrierFreePlaces = async ({ region, sub_region, keyword, page = 1, limit = 10 } = {}) => {
   if (!keyword || !keyword.trim()) {
     const err = new Error("keyword는 필수입니다.");
     err.status = 400;
     throw err;
   }
 
-  const target = resolveRegion(region);
+  const target = resolveRegion(sub_region || region);
   const params = {
     keyword: keyword.trim(),
     pageNo: page,
@@ -893,14 +896,14 @@ exports.getTourSpots = async ({
 /**
  * 5. 실시간 키워드 관광지 검색 (searchKeyword2)
  */
-exports.searchTourPlaces = async ({ region, keyword, page = 1, limit = 10 } = {}) => {
+exports.searchTourPlaces = async ({ region, sub_region, keyword, page = 1, limit = 10 } = {}) => {
   if (!keyword || !keyword.trim()) {
     const err = new Error("keyword는 필수입니다.");
     err.status = 400;
     throw err;
   }
 
-  const target = resolveRegion(region);
+  const target = resolveRegion(sub_region || region);
   const params = {
     keyword: keyword.trim(),
     pageNo: page,
@@ -947,14 +950,14 @@ exports.getPhotosByKeyword = async (keyword, limit = 10) => {
     throw err;
   }
 
-  const cacheKey = `PhotoGalleryService1:galleryList1:${keyword.trim()}:${limit}`;
+  const cacheKey = `PhotoGalleryService1:gallerySearchList1:${keyword.trim()}:${limit}`;
   return tourCache.swr(cacheKey, async () => {
     const serviceKey = getServiceKey();
     if (!serviceKey) {
       throw new Error("TOURAPI_SERVICE_KEY 환경변수가 설정되지 않았습니다.");
     }
 
-    const url = new URL(`${PHOTO_BASE_URL}/galleryList1`);
+    const url = new URL(`${PHOTO_BASE_URL}/gallerySearchList1`);
     url.searchParams.append("serviceKey", serviceKey);
     url.searchParams.append("MobileOS", DEFAULT_MOBILE_OS);
     url.searchParams.append("MobileApp", DEFAULT_MOBILE_APP);
@@ -970,20 +973,20 @@ exports.getPhotosByKeyword = async (keyword, limit = 10) => {
       const header = data?.response?.header;
       if (header?.resultCode && header.resultCode !== "0000") {
         if (header.resultCode === "03") {
-          trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "ok", resultCode: "03", message: "결과 없음", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+          trafficLog.record({ api: "PhotoGalleryService1", pathname: "gallerySearchList1", params: _params, status: "ok", resultCode: "03", message: "결과 없음", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
           return [];
         }
         const err = new Error(header.resultMsg || "관광사진 API 호출 실패");
         err.code = header.resultCode;
         err.status = 502;
-        trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "error", resultCode: header.resultCode, message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+        trafficLog.record({ api: "PhotoGalleryService1", pathname: "gallerySearchList1", params: _params, status: "error", resultCode: header.resultCode, message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
         throw err;
       }
 
       const item = data?.response?.body?.items?.item;
       const rawItems = !item ? [] : Array.isArray(item) ? item : [item];
 
-      trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "ok", resultCode: header?.resultCode || "0000", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+      trafficLog.record({ api: "PhotoGalleryService1", pathname: "gallerySearchList1", params: _params, status: "ok", resultCode: header?.resultCode || "0000", durationMs: Date.now() - _startedAt, startedAt: _startedAt });
 
       return rawItems.map((img) => ({
         thumbnail: img.galWebImageUrl || img.galThumbnailImage || null,
@@ -992,7 +995,7 @@ exports.getPhotosByKeyword = async (keyword, limit = 10) => {
       }));
     } catch (err) {
       if (err.status) throw err;
-      trafficLog.record({ api: "PhotoGalleryService1", pathname: "galleryList1", params: _params, status: "error", message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
+      trafficLog.record({ api: "PhotoGalleryService1", pathname: "gallerySearchList1", params: _params, status: "error", message: err.message, durationMs: Date.now() - _startedAt, startedAt: _startedAt });
       console.error("[PhotoGallery API 오류]", err.message);
       return [];
     }
@@ -1023,25 +1026,71 @@ exports.getSpotPhotos = async (contentId, spotName) => {
         return { source: "detailImage2", photos };
       }
     } catch (err) {
-      console.error("[detailImage2 실패, galleryList1으로 fallback]", err.message);
+      console.error("[detailImage2 실패, gallerySearchList1으로 fallback]", err.message);
     }
   }
 
   if (spotName) {
     const photos = await exports.getPhotosByKeyword(spotName);
-    return { source: "galleryList1", photos };
+    return { source: "gallerySearchList1", photos };
   }
 
   return { source: null, photos: [] };
 };
 
 /**
- * 8. 코스 사진 조회 (galleryList1 키워드 검색)
+ * 8. 코스 사진 조회 (관광사진갤러리 gallerySearchList1 키워드 검색 + 경유지 스팟 폴백)
  */
-exports.getCoursePhotos = async (courseName) => {
-  if (!courseName) return { source: null, photos: [] };
-  const photos = await exports.getPhotosByKeyword(courseName);
-  return { source: "galleryList1", photos };
+exports.getCoursePhotos = async (courseName, spotNames = []) => {
+  if (!courseName && (!spotNames || spotNames.length === 0)) {
+    return { source: null, photos: [] };
+  }
+
+  const photos = [];
+  const seenUrls = new Set();
+
+  const addPhotos = (items) => {
+    for (const img of items) {
+      const url = img.original || img.thumbnail;
+      if (url && !seenUrls.has(url)) {
+        seenUrls.add(url);
+        photos.push(img);
+      }
+    }
+  };
+
+  // 1. 코스 전체 이름으로 검색 (예: "해파랑길 1코스")
+  if (courseName) {
+    const coursePhotos = await exports.getPhotosByKeyword(courseName, 5);
+    addPhotos(coursePhotos);
+
+    // 2. 검색 결과가 없으면 코스 기본 명칭으로 2차 검색 (예: "해파랑길 1코스" -> "해파랑길")
+    if (photos.length < 3) {
+      const baseName = courseName
+        .replace(/\s*\d+([코구]스|구간|길).*$/, '')
+        .replace(/\s*\(.*?\)/, '')
+        .trim();
+      if (baseName && baseName !== courseName && baseName.length >= 2) {
+        const basePhotos = await exports.getPhotosByKeyword(baseName, 5);
+        addPhotos(basePhotos);
+      }
+    }
+  }
+
+  // 3. 코스 자체 사진이 부족하고 경유지 스팟 목록이 있는 경우 각 스팟별 대표 사진 검색 연동
+  //    경유지 검색은 서로 독립이라 병렬로 조회하고, 결과는 경유지 순서대로 합친다.
+  if (photos.length < 5 && Array.isArray(spotNames) && spotNames.length > 0) {
+    const targets = spotNames.slice(0, 5).filter((spotName) => spotName && spotName.length >= 2);
+    const results = await Promise.all(
+      targets.map((spotName) => exports.getPhotosByKeyword(spotName, 3).catch(() => []))
+    );
+    for (const spotPhotos of results) {
+      addPhotos(spotPhotos);
+      if (photos.length >= 8) break;
+    }
+  }
+
+  return { source: "gallerySearchList1", photos: photos.slice(0, 10) };
 };
 
 /**
@@ -1067,23 +1116,9 @@ exports.getPetTourDetail = async (contentId) => {
     };
   }
 
-  // 표준 11개 스팟 태그 및 반려동물 세부 태그 추출
-  const summaryTags = ["#반려견동반", "#반려동물"];
-  const petSize = `${item.acmpyPsblCpam || ""} ${item.etcAcmpyInfo || ""} ${item.petTursmInfo || ""}`;
-  const facilities = `${item.relaPosesFclty || ""} ${item.etcAcmpyInfo || ""}`;
-
-  if (/대형견|전\s*견종|전견종|모든\s*견종|제한\s*없음|제한없음/i.test(petSize)) {
-    summaryTags.push("#대형견가능");
-  }
-  if (/소형견|중[,\s·]*소형견|중형견|10kg|15kg|전\s*견종|전견종|모든\s*견종/i.test(petSize)) {
-    summaryTags.push("#소형견동반");
-  }
-  if (/배변|배변봉투|배변시설|수거함/i.test(facilities)) {
-    summaryTags.push("#반려견배변시설");
-  }
-  if (/놀이터|운동장|안전문|펜스/i.test(facilities)) {
-    summaryTags.push("#반려견놀이터");
-  }
+  // 표준 스팟 태그에 매핑 가능한 요약 태그 추출
+  const summaryTags = ["#반려동물"];
+  const facilities = item.relaPosesFclty || "";
   if (facilities.includes("주차") || facilities.includes("주차장")) summaryTags.push("#주차가능");
   if (facilities.includes("화장실")) summaryTags.push("#화장실");
   if (facilities.includes("쉼터") || facilities.includes("벤치")) summaryTags.push("#벤치·쉼터");
@@ -1096,6 +1131,8 @@ exports.getPetTourDetail = async (contentId) => {
       pet_tour_info: item.petTursmInfo || null,
       accident_risk: item.relaAcdntRiskMtr || null,
       accompany_type: item.acmpyTypeCd || null,
+      // 동반 시 필요사항 (예: "목줄 착용")
+      need_items: item.acmpyNeedMtr || null,
       facilities: item.relaPosesFclty || null,
       furnished_items: item.relaFrnshPrdlst || null,
       purchasable_items: item.relaPurcPrdlst || null,
@@ -1112,8 +1149,9 @@ exports.getPetTourDetail = async (contentId) => {
  * 10. 실시간 지역별 반려동물 동반 관광지 목록 조회 (KorPetTourService2 - areaBasedList2)
  * LBS 미신고 안전: 스마트폰 실시간 GPS 대신 서울(25개 구) / 춘천시 지역코드만 사용
  */
-exports.getPetTourSpots = async ({ region, contentTypeId, page = 1, limit = 10 } = {}) => {
-  const target = resolveRegion(region) || TARGET_REGIONS.CHUNCHEON;
+exports.getPetTourSpots = async ({ region, sub_region, contentTypeId, page = 1, limit = 10 } = {}) => {
+  const targetRegionInput = sub_region || region;
+  const target = resolveRegion(targetRegionInput) || resolveRegion(region) || TARGET_REGIONS.CHUNCHEON;
 
   const params = {
     areaCode: target.tourApi.areaCode,
@@ -1147,8 +1185,7 @@ exports.getPetTourSpots = async ({ region, contentTypeId, page = 1, limit = 10 }
     region: target.name,
     is_pet_friendly: true,
     tags: [
-      { tag_id: "pet", name: "반려견동반" },
-      { tag_id: "pet2", name: "반려동물" },
+      { tag_id: "pet", name: "반려동물" },
     ],
   }));
 
@@ -1206,14 +1243,14 @@ exports.getPetTourSpots = async ({ region, contentTypeId, page = 1, limit = 10 }
 /**
  * 11. 실시간 반려동물 동반 관광지 키워드 검색 (KorPetTourService2 - searchKeyword2)
  */
-exports.searchPetTourPlaces = async ({ region, keyword, contentTypeId, page = 1, limit = 10 } = {}) => {
+exports.searchPetTourPlaces = async ({ region, sub_region, keyword, contentTypeId, page = 1, limit = 10 } = {}) => {
   if (!keyword || !keyword.trim()) {
     const err = new Error("keyword는 필수입니다.");
     err.status = 400;
     throw err;
   }
 
-  const target = resolveRegion(region);
+  const target = resolveRegion(sub_region || region);
   const params = {
     keyword: keyword.trim(),
     pageNo: page,
@@ -1246,8 +1283,7 @@ exports.searchPetTourPlaces = async ({ region, keyword, contentTypeId, page = 1,
     region: target ? target.name : "전체",
     is_pet_friendly: true,
     tags: [
-      { tag_id: "pet", name: "반려견동반" },
-      { tag_id: "pet2", name: "반려동물" },
+      { tag_id: "pet", name: "반려동물" },
     ],
   }));
 

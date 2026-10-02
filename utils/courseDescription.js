@@ -87,7 +87,37 @@ function parseDescriptionSections(description) {
   return sections;
 }
 
+function cleanText(value) {
+  if (!value) return null;
+
+  return decodeHtmlEntities(String(value))
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p\s*>/gi, '\n')
+    .replace(/<\/div\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+function decodeHtmlEntities(value) {
+  return String(value)
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(Number.parseInt(code, 16)));
+}
+
 module.exports = {
+  cleanText,
+  decodeHtmlEntities,
   parseDescriptionSections,
   parseListLines,
   parseTravelerInfo,

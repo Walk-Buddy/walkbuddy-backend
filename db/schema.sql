@@ -240,9 +240,9 @@ CREATE TABLE tags (
     -- 계절 태그 관리용 (예: #벚꽃 봄 외 시즌 비활성화, #단풍 가을 외 비활성화)
 
     is_review_tag BOOLEAN       NOT NULL DEFAULT TRUE,
-    -- 후기(리뷰) 태그 사용 가능 여부 (migrate-tag-overhaul-final 통합)
-    -- TRUE: 후기 작성 시 선택 가능 / FALSE: 시스템·인증 전용 (후기 불가)
-    -- 예: 열린관광·공식코스·Odii음성해설·실시간축제 등은 FALSE
+    -- 후기(리뷰) 작성 시 사용자 선택 허용 여부
+    -- TRUE: 후기 작성 시 선택 가능 / FALSE: 시스템·공식 인증 전용 (후기 불가)
+    -- 예: 공식코스·무장애길·Odii음성해설·실시간축제·열린관광/반려동물 전 항목 등은 FALSE
 
     created_at  TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
 
@@ -282,6 +282,7 @@ CREATE TABLE spots (
     -- 사용자가 카카오 검색 결과에서 장소를 선택했을 때,
     -- 같은 장소가 spots에 중복 INSERT 되지 않도록 판단하는 기준
     -- 관리자 직접 등록 장소는 카카오 ID가 없을 수 있으므로 NULL 허용
+    -- 실제 카카오 번호(숫자)만 허용 (chk_spots_kakao_place_id). TourAPI 번호는 tour_content_id 에 넣는다
 
 
     name                VARCHAR(100)    NOT NULL,
@@ -371,6 +372,16 @@ CREATE TABLE spots (
     -- source = 'kakao'인 장소를 다시 보강/동기화할 때 사용
     -- 관리자 직접 등록 장소는 NULL 가능
 
+    tour_enriched_at    TIMESTAMPTZ     NULL,
+    -- TourAPI(개요·무장애·반려동물)·Odii 보강을 마지막으로 마친 시각
+    -- TOUR_ENRICH_REFRESH_DAYS(기본 30일) 안이면 재저장 시 보강 호출 생략
+    -- 일일 한도 초과로 보강이 불완전하면 기록하지 않음
+
+    tour_content_id     VARCHAR(20)     NULL,
+    -- 장소의 TourAPI contentId (TourAPI에 없는 장소면 NULL)
+    -- 같은 장소 중복 저장 방지 기준 (uix_spots_tour_content_id) — utils/spotIdentity.js
+    -- 다시 보강할 때 위치·키워드 매칭 검색을 생략하는 데 사용
+
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
 
@@ -427,6 +438,14 @@ CREATE UNIQUE INDEX uix_spots_kakao_place_id
 -- 카카오 장소 중복 저장 방지
 -- PostgreSQL UNIQUE는 NULL을 서로 다른 값으로 보므로,
 -- kakao_place_id가 NULL인 관리자 직접 등록 장소는 여러 개 저장 가능
+
+ALTER TABLE spots ADD CONSTRAINT chk_spots_kakao_place_id
+    CHECK (kakao_place_id IS NULL OR kakao_place_id ~ '^[0-9]+$');
+-- 실제 카카오 번호만 허용 (예전 'tour_123'·'tour:123' 임시값 때문에 같은 장소를 알아보지 못했다)
+
+CREATE UNIQUE INDEX uix_spots_tour_content_id
+    ON spots (tour_content_id) WHERE tour_content_id IS NOT NULL;
+-- TourAPI 장소 중복 저장 방지. 장소를 넣기 전 utils/spotIdentity.js findExistingSpot 으로 확인한다
 
 CREATE INDEX ix_spots_categories
     ON spots USING GIN (categories);
@@ -529,6 +548,12 @@ CREATE TABLE courses (
     -- 'hidden': 신고 누적으로 자동 숨김
     -- 'deleted': 삭제 (소프트 딜리트)
 
+    photo_cache         JSONB           NULL,
+    -- 관광사진(TourAPI) 검색 결과 캐시 { source, photos } (GET /api/courses/:id/photos)
+
+    photo_cached_at     TIMESTAMPTZ     NULL,
+    -- 사진 캐시 저장 시각: 사진이 있으면 7일, 없으면 1일 동안 재사용
+
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
 
@@ -628,6 +653,11 @@ CREATE TABLE course_waypoints (
     lng         DECIMAL(9,6)    NULL,
     -- type = 'pin' 일 때만 사용: 경도
     -- type = 'spot' 일 때 NULL (좌표는 spots.location 에서 조회)
+
+    name        VARCHAR(100)    NULL,
+    -- 경유지 표시 이름 (주로 type = 'pin' 에서 사용)
+    -- 카카오에 없는 옛터·표지석 등을 이름 있는 핀으로 저장 (예: '손병희 집 터')
+    -- type = 'spot' 은 spots.name 을 우선 사용
 
     CONSTRAINT pk_course_waypoints
         PRIMARY KEY (course_id, seq),
@@ -1499,20 +1529,14 @@ CREATE INDEX ix_user_blocks_blocked_id
     ON user_blocks (blocked_id);
 
 
-
 -- ================================================
--- 태그 메타데이터 시드 (통합)
--- 기존 개별 마이그레이션을 schema.sql 로 통합:
---   - migrate-tour-v2.sql
---   - migrate-hierarchical-tags.sql
---   - migrate-course-tags-group.sql
---   - migrate-tag-overhaul-final.sql
---   - migrate-bomnaegil-tag.sql
--- reset.sql → schema.sql 만으로 태그를 완비하기 위한 시드.
--- ON CONFLICT (name, type) DO UPDATE 로 idempotent 하게 동작한다.
+-- SEED DATA: tags (공식 표준 태그 마스터)
+-- 프론트엔드(ServerTags.kt) 및 백엔드 로직과 100% 일치하는 정본 태그 목록.
+-- reset.sql -> schema.sql 실행만으로 태그 마스터가 완비됩니다.
+-- ON CONFLICT (name, type) DO UPDATE 로 멱등(Idempotent)하게 동작합니다.
 -- ================================================
 
--- 1. 표준 코스 태그 (그룹 / 후기권한 포함)
+-- 1. 표준 코스 태그 (12개)
 INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
 VALUES
   -- 코스 출처 (시스템 전용, 후기 불가)
@@ -1521,7 +1545,6 @@ VALUES
 
   -- 추천·종류 (시스템/에디터 추천, 후기 불가)
   ('추천코스',   'course', '추천·종류',  TRUE, FALSE),
-  ('관광코스',   'course', '추천·종류',  TRUE, FALSE),
   ('둘레길',     'course', '추천·종류',  TRUE, FALSE),
   ('춘천 봄내길', 'course', '추천·종류',  TRUE, FALSE),
 
@@ -1540,50 +1563,46 @@ ON CONFLICT (name, type) DO UPDATE SET
   is_active     = EXCLUDED.is_active,
   is_review_tag = EXCLUDED.is_review_tag;
 
--- 2. 표준 스팟 태그 (그룹 / 후기권한 포함)
+-- 2. 표준 스팟 태그 (31개)
 INSERT INTO tags (name, type, group_name, is_active, is_review_tag)
 VALUES
-  -- 열린관광 (무장애 편의시설)
-  ('열린관광',           'spot', '열린관광',     TRUE, FALSE), -- 인증 대표 태그 (후기 불가)
-  ('무단차통로',         'spot', '열린관광',     TRUE, TRUE),
-  ('휠체어접근',         'spot', '열린관광',     TRUE, TRUE),
-  ('휠체어대여',         'spot', '열린관광',     TRUE, TRUE),
-  ('장애인주차',         'spot', '열린관광',     TRUE, TRUE),
-  ('장애인화장실',       'spot', '열린관광',     TRUE, TRUE),
-  ('엘리베이터',         'spot', '열린관광',     TRUE, TRUE),
-  ('안내견동반',         'spot', '열린관광',     TRUE, TRUE),
-  ('시각장애인음성안내', 'spot', '열린관광',     TRUE, FALSE), -- 전문 시설 (후기 불가)
-  ('점자안내',           'spot', '열린관광',     TRUE, TRUE),
-  ('수어안내',           'spot', '열린관광',     TRUE, TRUE),
-  ('유모차대여',         'spot', '열린관광',     TRUE, TRUE),
-  ('수유실',             'spot', '열린관광',     TRUE, TRUE),
+  -- 열린관광 (무장애 편의시설 12개 - 전부 후기 불가 FALSE)
+  ('무단차통로',         'spot', '열린관광',     TRUE, FALSE),
+  ('휠체어접근',         'spot', '열린관광',     TRUE, FALSE),
+  ('휠체어대여',         'spot', '열린관광',     TRUE, FALSE),
+  ('장애인주차',         'spot', '열린관광',     TRUE, FALSE),
+  ('장애인화장실',       'spot', '열린관광',     TRUE, FALSE),
+  ('엘리베이터',         'spot', '열린관광',     TRUE, FALSE),
+  ('안내견동반',         'spot', '열린관광',     TRUE, FALSE),
+  ('시각장애인음성안내', 'spot', '열린관광',     TRUE, FALSE),
+  ('점자안내',           'spot', '열린관광',     TRUE, FALSE),
+  ('수어안내',           'spot', '열린관광',     TRUE, FALSE),
+  ('유모차대여',         'spot', '열린관광',     TRUE, FALSE),
+  ('수유실',             'spot', '열린관광',     TRUE, FALSE),
 
-  -- 반려동물
-  ('반려견동반',         'spot', '반려동물',     TRUE, TRUE),
-  ('소형견동반',         'spot', '반려동물',     TRUE, TRUE),
-  ('대형견가능',         'spot', '반려동물',     TRUE, TRUE),
-  ('반려견배변시설',     'spot', '반려동물',     TRUE, TRUE),
-  ('반려견놀이터',       'spot', '반려동물',     TRUE, TRUE),
+  -- 반려동물 (한국관광공사 공인 데이터 - 전부 후기 불가 FALSE)
+  ('반려동물',           'spot', '반려동물',     TRUE, FALSE),
+  ('소형견동반',         'spot', '반려동물',     TRUE, FALSE),
+  ('대형견 동반',        'spot', '반려동물',     TRUE, FALSE),
+  ('반려견배변시설',     'spot', '반려동물',     TRUE, FALSE),
+  ('반려견놀이터',       'spot', '반려동물',     TRUE, FALSE),
 
-  -- 시설·편의
+  -- 시설·편의 (후기 가능)
   ('화장실',             'spot', '시설·편의',    TRUE, TRUE),
   ('주차가능',           'spot', '시설·편의',    TRUE, TRUE),
   ('식수대',             'spot', '시설·편의',    TRUE, TRUE),
   ('벤치·쉼터',          'spot', '시설·편의',    TRUE, TRUE),
-  ('카페&식당',          'spot', '시설·편의',    TRUE, TRUE),
 
   -- 분위기·테마
   ('Odii음성해설',       'spot', '분위기·테마',  TRUE, FALSE), -- Odii 연동 전용 (후기 불가)
+  ('실시간축제',         'spot', '분위기·테마',  TRUE, FALSE), -- 실시간 연동 전용 (후기 불가)
   ('포토존',             'spot', '분위기·테마',  TRUE, TRUE),
   ('전통·한옥',          'spot', '분위기·테마',  TRUE, TRUE),
   ('낮그늘',             'spot', '분위기·테마',  TRUE, TRUE),
-    ('야경명소',           'spot', '분위기·테마',  TRUE, TRUE),
-  ('야간명소',           'spot', '분위기·테마',  TRUE, TRUE),
-  ('야간개방',           'spot', '분위기·테마',  TRUE, TRUE),
+  ('밤산책',             'spot', '분위기·테마',  TRUE, TRUE),   -- 야간명소 -> 밤산책 추천 대체
   ('일출명소',           'spot', '분위기·테마',  TRUE, TRUE),
   ('일몰명소',           'spot', '분위기·테마',  TRUE, TRUE),
   ('문화/예술',          'spot', '분위기·테마',  TRUE, TRUE),
-  ('실시간축제',         'spot', '분위기·테마',  TRUE, FALSE), -- 실시간 연동 전용 (후기 불가)
   ('역사유적',           'spot', '분위기·테마',  TRUE, TRUE),
   ('벚꽃',               'spot', '분위기·테마',  FALSE, TRUE), -- 계절 태그 (봄 외 비활성)
   ('단풍',               'spot', '분위기·테마',  FALSE, TRUE)  -- 계절 태그 (가을 외 비활성)
@@ -1591,3 +1610,58 @@ ON CONFLICT (name, type) DO UPDATE SET
   group_name    = EXCLUDED.group_name,
   is_active     = EXCLUDED.is_active,
   is_review_tag = EXCLUDED.is_review_tag;
+
+-- 태그는 위 정본 목록만 허용한다. (import 코드가 모르는 이름으로 태그를 자동 생성해 중복이 생겼던 문제 방지)
+-- 태그를 추가·변경할 때는 위 시드와 이 제약을 함께 바꾸고, 운영 DB용 migration 을 추가한다.
+ALTER TABLE tags DROP CONSTRAINT IF EXISTS chk_tags_master;
+ALTER TABLE tags ADD CONSTRAINT chk_tags_master CHECK (
+  (type, group_name, name) IN (
+    ('course', '코스 출처', '공식코스'),
+    ('course', '코스 출처', '사용자코스'),
+    ('course', '추천·종류', '추천코스'),
+    ('course', '추천·종류', '둘레길'),
+    ('course', '추천·종류', '춘천 봄내길'),
+    ('course', '분위기', '힐링'),
+    ('course', '분위기', '노을·야경'),
+    ('course', '분위기', '자연·풍경'),
+    ('course', '분위기', '역사·문화'),
+    ('course', '동반·접근성', '무장애길'),
+    ('course', '동반·접근성', '반려동물'),
+    ('course', '동반·접근성', '아이와함께'),
+    ('spot', '열린관광', '무단차통로'),
+    ('spot', '열린관광', '휠체어접근'),
+    ('spot', '열린관광', '휠체어대여'),
+    ('spot', '열린관광', '장애인주차'),
+    ('spot', '열린관광', '장애인화장실'),
+    ('spot', '열린관광', '엘리베이터'),
+    ('spot', '열린관광', '안내견동반'),
+    ('spot', '열린관광', '시각장애인음성안내'),
+    ('spot', '열린관광', '점자안내'),
+    ('spot', '열린관광', '수어안내'),
+    ('spot', '열린관광', '유모차대여'),
+    ('spot', '열린관광', '수유실'),
+    ('spot', '반려동물', '반려동물'),
+    ('spot', '반려동물', '소형견동반'),
+    ('spot', '반려동물', '대형견 동반'),
+    ('spot', '반려동물', '반려견배변시설'),
+    ('spot', '반려동물', '반려견놀이터'),
+    ('spot', '시설·편의', '화장실'),
+    ('spot', '시설·편의', '주차가능'),
+    ('spot', '시설·편의', '식수대'),
+    ('spot', '시설·편의', '벤치·쉼터'),
+    ('spot', '분위기·테마', 'Odii음성해설'),
+    ('spot', '분위기·테마', '실시간축제'),
+    ('spot', '분위기·테마', '포토존'),
+    ('spot', '분위기·테마', '전통·한옥'),
+    ('spot', '분위기·테마', '낮그늘'),
+    ('spot', '분위기·테마', '밤산책'),
+    ('spot', '분위기·테마', '일출명소'),
+    ('spot', '분위기·테마', '일몰명소'),
+    ('spot', '분위기·테마', '문화/예술'),
+    ('spot', '분위기·테마', '역사유적'),
+    ('spot', '분위기·테마', '벚꽃'),
+    ('spot', '분위기·테마', '단풍')
+  )
+);
+
+
