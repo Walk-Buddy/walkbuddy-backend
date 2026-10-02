@@ -16,6 +16,7 @@ const { getQuotaErrorCount } = require('./dataGoKrKey');
 const { isLegacyPlaceId, legacyContentId, findKakaoPlaceNear, isSamePlaceName } = require('../utils/kakaoPlaceMatch');
 const { findExistingSpot, linkExternalIds, toKakaoPlaceId, toTourContentId } = require('../utils/spotIdentity');
 const { findTags, petSizeTag } = require('../constants/tagAliases');
+const { getSystemAccountId } = require('../utils/systemAccount');
 
 const TOUR_API_BASE_URL = 'https://apis.data.go.kr/B551011/KorService2';
 const TOUR_API_MATCH_RADIUS = Number(process.env.TOUR_API_MATCH_RADIUS || 300);
@@ -360,60 +361,10 @@ function extractTourTags({ overview, barrierFreeInfo, petTourInfo, odiiGuide }) 
 //   실제 user_id 가 필요하다. 관리자 계정이 있으면 그 계정을, 없으면
 //   'system-tagger' 시드 계정을 1회 생성·재사용한다.
 // ──────────────────────────────────────────────────────────
-let cachedSystemTaggerId = null;
 
 async function ensureSystemTaggerId() {
-    if (cachedSystemTaggerId) return cachedSystemTaggerId;
-
-    // 1. 활성 관리자 우선
-    const { rows: admins } = await pool.query(
-        `SELECT user_id FROM users
-         WHERE role = 'admin' AND status = 'active'
-         ORDER BY created_at LIMIT 1`
-    );
-    if (admins.length) {
-        cachedSystemTaggerId = admins[0].user_id;
-        return cachedSystemTaggerId;
-    }
-
-    // 2. 기존 시스템 태거 계정 재사용
-    const { rows: seedUsers } = await pool.query(
-        `SELECT user_id FROM users
-         WHERE social_provider = 'seed' AND social_id = 'system-tagger'
-         LIMIT 1`
-    );
-    if (seedUsers.length) {
-        cachedSystemTaggerId = seedUsers[0].user_id;
-        return cachedSystemTaggerId;
-    }
-
-        // 3. 없으면 생성 (nickname UNIQUE 충돌 방지를 위해 ON CONFLICT 후 재조회 폴백)
-    try {
-        const { rows: created } = await pool.query(
-            `INSERT INTO users (nickname, social_provider, social_id, role, status)
-             VALUES ('자동태깅', 'seed', 'system-tagger', 'admin', 'active')
-             ON CONFLICT (nickname) DO NOTHING
-             RETURNING user_id`
-        );
-        if (created.length) {
-            cachedSystemTaggerId = created[0].user_id;
-            return cachedSystemTaggerId;
-        }
-    } catch (err) {
-        console.warn('[ensureSystemTaggerId] 시스템 태거 생성 실패, 재조회:', err.message);
-    }
-
-    // 3-b. nickname 충돌 등으로 생성이 안 됐다면 social 기준으로 재조회
-    const { rows: retry } = await pool.query(
-        `SELECT user_id FROM users
-         WHERE social_provider = 'seed' AND social_id = 'system-tagger' LIMIT 1`
-    );
-    if (retry.length) {
-        cachedSystemTaggerId = retry[0].user_id;
-        return cachedSystemTaggerId;
-    }
-
-    return null;
+    // 자동 태그는 시스템 계정(GilBom)으로 단다 (utils/systemAccount.js)
+    return getSystemAccountId(pool);
 }
 
 // 스팟에 세부 태그 일괄 자동 부착
