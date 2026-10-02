@@ -24,6 +24,8 @@ const axios = require('axios');
 const HOST = 'apis.data.go.kr';
 const EXHAUSTED_COOLDOWN_MS = 30 * 60 * 1000;
 const QUOTA_ERROR_PATTERN = /LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS/;
+// 그 서비스(예: KorWithService2)에 활용신청이 안 된 키. 이 오퍼레이션에는 다음 키를 쓴다.
+const NOT_REGISTERED_PATTERN = /SERVICE_KEY_IS_NOT_REGISTERED/;
 
 // `${key}|${operation}` -> 다시 시도해 볼 시각(ms)
 const exhaustedUntil = new Map();
@@ -44,7 +46,9 @@ function getKeyChain() {
     .split(',')
     .map((key) => key.trim())
     .filter(Boolean);
-  return [...new Set([getPrimaryKey(), ...fallbacks].filter(Boolean))];
+  // IMPORTANT: 공공데이터포털 '인코딩' 키(%2B 등 포함)를 넣으면 요청 때 한 번 더 인코딩돼
+  // "등록되지 않은 서비스키"가 된다. 항상 디코딩 키로 바꿔 쓴다.
+  return [...new Set([getPrimaryKey(), ...fallbacks].filter(Boolean).map((key) => decodeSafe(key)))];
 }
 
 function getRequestUrl(config) {
@@ -107,7 +111,7 @@ function markExhausted(key, operation) {
 function isQuotaExceededResponse(response) {
   if (!response) return false;
   const body = typeof response.data === 'string' ? response.data : JSON.stringify(response.data || '');
-  return QUOTA_ERROR_PATTERN.test(body);
+  return QUOTA_ERROR_PATTERN.test(body) || NOT_REGISTERED_PATTERN.test(body);
 }
 
 function createQuotaError(config, operation) {
@@ -149,15 +153,19 @@ async function retryWithNextKey(instance, config, response) {
   const operation = getOperation(url);
   if (usedKey) markExhausted(usedKey, operation);
 
-  const nextKey = keys.find((key) => !isExhausted(key, operation));
-  if (!usedKey || !nextKey || config.__dataGoKrRetried) {
+  // 키가 여러 개면 쓸 수 있는 키를 차례로 모두 시도한다 (예전엔 한 번만 재시도해서 세 번째 키를 쓰지 못했다)
+  const tried = [...(config.__dataGoKrTried || []), usedKey].filter(Boolean);
+  const nextKey = keys.find((key) => !isExhausted(key, operation) && !tried.includes(key));
+  if (!usedKey || !nextKey) {
     // 보조 키로도 처리하지 못한 경우만 실패로 센다. (재시도가 성공하면 데이터는 온전함)
     quotaErrorCount += 1;
     return undefined;
   }
 
-  console.warn(`[data.go.kr] ${operation} 일일 한도 초과 → 보조 인증키로 재시도`);
-  const retryConfig = { ...config, __dataGoKrRetried: true };
+  const reason = NOT_REGISTERED_PATTERN.test(typeof response.data === 'string' ? response.data : JSON.stringify(response.data || ''))
+    ? '활용신청 안 된 키' : '일일 한도 초과';
+  console.warn(`[data.go.kr] ${operation} ${reason} → 다음 인증키로 재시도`);
+  const retryConfig = { ...config, __dataGoKrTried: tried };
   replaceKey(retryConfig, usedKey, nextKey);
   return instance.request(retryConfig);
 }
