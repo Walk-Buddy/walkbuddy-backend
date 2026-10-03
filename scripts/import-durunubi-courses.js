@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const axios = require('axios');
 const pool = require('../config/db');
+const { getSystemAccountId } = require('../utils/systemAccount');
 const { requireTagId } = require('../constants/tagAliases');
 const spotService = require('../services/spotService');
 const { installDataGoKrKeyFallback } = require('../services/dataGoKrKey');
@@ -325,56 +326,7 @@ async function ensureAdminUser(client) {
     return rows[0].user_id;
   }
 
-  const { rows: admins } = await client.query(
-    `SELECT user_id
-     FROM users
-     WHERE role = 'admin' AND status = 'active'
-     ORDER BY created_at
-     LIMIT 1`
-  );
-
-  if (admins.length) return admins[0].user_id;
-
-  const { rows: seedAdmins } = await client.query(
-    `SELECT user_id
-     FROM users
-     WHERE social_provider = 'seed' AND social_id = 'durunubi-admin'
-     LIMIT 1`
-  );
-
-  if (seedAdmins.length) {
-    await client.query(
-      `UPDATE users
-       SET role = 'admin', status = 'active'
-       WHERE user_id = $1`,
-      [seedAdmins[0].user_id]
-    );
-    return seedAdmins[0].user_id;
-  }
-
-  const nickname = await findAvailableNickname(client, '두루누비관리');
-  const { rows } = await client.query(
-    `INSERT INTO users (nickname, social_provider, social_id, role)
-     VALUES ($1, 'seed', 'durunubi-admin', 'admin')
-     RETURNING user_id`,
-    [nickname]
-  );
-
-  return rows[0].user_id;
-}
-
-async function findAvailableNickname(client, baseName) {
-  for (let i = 0; i < 100; i += 1) {
-    const nickname = i === 0 ? baseName : `${baseName}${i}`;
-    const { rows } = await client.query(
-      `SELECT 1 FROM users WHERE nickname = $1 LIMIT 1`,
-      [nickname]
-    );
-
-    if (!rows.length) return nickname;
-  }
-
-  throw new Error('두루누비 관리자 계정에 사용할 수 있는 닉네임을 만들지 못했습니다.');
+  return getSystemAccountId(client); // 코스 주인은 시스템 계정(GilBom) — utils/systemAccount.js
 }
 
 // 정본 태그만 쓴다 (태그를 새로 만들지 않는다 — DB 정본 태그 — constants/tagAliases.js)

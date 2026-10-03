@@ -6,6 +6,7 @@ require('dotenv').config();
 
 const axios = require('axios');
 const pool = require('../config/db');
+const { getSystemAccountId } = require('../utils/systemAccount');
 const {
   inferRegionFromLocation,
   inferSpotCategoriesWithFallback,
@@ -433,11 +434,7 @@ function deriveSpotTags({ title = '', categories = [], overview = '', barrierFre
 // 5. DB 관리자 계정 및 태깅 처리
 // ──────────────────────────────────────────────────────────
 async function ensureAdminUser(client) {
-  const { rows } = await client.query(
-    `SELECT user_id FROM users WHERE role = 'admin' AND status = 'active' ORDER BY created_at LIMIT 1`
-  );
-  if (rows.length) return rows[0].user_id;
-  return '00000000-0000-4000-8000-000000000001';
+  return getSystemAccountId(client); // 자동 태그는 시스템 계정(GilBom) — utils/systemAccount.js
 }
 
 async function attachTags(client, spotId, tagNames, ownerId) {
