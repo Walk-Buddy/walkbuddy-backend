@@ -19,56 +19,15 @@
  */
 
 const pool = require('../config/db');
+const { getSystemAccountId } = require('../utils/systemAccount');
 
 // ──────────────────────────────────────────────────────────
 // 시스템 태깅 계정 (spotService 와 동일 규칙)
 // ──────────────────────────────────────────────────────────
-let cachedSystemTaggerId = null;
 
 async function ensureSystemTaggerId(client = pool) {
-  if (cachedSystemTaggerId) return cachedSystemTaggerId;
-
-  const { rows: admins } = await client.query(
-    `SELECT user_id FROM users
-     WHERE role = 'admin' AND status = 'active'
-     ORDER BY created_at LIMIT 1`
-  );
-  if (admins.length) {
-    cachedSystemTaggerId = admins[0].user_id;
-    return cachedSystemTaggerId;
-  }
-
-  const { rows: seedUsers } = await client.query(
-    `SELECT user_id FROM users
-     WHERE social_provider = 'seed' AND social_id = 'system-tagger' LIMIT 1`
-  );
-  if (seedUsers.length) {
-    cachedSystemTaggerId = seedUsers[0].user_id;
-    return cachedSystemTaggerId;
-  }
-
-  try {
-    const { rows: created } = await client.query(
-      `INSERT INTO users (nickname, social_provider, social_id, role, status)
-       VALUES ('자동태깅', 'seed', 'system-tagger', 'admin', 'active')
-       ON CONFLICT (nickname) DO NOTHING
-       RETURNING user_id`
-    );
-    if (created.length) {
-      cachedSystemTaggerId = created[0].user_id;
-      return cachedSystemTaggerId;
-    }
-  } catch (err) {
-    console.warn('[ensureSystemTaggerId/course] 시스템 태거 생성 실패, 재조회:', err.message);
-  }
-
-  // nickname 충돌 등으로 생성 실패 → social 기준 재조회
-  const { rows: retry } = await client.query(
-    `SELECT user_id FROM users
-     WHERE social_provider = 'seed' AND social_id = 'system-tagger' LIMIT 1`
-  );
-  cachedSystemTaggerId = retry[0]?.user_id || null;
-  return cachedSystemTaggerId;
+  // 자동 태그는 시스템 계정(GilBom)으로 단다 (utils/systemAccount.js)
+  return getSystemAccountId(client);
 }
 
 // ──────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const pool = require('../config/db');
+const { getSystemAccountId } = require('../utils/systemAccount');
 const { requireTagId } = require('../constants/tagAliases');
 const spotService = require('../services/spotService');
 const courseTagService = require('../services/courseTagService');
@@ -548,22 +549,7 @@ async function buildCourseRoute(waypointsList) {
 // 5. DB 삽입 및 관리자 확인
 // ──────────────────────────────────────────────────────────
 async function ensureAdminUser(client) {
-  const { rows: admins } = await client.query(
-    `SELECT user_id FROM users WHERE role = 'admin' AND status = 'active' ORDER BY created_at LIMIT 1`
-  );
-  if (admins.length) return admins[0].user_id;
-
-  const { rows: seedAdmins } = await client.query(
-    `SELECT user_id FROM users WHERE social_provider = 'seed' AND social_id = 'public-admin' LIMIT 1`
-  );
-  if (seedAdmins.length) return seedAdmins[0].user_id;
-
-  const { rows: created } = await client.query(
-    `INSERT INTO users (nickname, social_provider, social_id, role, status)
-     VALUES ('공공데이터관리', 'seed', 'public-admin', 'admin', 'active')
-     RETURNING user_id`
-  );
-  return created[0].user_id;
+  return getSystemAccountId(client); // 코스 주인은 시스템 계정(GilBom) — utils/systemAccount.js
 }
 
 // 정본 태그만 쓴다 (태그를 새로 만들지 않는다 — DB 정본 태그 — constants/tagAliases.js)

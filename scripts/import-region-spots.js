@@ -17,6 +17,7 @@ require('dotenv').config();
 
 const axios = require('axios');
 const pool = require('../config/db');
+const { getSystemAccountId } = require('../utils/systemAccount');
 const spotService = require('../services/spotService');
 const { inferSpotCategoriesWithFallback } = require('../constants/spotCategoryRules');
 
@@ -158,11 +159,7 @@ async function findKakaoPlace(item, regionName) {
 }
 
 async function ensureAdminUser() {
-  const { rows } = await pool.query(
-    `SELECT user_id FROM users WHERE role = 'admin' AND status = 'active' ORDER BY created_at LIMIT 1`
-  );
-  if (!rows.length) throw new Error('active admin 사용자가 없습니다. 코스 import를 먼저 실행해 주세요.');
-  return rows[0].user_id;
+  return getSystemAccountId(pool); // 시스템 계정(GilBom) — utils/systemAccount.js
 }
 
 async function main() {
